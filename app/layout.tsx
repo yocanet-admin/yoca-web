@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Manrope } from 'next/font/google';
 import CookieConsent from '@/components/ui/CookieConsent';
 import ScrollProgress from '@/components/ui/ScrollProgress';
+import VercelAnalytics from '@/components/ui/VercelAnalytics';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import {
@@ -60,6 +61,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           acceptAll={t.cookies.acceptAll}
           essentialOnly={t.cookies.essentialOnly}
         />
+        <VercelAnalytics />
       </body>
     </html>
   );

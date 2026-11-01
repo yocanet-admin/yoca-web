@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
  *   carry the locale to the application layer.
  * - A request without a prefix 308-redirects to the visitor's preferred
  *   locale (remembered in the `yoca_locale` cookie; default: en).
- * - /admin, /api, sitemap/robots/manifest and all static files bypass
+ * - /admin, /api, /_vercel (Web Analytics), sitemap/robots/manifest and all static files bypass
  *   locale handling entirely.
  * - www.* hosts 308-redirect to the apex host.
  */
@@ -19,7 +19,7 @@ type AppLocale = (typeof LOCALES)[number];
 
 export const config = {
   // Skip Next internals and any path with a file extension (static assets).
-  matcher: ['/((?!_next/|api/|admin|.*\\..*).*)'],
+  matcher: ['/((?!_next/|_vercel/|api/|admin|.*\\..*).*)'],
 };
 
 function isLocale(value: string | undefined): value is AppLocale {

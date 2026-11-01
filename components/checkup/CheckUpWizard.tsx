@@ -1,10 +1,11 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { CheckupPayload, Locale } from '@/types';
 import type { Dict } from '@/lib/i18n';
 import { DUR, EASE_YOCA } from '@/lib/motion';
+import Honeypot from '@/components/ui/Honeypot';
 
 /**
  * Yoca — Digital Marketing Check-Up Wizard.
@@ -59,6 +60,12 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
   const [status, setStatus] = useState<Status>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Spam screening: a real hidden honeypot + how long the wizard was open.
+  const [honeypot, setHoneypot] = useState('');
+  const openedAt = useRef(0);
+  useEffect(() => {
+    openedAt.current = Date.now();
+  }, []);
   const topRef = useRef<HTMLDivElement>(null);
 
   const isContactStep = step === questions.length;
@@ -110,7 +117,8 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
         phone: contact.phone.trim(),
       },
       locale,
-      website: '', // honeypot — must stay empty
+      website: honeypot, // honeypot — empty for people
+      elapsed: openedAt.current ? Date.now() - openedAt.current : 0,
     };
 
     try {
@@ -278,7 +286,8 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
         </div>
       )}
 
-      <form onSubmit={submit} noValidate>
+      <form onSubmit={submit} noValidate className="relative">
+        <Honeypot id="cu-homepage" value={honeypot} onChange={setHoneypot} />
         <AnimatePresence mode="wait" custom={direction} initial={false}>
           {!isContactStep ? (
             <motion.fieldset

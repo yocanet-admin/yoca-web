@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Dict } from '@/lib/i18n';
 import type { Locale } from '@/types';
 import FlowDiagram from '@/components/ui/FlowDiagram';
+import Honeypot from '@/components/ui/Honeypot';
 
 /** Yoca — contact form (client): validates, posts to /api/contact. */
 
@@ -29,6 +30,12 @@ export default function ContactForm({
   const [budget, setBudget] = useState<string>('');
   const [launch, setLaunch] = useState<string>('');
   const [consent, setConsent] = useState(false);
+  // Spam screening: a real hidden honeypot + how long the form was open.
+  const [honeypot, setHoneypot] = useState('');
+  const openedAt = useRef(0);
+  useEffect(() => {
+    openedAt.current = Date.now();
+  }, []);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -87,7 +94,8 @@ export default function ContactForm({
           company: form.company.trim(),
           message: fullMessage,
           locale,
-          website: '', // honeypot
+          website: honeypot, // honeypot — empty for people
+          elapsed: openedAt.current ? Date.now() - openedAt.current : 0,
         }),
       });
       const result = (await response.json()) as { ok: boolean; message?: string; error?: string };
@@ -126,7 +134,8 @@ export default function ContactForm({
     'min-h-12 w-full rounded-sm border border-line bg-surface-secondary px-3.5 text-[15px] text-white transition-colors focus:border-yoca-lime focus:outline-none';
 
   return (
-    <form onSubmit={submit} noValidate className="grid gap-5">
+    <form onSubmit={submit} noValidate className="relative grid gap-5">
+      <Honeypot id="cf-homepage" value={honeypot} onChange={setHoneypot} />
       {error && (
         <div
           role="alert"

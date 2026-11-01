@@ -75,6 +75,8 @@ export interface CheckupPayload {
   locale: Locale;
   /** Honeypot — must stay empty. */
   website?: string;
+  /** Milliseconds the wizard was open before submitting (spam timing). */
+  elapsed?: number;
 }
 
 // ── UI data ────────────────────────────────────────────────────────
