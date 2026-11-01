@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { CHECKUP_WEIGHTS, getDict } from '@/lib/i18n';
 import { notifyCheckup } from '@/lib/notify';
+import { screenSubmission } from '@/lib/spam';
 import type { CheckupAnswer, CheckupPayload, Locale } from '@/types';
 
 /**
  * Yoca — Digital Check-Up submission endpoint.
  *
- * Validates the wizard payload server-side (honeypot, field limits, option
+ * Validates the wizard payload server-side (spam screen, field limits, option
  * ranges), computes the 0–100 digital-health score and inserts the record
  * into the Supabase `checkup_submissions` table.
  */
@@ -39,11 +40,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  // Honeypot: silently accept so bots learn nothing.
-  if (payload.website && payload.website.length > 0) {
-    return NextResponse.json({ ok: true });
-  }
-
   const ip =
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     request.headers.get('x-real-ip') ||
@@ -70,6 +66,19 @@ export async function POST(request: NextRequest) {
   }
   if (!EMAIL_RE.test(email)) {
     return NextResponse.json({ ok: false, error: dict.checkup.errorEmail }, { status: 422 });
+  }
+
+  // Spam: answer like a success so bots learn nothing; store and notify nothing.
+  const verdict = screenSubmission({
+    honeypot: payload.website,
+    elapsed: payload.elapsed,
+    name,
+    company,
+    email,
+  });
+  if (verdict.spam) {
+    console.warn('checkup spam dropped:', verdict.reasons.join(','));
+    return NextResponse.json({ ok: true, score: 0 });
   }
 
   // ── Answer validation + scoring ──────────────────────────────
