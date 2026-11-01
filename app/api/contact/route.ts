@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getDict } from '@/lib/i18n';
 import { notifyContact } from '@/lib/notify';
+import { freeText, screenSubmission } from '@/lib/spam';
 import type { Locale } from '@/types';
 
-/** Yoca — contact form endpoint: validate, persist to Supabase, notify. */
+/** Yoca — contact form endpoint: validate, screen for spam, persist to Supabase, notify. */
 
 export const runtime = 'nodejs';
 
@@ -30,7 +31,8 @@ interface ContactPayload {
   company?: string;
   message?: string;
   locale?: Locale;
-  website?: string; // honeypot
+  website?: string; // honeypot (hidden input)
+  elapsed?: number; // ms the form was open
 }
 
 export async function POST(request: NextRequest) {
@@ -39,11 +41,6 @@ export async function POST(request: NextRequest) {
     payload = (await request.json()) as ContactPayload;
   } catch {
     return NextResponse.json({ ok: false, error: 'Invalid JSON body.' }, { status: 400 });
-  }
-
-  // Honeypot — pretend success
-  if (payload.website && payload.website.length > 0) {
-    return NextResponse.json({ ok: true });
   }
 
   const ip =
@@ -72,6 +69,20 @@ export async function POST(request: NextRequest) {
   }
   if (!EMAIL_RE.test(email)) {
     return NextResponse.json({ ok: false, error: dict.checkup.errorEmail }, { status: 422 });
+  }
+
+  // Spam: answer exactly like a success, but store nothing and notify no one.
+  const verdict = screenSubmission({
+    honeypot: payload.website,
+    elapsed: payload.elapsed,
+    name,
+    company,
+    email,
+    message: freeText(message),
+  });
+  if (verdict.spam) {
+    console.warn('contact spam dropped:', verdict.reasons.join(','));
+    return NextResponse.json({ ok: true, message: dict.contact.success });
   }
 
   const supabase = getSupabaseAdmin();
