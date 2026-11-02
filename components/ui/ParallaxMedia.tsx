@@ -7,8 +7,10 @@ import { EASE_YOCA } from '@/lib/motion';
 
 /**
  * Yoca — media reveal + micro-parallax.
- * Clip-reveals from the start edge when entering, then drifts a few pixels
- * against scroll (never more than ±24px). Static under reduced motion.
+ * Clip-reveals from the start edge when entering, then the whole frame drifts
+ * a few pixels against scroll (±14px). The image is never cropped: it always
+ * shows edge to edge, which matters for narrow phone captures. Static under
+ * reduced motion.
  */
 interface ParallaxMediaProps {
   src: string;
@@ -25,7 +27,7 @@ export default function ParallaxMedia({ src, alt = '', width, height, className,
   const reduced = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] });
-  const y = useTransform(scrollYProgress, [0, 1], [24, -24]);
+  const y = useTransform(scrollYProgress, [0, 1], [14, -14]);
 
   return (
     <motion.figure
@@ -34,9 +36,10 @@ export default function ParallaxMedia({ src, alt = '', width, height, className,
       whileInView={{ clipPath: 'inset(0 0% 0 0)' }}
       viewport={{ once: true, margin: '-60px' }}
       transition={{ duration: 0.9, ease: EASE_YOCA }}
+      style={{ y: reduced ? 0 : y }}
       className={`overflow-hidden border border-line bg-surface ${className ?? ''}`}
     >
-      <motion.div style={{ y: reduced ? 0 : y }} className="-my-6">
+      <div>
         {video ? (
           <video
             src={video.src}
@@ -58,7 +61,7 @@ export default function ParallaxMedia({ src, alt = '', width, height, className,
             className="block h-auto w-full"
           />
         )}
-      </motion.div>
+      </div>
     </motion.figure>
   );
 }
