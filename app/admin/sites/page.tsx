@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Card, Notice, StatusBadge } from '@/components/admin/cockpit/Widgets';
 import { adminApi, fmtDate } from '@/lib/cockpit/client';
-import { loadSiteRows, removeSite, saveSite, siteIssues, type HealthResponse, type SiteRow } from '@/lib/cockpit/sites';
+import { addSite, loadSiteRows, normalizeSiteUrl, removeSite, siteIssues, updateSite, type HealthResponse, type SiteEdit, type SiteRow } from '@/lib/cockpit/sites';
 import type { SiteCheck } from '@/lib/cockpit/monitor';
 
 /**
@@ -32,11 +32,25 @@ export default function AdminSites() {
   const [ready, setReady] = useState(true);
   const [busy, setBusy] = useState(true);
   const [draft, setDraft] = useState({ name: '', url: '', expects_signature: true });
+  const [formError, setFormError] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  const say = (text: string) => {
+    setFlash(text);
+    setTimeout(() => setFlash(null), 3000);
+  };
 
   const check = async (fresh = false) => {
     setBusy(true);
-    setHealth(await adminApi<HealthResponse>(`/api/admin/health${fresh ? '?refresh=1' : ''}`));
-    setBusy(false);
+    try {
+      setHealth(await adminApi<HealthResponse>(`/api/admin/health${fresh ? '?refresh=1' : ''}`));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const edit = async (row: SiteRow, patch: SiteEdit) => {
+    if (await updateSite(row.id, patch)) loadRows();
+    else say('Kaydedilemedi — oturumu ve SQL kurulumunu kontrol edin.');
   };
   const loadRows = async () => {
     const result = await loadSiteRows();
@@ -49,7 +63,9 @@ export default function AdminSites() {
     loadRows();
   }, []);
 
-  const renewals = (health?.checks ?? [])
+  const checks = health?.checks ?? [];
+  const failed = health && !health.ok ? health.error ?? 'Site kontrolü yapılamadı.' : null;
+  const renewals = checks
     .flatMap((c) => [
       c.domainExpires ? { site: c.name, what: 'Alan adı', date: c.domainExpires } : null,
       c.sslExpires ? { site: c.name, what: 'SSL sertifikası', date: c.sslExpires } : null,
@@ -65,10 +81,22 @@ export default function AdminSites() {
           <h1 className="text-2xl font-extrabold tracking-tight">Müşteri siteleri</h1>
           <p className="mt-1.5 text-[14px] text-muted">Açık mı, askıda mı, imza var mı, SSL ve alan adı ne zaman bitiyor.</p>
         </div>
-        <button type="button" onClick={() => check(true)} disabled={busy} className="admin-btn">
-          {busy ? 'Kontrol ediliyor…' : '↻ Şimdi kontrol et'}
-        </button>
+        <div className="flex items-center gap-3">
+          {flash && <span role="status" className="text-[13px] font-bold text-amber-300">{flash}</span>}
+          <button type="button" onClick={() => check(true)} disabled={busy} className="admin-btn">
+            {busy ? 'Kontrol ediliyor…' : '↻ Şimdi kontrol et'}
+          </button>
+        </div>
       </header>
+
+      {failed && !busy && (
+        <Notice tone="warning">
+          Site kontrolü alınamadı: {failed}{' '}
+          <button type="button" onClick={() => check(true)} className="font-bold underline">
+            Tekrar dene
+          </button>
+        </Notice>
+      )}
 
       {!ready && (
         <Notice tone="warning">
@@ -77,7 +105,7 @@ export default function AdminSites() {
       )}
 
       <div className={`grid gap-3 transition-opacity ${busy && health ? 'opacity-60' : ''}`}>
-        {(health?.checks ?? []).map((c) => {
+        {checks.map((c) => {
           const issues = siteIssues(c);
           return (
             <article key={c.url} className="rounded-md border border-line bg-surface-deep/80 p-4">
@@ -123,7 +151,7 @@ export default function AdminSites() {
           );
         })}
         {!health && <div className="h-40 animate-pulse rounded-md bg-surface" />}
-        {health?.checks[0] && <p className="text-[12px] text-subtle">Son kontrol: {fmtDate(health.checks[0].checkedAt)} · sonuçlar 10 dakika saklanır.</p>}
+        {checks[0] && <p className="text-[12px] text-subtle">Son kontrol: {fmtDate(checks[0].checkedAt)} · sonuçlar 10 dakika saklanır.</p>}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -162,9 +190,7 @@ export default function AdminSites() {
                         type="checkbox"
                         checked={row.expects_signature}
                         className="accent-yoca-lime"
-                        onChange={async (e) => {
-                          if (await saveSite({ ...row, expects_signature: e.target.checked })) loadRows();
-                        }}
+                        onChange={(e) => edit(row, { expects_signature: e.target.checked })}
                       />
                       imza beklenir
                     </label>
@@ -189,9 +215,7 @@ export default function AdminSites() {
                     <input
                       type="date"
                       value={row.hosting_renews_on ?? ''}
-                      onChange={async (e) => {
-                        if (await saveSite({ ...row, hosting_renews_on: e.target.value || null })) loadRows();
-                      }}
+                      onChange={(e) => edit(row, { hosting_renews_on: e.target.value || null })}
                       className="admin-input !w-auto !py-1 text-[12px]"
                     />
                   </label>
@@ -204,14 +228,16 @@ export default function AdminSites() {
               className="mt-3 flex flex-wrap gap-2"
               onSubmit={async (e) => {
                 e.preventDefault();
-                let url = draft.url.trim();
-                if (!draft.name.trim() || !url) return;
-                if (!/^https?:\/\//.test(url)) url = `https://${url}`;
-                if (await saveSite({ name: draft.name.trim(), url, expects_signature: draft.expects_signature, order_index: rows.length })) {
-                  setDraft({ name: '', url: '', expects_signature: true });
-                  await loadRows();
-                  check(true);
-                }
+                setFormError(null);
+                if (!draft.name.trim()) return setFormError('Site adı gerekli.');
+                const url = normalizeSiteUrl(draft.url);
+                if (!url) return setFormError('Geçerli bir adres girin (ör. ornek.com veya https://ornek.com).');
+                const order = rows.length ? Math.max(...rows.map((r) => r.order_index ?? 0)) + 1 : 0;
+                const result = await addSite({ name: draft.name.trim(), url, expects_signature: draft.expects_signature, order_index: order });
+                if (!result.ok) return setFormError(`Eklenemedi: ${result.error ?? 'bilinmeyen hata'}`);
+                setDraft({ name: '', url: '', expects_signature: true });
+                await loadRows();
+                check(true);
               }}
             >
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Ad" aria-label="Site adı" className="admin-input !w-36 !py-1.5 text-[13px]" />
@@ -220,6 +246,11 @@ export default function AdminSites() {
                 + Ekle
               </button>
             </form>
+          )}
+          {formError && (
+            <p role="alert" className="mt-2 text-[12px] font-bold text-amber-300">
+              {formError}
+            </p>
           )}
           <p className="mt-3 text-[12px] text-subtle">
             İmza kodu: <Link href="/admin/signature" className="underline">İmza</Link> sayfası.

@@ -7,7 +7,7 @@ import { getDict } from '@/lib/i18n';
 import type { Locale, SiteContentRow } from '@/types';
 
 /**
- * Yoca Admin — site metinleri (3 dil).
+ * Yoca Admin — site metinleri (4 dil).
  * Boş bırakılan alan koddaki varsayılan metne geri döner.
  */
 
@@ -25,14 +25,16 @@ export default function AdminContent() {
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const storageKey = (key: string, locale: Locale) => `${locale}::${key}`;
 
   useEffect(() => {
     if (!supabase) return;
     (async () => {
-      const { data } = await supabase.from('site_content').select('id,key,locale,value');
+      const { data, error } = await supabase.from('site_content').select('id,key,locale,value');
+      if (error) setLoadError(error.message);
       const map: Record<string, string> = {};
       for (const row of (data as SiteContentRow[]) ?? []) {
         map[storageKey(row.key, row.locale)] = row.value;
@@ -41,6 +43,16 @@ export default function AdminContent() {
       setLoading(false);
     })();
   }, [supabase]);
+
+  useEffect(() => {
+    if (dirty.size === 0) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
 
   const dict = getDict(activeLocale);
 
@@ -53,21 +65,37 @@ export default function AdminContent() {
   const save = async () => {
     if (!supabase || dirty.size === 0) return;
     setSaving(true);
+    const failed = new Set<string>();
+    let lastError = '';
     for (const sk of Array.from(dirty)) {
       const [locale, key] = sk.split('::');
       const value = (values[sk] ?? '').trim();
-      if (value.length === 0) {
-        await supabase.from('site_content').delete().eq('key', key).eq('locale', locale);
-      } else {
-        await supabase
-          .from('site_content')
-          .upsert({ key, locale, value }, { onConflict: 'key,locale' });
+      try {
+        const { error } =
+          value.length === 0
+            ? await supabase.from('site_content').delete().eq('key', key).eq('locale', locale)
+            : await supabase.from('site_content').upsert({ key, locale, value }, { onConflict: 'key,locale' });
+        if (error) {
+          failed.add(sk);
+          lastError = error.message;
+        }
+      } catch (error) {
+        failed.add(sk);
+        lastError = (error as Error)?.message ?? '';
       }
     }
-    setDirty(new Set());
+    // Only the keys that failed stay marked as unsaved, so a retry sends just those.
+    setDirty(failed);
     setSaving(false);
-    setMessage('Kaydedildi — site anında güncellendi.');
-    setTimeout(() => setMessage(null), 2500);
+    if (failed.size === 0) {
+      setMessage({ tone: 'ok', text: 'Kaydedildi — site anında güncellendi.' });
+      setTimeout(() => setMessage(null), 2500);
+    } else {
+      setMessage({
+        tone: 'error',
+        text: `${failed.size} metin kaydedilemedi${lastError ? ` (${lastError})` : ''}. Oturumunuzu kontrol edip tekrar Kaydet’e basın.`,
+      });
+    }
   };
 
   return (
@@ -81,7 +109,11 @@ export default function AdminContent() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {message && <p className="text-[13px] font-bold text-yoca-lime">{message}</p>}
+          {message && (
+            <p role="status" className={`text-[13px] font-bold ${message.tone === 'ok' ? 'text-yoca-lime' : 'text-amber-300'}`}>
+              {message.text}
+            </p>
+          )}
           <button
             type="button"
             onClick={save}
@@ -109,6 +141,12 @@ export default function AdminContent() {
           </button>
         ))}
       </div>
+
+      {loadError && (
+        <p role="alert" className="rounded-md border border-amber-400/40 px-4 py-3 text-[13px] font-bold text-amber-300">
+          Kayıtlı metinler okunamadı ({loadError}). Şu an gördüğünüz alanlar boş olabilir; kaydetmeden önce sayfayı yenileyin.
+        </p>
+      )}
 
       {loading ? (
         <p className="text-[14px] text-muted">Yükleniyor…</p>

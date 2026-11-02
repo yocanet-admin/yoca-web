@@ -5,6 +5,7 @@ import SiteHeader from '@/components/SiteHeader';
 import SiteFooter from '@/components/SiteFooter';
 import PageIntro from '@/components/ui/PageIntro';
 import FlowDiagram from '@/components/ui/FlowDiagram';
+import PageVisual from '@/components/ui/PageVisual';
 import CtaSection from '@/components/sections/CtaSection';
 import Reveal from '@/components/ui/Reveal';
 import { getDict } from '@/lib/i18n';
@@ -54,6 +55,7 @@ export function generateMetadata({ params }: PageProps): Metadata {
     path: `/services/${params.slug}`,
     title: `${service.name} — ${t.nav.services} | Yoca`,
     description: service.desc,
+    ogImagePath: `/visuals/og/${params.slug}.jpg`,
   });
 }
 
@@ -98,6 +100,8 @@ export default async function ServiceDetailPage({ params }: PageProps) {
           titleMax="max-w-[20ch]"
           compact
         />
+
+        <PageVisual src={`/visuals/services/${entry.slug}.webp`} priority />
 
         {/* Problem → What changes — soft-white editorial spread */}
         <section className="section-light relative z-[7] py-16 lg:py-28">

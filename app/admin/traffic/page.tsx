@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, DailyBars, Notice, RankList, StatTile } from '@/components/admin/cockpit/Widgets';
 import { adminApi, delta, fmtNumber } from '@/lib/cockpit/client';
 import type { TrafficReport } from '@/lib/cockpit/vercel';
@@ -38,9 +38,14 @@ export default function AdminTraffic() {
   const [result, setResult] = useState<Response | null>(null);
   const [busy, setBusy] = useState(true);
 
+  // Only the latest request may update the page (fast range switches arrive out of order).
+  const latest = useRef(0);
   const load = async (fresh = false) => {
+    const ticket = ++latest.current;
     setBusy(true);
-    setResult(await adminApi<Response>(`/api/admin/traffic?days=${days}${fresh ? '&refresh=1' : ''}`));
+    const next = await adminApi<Response>(`/api/admin/traffic?days=${days}${fresh ? '&refresh=1' : ''}`);
+    if (ticket !== latest.current) return;
+    setResult(next);
     setBusy(false);
   };
 
@@ -81,8 +86,13 @@ export default function AdminTraffic() {
       </header>
 
       {result && result.configured === false && <TokenHelp />}
-      {result && result.configured && !result.ok && (
-        <Notice tone="warning">Vercel verisi alınamadı: {result.error ?? 'bilinmeyen hata'}. Anahtarın süresi dolmuş ya da yetkisi eksik olabilir.</Notice>
+      {result && result.configured !== false && !result.ok && !busy && (
+        <Notice tone="warning">
+          Vercel verisi alınamadı: {result.error ?? 'bilinmeyen hata'}.{result.configured ? ' Anahtarın süresi dolmuş ya da yetkisi eksik olabilir.' : ''}{' '}
+          <button type="button" onClick={() => load(true)} className="font-bold underline">
+            Tekrar dene
+          </button>
+        </Notice>
       )}
 
       {(busy || report) && (

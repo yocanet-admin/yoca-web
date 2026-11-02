@@ -23,6 +23,7 @@ import {
   previewOk,
 } from '@/lib/insights';
 import type { InsightRow } from '@/types';
+import { categoryOgImage } from '@/lib/visuals';
 
 /**
  * Yoca — Insight article. Editorial reading page: category · H1 · lead ·
@@ -56,7 +57,8 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   for (const alt of alternates) languages[HREFLANG[alt.locale]] = absoluteLocalizedUrl(ctx.host, alt.locale, `/insights/${alt.slug}`);
   const title = article.seo_title || `${article.title} | Yoca`;
   const description = article.meta_description || article.excerpt;
-  const ogImage = article.og_image || article.cover_url || absoluteUrl(ctx.host, '/brand/og-default.png');
+  const fallbackOg = categoryOgImage(article.category_key);
+  const ogImage = article.og_image || article.cover_url || absoluteUrl(ctx.host, fallbackOg ?? '/brand/og-default.png');
   return {
     title,
     description,

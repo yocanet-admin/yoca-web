@@ -32,6 +32,7 @@ interface Status {
     emailFrom: string;
     openai: boolean;
     cronSecret: boolean;
+    serviceRole: boolean;
   };
   settings: Settings;
   state: { morning_last?: string; morning_last_at?: string; sites_last_at?: string };
@@ -69,6 +70,10 @@ export default function AdminSettings() {
     setStatus(result);
     if (result.ok) setDraft(result.settings);
   };
+  const retry = () => {
+    setStatus(null);
+    load();
+  };
 
   useEffect(() => {
     load();
@@ -83,8 +88,18 @@ export default function AdminSettings() {
     setBusy(action);
     const result = await adminPost<{ ok: boolean; error?: string; sent?: { email: Channel; telegram: Channel }; chat?: { name: string } }>('/api/admin/notify', { action, ...extra });
     setBusy(null);
-    if (!result.ok) return say('error', result.error ?? 'İşlem başarısız.');
-    if (result.sent) say('ok', `Telegram: ${CHANNEL[result.sent.telegram]} · E-posta: ${CHANNEL[result.sent.email]}`);
+    if (!result.ok) {
+      say('error', result.error ?? 'İşlem başarısız.');
+      // Re-read the saved settings so a rejected change (e.g. an invalid e-mail) does not stay ticked on screen.
+      if (action === 'save') load();
+      return;
+    }
+    if (result.sent) {
+      const { telegram, email } = result.sent;
+      const text = `Telegram: ${CHANNEL[telegram]} · E-posta: ${CHANNEL[email]}`;
+      if (telegram === 'sent' || email === 'sent') say(telegram === 'error' || email === 'error' ? 'error' : 'ok', text);
+      else say('error', `Hiçbir kanaldan gönderilmedi — ${text}. Telegram veya e-posta kurulumunu tamamlayın.`);
+    }
     else if (result.chat) say('ok', `Telegram bağlandı: ${result.chat.name}. Sohbete onay mesajı gitti.`);
     else say('ok', 'Kaydedildi.');
     load();
@@ -114,7 +129,20 @@ export default function AdminSettings() {
         )}
       </header>
 
-      {status && !status.ok && <Notice tone="warning">Ayarlar okunamadı: {status.error ?? 'oturum süresi dolmuş olabilir'}.</Notice>}
+      {status && !status.ok && (
+        <Notice tone="warning">
+          Ayarlar okunamadı: {status.error ?? 'oturum süresi dolmuş olabilir'}.{' '}
+          <button type="button" onClick={retry} className="font-bold underline">
+            Tekrar dene
+          </button>
+        </Notice>
+      )}
+      {i && !i.serviceRole && (
+        <Notice tone="warning">
+          {code('SUPABASE_SERVICE_ROLE_KEY')} Vercel’de tanımlı değil. Sunucu tarafı işler (sabah özeti, site uyarıları, ayarların kaydı, yapay zekâ) bu anahtar olmadan
+          verileri okuyamaz: özet “0 lead” gösterebilir, kayıtlar başarısız olabilir. Supabase → Project Settings → API → service_role anahtarını ekleyip Redeploy edin.
+        </Notice>
+      )}
       {s && !s.ready && (
         <Notice tone="warning">
           Bildirim ayarlarını kaydetmek için Supabase’de {code('supabase/upgrade-v9-cockpit-phase2.sql')} dosyasını bir kez çalıştırın.
@@ -124,9 +152,16 @@ export default function AdminSettings() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Bağlantılar">
           {!i ? (
-            <div className="h-40 animate-pulse rounded-md bg-surface" />
+            status && !status.ok ? (
+              <p className="text-[13px] text-subtle">Bağlantı durumu okunamadı.</p>
+            ) : (
+              <div className="h-40 animate-pulse rounded-md bg-surface" />
+            )
           ) : (
             <ul>
+              <Row label="Supabase sunucu anahtarı" ok={i.serviceRole}>
+                {i.serviceRole ? 'SUPABASE_SERVICE_ROLE_KEY' : ''}
+              </Row>
               <Row label="Telegram botu" ok={i.telegram && i.telegramTokenValid !== false}>
                 {i.telegramBot ? `@${i.telegramBot}` : i.telegram ? 'token geçersiz' : ''}
               </Row>
@@ -188,6 +223,8 @@ export default function AdminSettings() {
                 </div>
               </form>
             </div>
+          ) : status && !status.ok ? (
+            <p className="text-[13px] text-subtle">Ayarlar okunamadı.</p>
           ) : (
             <div className="h-40 animate-pulse rounded-md bg-surface" />
           )}

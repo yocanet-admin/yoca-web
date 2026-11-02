@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, Notice, StatTile } from '@/components/admin/cockpit/Widgets';
-import { fmtDate, timeAgo } from '@/lib/cockpit/client';
+import { fmtDate, istanbulToday, timeAgo } from '@/lib/cockpit/client';
 import {
   ACTIVITY_ICON,
   ACTIVITY_KINDS,
@@ -41,7 +41,11 @@ import {
  * activity timeline per client (notes, calls, e-mails, meetings, dated tasks).
  */
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = istanbulToday;
+
+/** The client fields the form edits — the only ones that count for "unsaved changes". */
+const EDITABLE = ['name', 'contact_name', 'email', 'phone', 'website', 'status', 'note'] as const;
+const editable = (client: Client) => JSON.stringify(EDITABLE.map((key) => client[key] ?? ''));
 
 function ClientsInner() {
   const searchParams = useSearchParams();
@@ -206,7 +210,9 @@ function ClientsInner() {
 
         {selected ? (
           <ClientDetail
-            key={selected.id}
+            // Re-mount when the saved client changes (e.g. a won deal made it "active"),
+            // so the form never holds a stale copy that "Kaydet" would write back.
+            key={`${selected.id}:${selected.updated_at}`}
             client={selected}
             deals={data.deals.filter((d) => d.client_id === selected.id)}
             activities={data.activities.filter((a) => a.client_id === selected.id)}
@@ -245,7 +251,7 @@ function ClientDetail({
   const [body, setBody] = useState('');
   const [due, setDue] = useState('');
   const [newDeal, setNewDeal] = useState({ title: '', value: '', currency: 'TRY' as Currency });
-  const dirty = JSON.stringify(form) !== JSON.stringify(client);
+  const dirty = editable(form) !== editable(client);
 
   const field = (key: keyof Client, label: string, type = 'text') => (
     <label className="grid gap-1 text-[12px] font-bold text-subtle">

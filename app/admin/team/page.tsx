@@ -24,6 +24,19 @@ export default function AdminTeam() {
   const [form, setForm] = useState<TeamForm>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // The form as it was when editing started; anything else counts as unsaved.
+  const [baseline, setBaseline] = useState<TeamForm>(EMPTY_FORM);
+  const dirty = JSON.stringify(form) !== JSON.stringify(baseline);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
 
   const flash = (text: string) => {
     setMessage(text);
@@ -60,17 +73,19 @@ export default function AdminTeam() {
       tags: parseTags(form.tags),
     };
 
-    if (editingId !== null) {
-      await supabase.from('team_members').update(payload).eq('id', editingId);
-      flash('Ekip üyesi güncellendi.');
-    } else {
-      const nextOrder = rows.length > 0 ? Math.max(...rows.map((row) => row.order_index)) + 1 : 0;
-      await supabase
-        .from('team_members')
-        .insert({ ...payload, order_index: nextOrder, is_active: true });
-      flash('Ekip üyesi eklendi.');
+    const nextOrder = rows.length > 0 ? Math.max(...rows.map((row) => row.order_index)) + 1 : 0;
+    const { error } =
+      editingId !== null
+        ? await supabase.from('team_members').update(payload).eq('id', editingId)
+        : await supabase.from('team_members').insert({ ...payload, order_index: nextOrder, is_active: true });
+    if (error) {
+      // Keep the form filled in so nothing is lost.
+      flash(`Kaydedilemedi: ${error.message}`);
+      return;
     }
+    flash(editingId !== null ? 'Ekip üyesi güncellendi.' : 'Ekip üyesi eklendi.');
     setForm(EMPTY_FORM);
+    setBaseline(EMPTY_FORM);
     setEditingId(null);
     load();
   };
@@ -96,20 +111,24 @@ export default function AdminTeam() {
 
   const remove = async (row: TeamMemberRow) => {
     if (!supabase) return;
-    await supabase.from('team_members').delete().eq('id', row.id);
-    flash('Ekip üyesi silindi.');
+    if (!window.confirm(`${row.name} kalıcı olarak silinsin mi? Bu geri alınamaz. (Sadece sitede gizlemek için “Gizle”yi kullanın.)`)) return;
+    const { error } = await supabase.from('team_members').delete().eq('id', row.id);
+    flash(error ? `Silinemedi: ${error.message}` : 'Ekip üyesi silindi.');
     load();
   };
 
   const startEdit = (row: TeamMemberRow) => {
-    setEditingId(row.id);
-    setForm({
+    if (dirty && !window.confirm('Kaydedilmemiş değişiklikler kaybolacak. Devam edilsin mi?')) return;
+    const next = {
       name: row.name,
       role: row.role,
       image_url: row.image_url ?? '',
       linkedin: row.linkedin ?? '',
       tags: (row.tags ?? []).join(', '),
-    });
+    };
+    setEditingId(row.id);
+    setForm(next);
+    setBaseline(next);
   };
 
   return (
@@ -170,6 +189,7 @@ export default function AdminTeam() {
               onClick={() => {
                 setEditingId(null);
                 setForm(EMPTY_FORM);
+                setBaseline(EMPTY_FORM);
               }}
             >
               Vazgeç

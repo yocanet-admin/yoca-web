@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { PostgrestError } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/adminClient';
 import { getDefaultCaseStudyRows } from '@/lib/workData';
 import type { CaseStudyLocalized, CaseStudyRow, Locale } from '@/types';
 
-/** Yoca Admin — Work / vaka çalışmaları yönetimi (3 dilde içerik). */
+/** Yoca Admin — Work / vaka çalışmaları yönetimi (4 dilde içerik). */
 
 const LOCALES: Array<{ code: Locale; label: string }> = [
   { code: 'tr', label: 'Türkçe' },
@@ -58,6 +59,26 @@ function textToStats(text: string): Array<{ label: string; value: string; bar: n
 
 type EditableRow = Omit<CaseStudyRow, 'id'> & { id?: number };
 
+function parseServices(text: string): string[] {
+  return text
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/** A locale with no text and no stats is left out of `content`, so the site falls back to English instead of showing a blank card. */
+function isEmptyLocalized(value: CaseStudyLocalized | undefined): boolean {
+  if (!value) return true;
+  const hasText = Object.entries(value).some(([key, v]) => key !== 'stats' && typeof v === 'string' && v.trim().length > 0);
+  return !hasText && !(value.stats && value.stats.length > 0);
+}
+
+function saveErrorText(error: PostgrestError): string {
+  if (error.code === '23505') return 'Bu slug zaten kullanılıyor — farklı bir slug girin.';
+  if (error.code === '42501' || /row-level security/i.test(error.message)) return 'Yetki hatası — oturumunuz kapanmış olabilir, yeniden giriş yapın.';
+  return `Kaydedilemedi: ${error.message}`;
+}
+
 function newRow(orderIndex: number): EditableRow {
   return {
     slug: '',
@@ -87,6 +108,40 @@ export default function AdminWork() {
   const [editLocale, setEditLocale] = useState<Locale>('tr');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  // Raw text of the comma / line based inputs: parsed only on save, so typing "," or a new line is never eaten.
+  const [servicesText, setServicesText] = useState('');
+  const [statsText, setStatsText] = useState<Partial<Record<Locale, string>>>({});
+
+  const open = (row: EditableRow) => {
+    setEditLocale('tr');
+    setEditing(row);
+    setServicesText((row.services ?? []).join(', '));
+    setStatsText({});
+    setError(null);
+    setDirty(false);
+  };
+  const change = (next: EditableRow) => {
+    setEditing(next);
+    setDirty(true);
+  };
+  const close = () => {
+    if (dirty && !window.confirm('Kaydedilmemiş değişiklikler kaybolacak. Çıkılsın mı?')) return;
+    setEditing(null);
+    setDirty(false);
+    setError(null);
+  };
+
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
 
   const flash = (text: string) => {
     setMessage(text);
@@ -108,37 +163,55 @@ export default function AdminWork() {
   const importDefaults = async () => {
     if (!supabase) return;
     setSaving(true);
-    await supabase.from('case_studies').insert(getDefaultCaseStudyRows());
+    const { error: importError } = await supabase.from('case_studies').insert(getDefaultCaseStudyRows());
     setSaving(false);
-    flash('Varsayılan 4 proje içe aktarıldı.');
+    if (importError) flash(saveErrorText(importError));
+    else flash('Varsayılan 4 proje içe aktarıldı.');
     load();
   };
 
   const saveEditing = async () => {
     if (!supabase || !editing || !editing.slug.trim()) return;
+    // Apply the raw stats text of every locale that was edited, then drop locales that stayed empty.
+    const content: EditableRow['content'] = {};
+    for (const { code } of LOCALES) {
+      const current = editing.content[code];
+      const raw = statsText[code];
+      const next = raw === undefined ? current : { ...(current ?? EMPTY_LOCALIZED), stats: textToStats(raw) };
+      if (next && !isEmptyLocalized(next)) content[code] = next;
+    }
+    if (!Object.values(content).some((value) => value?.name?.trim())) {
+      setError('En az bir dilde proje adı girin (tercihen English — diğer diller boşsa ona düşer).');
+      return;
+    }
+    setError(null);
     setSaving(true);
     const payload = {
       slug: editing.slug.trim(),
       year: editing.year.trim(),
       market: editing.market.trim(),
       image_url: editing.image_url.trim(),
-      services: editing.services ?? [],
+      services: parseServices(servicesText),
       order_index: editing.order_index,
       is_active: editing.is_active,
       kind: editing.kind,
       video_url: editing.video_url?.trim() || null,
       live_url: editing.live_url?.trim() || null,
-      content: editing.content,
+      content,
     };
-    if (editing.id !== undefined) {
-      await supabase.from('case_studies').update(payload).eq('id', editing.id);
-      flash('Proje güncellendi.');
-    } else {
-      await supabase.from('case_studies').insert(payload);
-      flash('Proje eklendi.');
-    }
+    const { error: saveError } =
+      editing.id !== undefined
+        ? await supabase.from('case_studies').update(payload).eq('id', editing.id)
+        : await supabase.from('case_studies').insert(payload);
     setSaving(false);
+    if (saveError) {
+      // Keep the form open so nothing typed is lost.
+      setError(saveErrorText(saveError));
+      return;
+    }
+    flash(editing.id !== undefined ? 'Proje güncellendi.' : 'Proje eklendi.');
     setEditing(null);
+    setDirty(false);
     load();
   };
 
@@ -163,27 +236,25 @@ export default function AdminWork() {
 
   const remove = async (row: CaseStudyRow) => {
     if (!supabase) return;
-    await supabase.from('case_studies').delete().eq('id', row.id);
-    flash('Proje silindi.');
+    const name = row.content?.tr?.name || row.content?.en?.name || row.slug;
+    if (!window.confirm(`“${name}” kalıcı olarak silinsin mi? Bu geri alınamaz. (Sadece sitede gizlemek için “Gizle”yi kullanın.)`)) return;
+    const { error: deleteError } = await supabase.from('case_studies').delete().eq('id', row.id);
+    flash(deleteError ? saveErrorText(deleteError) : 'Proje silindi.');
     load();
   };
 
   const setLocalizedField = (key: TextField, value: string) => {
     if (!editing) return;
     const current = editing.content[editLocale] ?? { ...EMPTY_LOCALIZED };
-    setEditing({
+    change({
       ...editing,
       content: { ...editing.content, [editLocale]: { ...current, [key]: value } },
     });
   };
 
   const setLocalizedStats = (text: string) => {
-    if (!editing) return;
-    const current = editing.content[editLocale] ?? { ...EMPTY_LOCALIZED };
-    setEditing({
-      ...editing,
-      content: { ...editing.content, [editLocale]: { ...current, stats: textToStats(text) } },
-    });
+    setStatsText((current) => ({ ...current, [editLocale]: text }));
+    setDirty(true);
   };
 
   // ── Edit form ────────────────────────────────────────────────
@@ -196,7 +267,7 @@ export default function AdminWork() {
             {editing.id !== undefined ? `Düzenle: ${editing.slug}` : 'Yeni Proje'}
           </h1>
           <div className="flex gap-2">
-            <button type="button" className="admin-btn" onClick={() => setEditing(null)}>
+            <button type="button" className="admin-btn" onClick={close}>
               Vazgeç
             </button>
             <button
@@ -205,17 +276,22 @@ export default function AdminWork() {
               disabled={saving || !editing.slug.trim()}
               onClick={saveEditing}
             >
-              {saving ? 'Kaydediliyor…' : 'Kaydet'}
+              {saving ? 'Kaydediliyor…' : dirty ? 'Kaydet •' : 'Kaydet'}
             </button>
           </div>
         </header>
+        {error && (
+          <p role="alert" className="rounded-md border border-amber-400/40 px-4 py-3 text-[13px] font-bold text-amber-300">
+            {error}
+          </p>
+        )}
 
         <div className="admin-card grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
             Slug (URL) *
             <input
               value={editing.slug}
-              onChange={(event) => setEditing({ ...editing, slug: event.target.value })}
+              onChange={(event) => change({ ...editing, slug: event.target.value })}
               placeholder="orn-proje-adi"
               className="admin-input"
             />
@@ -224,7 +300,7 @@ export default function AdminWork() {
             Yıl
             <input
               value={editing.year}
-              onChange={(event) => setEditing({ ...editing, year: event.target.value })}
+              onChange={(event) => change({ ...editing, year: event.target.value })}
               className="admin-input"
             />
           </label>
@@ -232,23 +308,19 @@ export default function AdminWork() {
             Pazar
             <input
               value={editing.market}
-              onChange={(event) => setEditing({ ...editing, market: event.target.value })}
+              onChange={(event) => change({ ...editing, market: event.target.value })}
               className="admin-input"
             />
           </label>
           <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
             Hizmetler (virgülle)
             <input
-              value={(editing.services ?? []).join(', ')}
-              onChange={(event) =>
-                setEditing({
-                  ...editing,
-                  services: event.target.value
-                    .split(',')
-                    .map((item) => item.trim())
-                    .filter(Boolean),
-                })
-              }
+              value={servicesText}
+              onChange={(event) => {
+                setServicesText(event.target.value);
+                setDirty(true);
+              }}
+              placeholder="Web, SEO, Marka"
               className="admin-input"
             />
           </label>
@@ -257,7 +329,7 @@ export default function AdminWork() {
             <select
               value={editing.kind}
               onChange={(event) =>
-                setEditing({
+                change({
                   ...editing,
                   kind: event.target.value as 'client' | 'concept' | 'product' | 'experimental' | 'venture',
                 })
@@ -275,7 +347,7 @@ export default function AdminWork() {
             Hover video URL (opsiyonel — .mp4/.webm; karta gelince sessiz döngüyle oynar)
             <input
               value={editing.video_url ?? ''}
-              onChange={(event) => setEditing({ ...editing, video_url: event.target.value })}
+              onChange={(event) => change({ ...editing, video_url: event.target.value })}
               className="admin-input"
             />
           </label>
@@ -283,7 +355,7 @@ export default function AdminWork() {
             Canlı proje linki (opsiyonel — vaka sayfasında "Canlı Görüntüle" butonu)
             <input
               value={editing.live_url ?? ''}
-              onChange={(event) => setEditing({ ...editing, live_url: event.target.value })}
+              onChange={(event) => change({ ...editing, live_url: event.target.value })}
               className="admin-input"
             />
           </label>
@@ -291,7 +363,7 @@ export default function AdminWork() {
             Görsel URL (/work/… veya https://…)
             <input
               value={editing.image_url}
-              onChange={(event) => setEditing({ ...editing, image_url: event.target.value })}
+              onChange={(event) => change({ ...editing, image_url: event.target.value })}
               className="admin-input"
             />
           </label>
@@ -336,7 +408,7 @@ export default function AdminWork() {
             Sonuç istatistikleri — her satır: Etiket | Değer | 0-100 çubuk yüzdesi
             <textarea
               rows={4}
-              value={statsToText(localized.stats)}
+              value={statsText[editLocale] ?? statsToText(localized.stats)}
               onChange={(event) => setLocalizedStats(event.target.value)}
               placeholder={'Online randevu | +87% | 87\nOrganik trafik | +120% | 95'}
               className="admin-input resize-y font-medium"
@@ -354,7 +426,7 @@ export default function AdminWork() {
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Work / Projeler</h1>
           <p className="mt-1.5 text-[14px] text-muted">
-            Vaka çalışmaları 3 dilde yönetilir; tablo boşken sitede koddaki varsayılanlar gösterilir.
+            Vaka çalışmaları 4 dilde yönetilir; tablo boşken sitede koddaki varsayılanlar gösterilir.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -367,10 +439,7 @@ export default function AdminWork() {
           <button
             type="button"
             className="admin-btn-primary"
-            onClick={() => {
-              setEditLocale('tr');
-              setEditing(newRow(rows.length));
-            }}
+            onClick={() => open(newRow(rows.length ? Math.max(...rows.map((r) => r.order_index)) + 1 : 0))}
           >
             Yeni Proje
           </button>
@@ -424,10 +493,7 @@ export default function AdminWork() {
                   <button
                     type="button"
                     className="admin-btn"
-                    onClick={() => {
-                      setEditLocale('tr');
-                      setEditing({ ...row, services: row.services ?? [] });
-                    }}
+                    onClick={() => open({ ...row, services: row.services ?? [] })}
                   >
                     Düzenle
                   </button>

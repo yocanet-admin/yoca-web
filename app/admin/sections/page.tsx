@@ -23,13 +23,14 @@ export default function AdminSections() {
   const [rows, setRows] = useState<SectionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
   const load = async () => {
     if (!supabase) return;
-    const { data } = await supabase.from('sections').select('*').order('id');
+    const { data, error } = await supabase.from('sections').select('*').order('id');
     setRows((data as SectionRow[]) ?? []);
     setLoading(false);
+    if (error) setMessage({ tone: 'error', text: `Bölümler okunamadı: ${error.message}` });
   };
 
   useEffect(() => {
@@ -48,8 +49,10 @@ export default function AdminSections() {
       setRows((prev) =>
         prev.map((item) => (item.id === row.id ? { ...item, is_active: !item.is_active } : item)),
       );
-      setMessage('Kaydedildi — site anında güncellendi.');
+      setMessage({ tone: 'ok', text: 'Kaydedildi — site anında güncellendi.' });
       setTimeout(() => setMessage(null), 2500);
+    } else {
+      setMessage({ tone: 'error', text: `Kaydedilemedi: ${error.message}. Oturumunuz kapanmış olabilir.` });
     }
     setBusyId(null);
   };
@@ -63,7 +66,11 @@ export default function AdminSections() {
             Kapatılan bölüm sitede hiç render edilmez; içerik silinmez.
           </p>
         </div>
-        {message && <p className="text-[13px] font-bold text-yoca-lime">{message}</p>}
+        {message && (
+          <p role="status" className={`text-[13px] font-bold ${message.tone === 'ok' ? 'text-yoca-lime' : 'text-amber-300'}`}>
+            {message.text}
+          </p>
+        )}
       </header>
 
       {loading ? (
