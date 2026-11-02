@@ -30,12 +30,15 @@ export function getSupabase(): SupabaseClient | null {
   return browserClient;
 }
 
-/** Service-role client — server only (API routes). Falls back to anon. */
+/** Next.js must never serve these reads from its data cache (cron state, alerts, leads). */
+const noStoreFetch: typeof fetch = (input, init) => fetch(input, { ...init, cache: 'no-store' });
+
+/** Service-role client — server only (API routes). Falls back to anon. Always fresh (no fetch cache). */
 export function getSupabaseAdmin(): SupabaseClient | null {
   if (!SUPABASE_URL) return null;
   const key = SERVICE_ROLE_KEY || SUPABASE_ANON_KEY;
   if (!key) return null;
-  return createClient(SUPABASE_URL, key, { auth: { persistSession: false } });
+  return createClient(SUPABASE_URL, key, { auth: { persistSession: false }, global: { fetch: noStoreFetch } });
 }
 
 // ── Sections ───────────────────────────────────────────────────────
