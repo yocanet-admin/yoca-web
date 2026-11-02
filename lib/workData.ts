@@ -7,8 +7,8 @@ import type { CaseStudyRow, Locale } from '@/types';
  * The fully localized defaults below (EN/TR/AZ/AR) act as the fallback when
  * the table is empty — and as the "import defaults" source for the admin panel.
  *
- * REAL WORK ONLY: Prime Wash Car, SP Medya, SunSoft and Mehmet Altıoklar (client work) and
- * Cleova (Yoca venture). Facts come from the owner's briefs and the live
+ * REAL WORK ONLY: Prime Wash Car, SP Medya, Cleova, SunSoft and Mehmet Altıoklar
+ * (all shown as client work). Facts come from the owner's briefs and the live
  * sites. No metrics, results, quotes or awards are attributed to YOCA —
  * `results` stays empty until a verified, client-approved outcome exists
  * (the case page then hides that module). Empty year/market are not shown.
@@ -51,7 +51,7 @@ interface CaseStudyBase {
 const BASE: CaseStudyBase[] = [
   {"slug": "prime-wash-car", "year": "2026", "market": "Türkiye", "services": ["Brand", "Web", "Development"], "kind": "client", "liveUrl": "https://primewashcar.com", "image": "/work/prime-wash-car/hero.webp"},
   {"slug": "sp-medya", "year": "", "market": "Türkiye", "services": ["Web", "Development"], "kind": "client", "liveUrl": "https://www.spmedya.com", "image": "/work/sp-medya/hero.webp"},
-  {"slug": "cleova", "year": "2026", "market": "", "services": ["Brand", "Web", "Development"], "kind": "venture", "liveUrl": "https://thecleova.com", "image": "/work/cleova/hero.webp"},
+  {"slug": "cleova", "year": "2026", "market": "", "services": ["Brand", "Web", "Development"], "kind": "client", "liveUrl": "https://thecleova.com", "image": "/work/cleova/hero.webp"},
   {"slug": "mehmet-altioklar", "year": "", "market": "Türkiye", "services": ["Web", "Development"], "kind": "client", "liveUrl": "https://mehmetaltioklar.com", "image": "/work/mehmet-altioklar/hero.webp"},
   {"slug": "sunsoft", "year": "2026", "market": "Azerbaijan", "services": ["Identity", "Web", "Development"], "kind": "client", "liveUrl": "https://sunsoft.az", "image": "/work/sunsoft/hero.webp"},
 ];
@@ -81,8 +81,8 @@ const CONTENT: Record<Locale, Record<string, LocalizedFields>> = {
     "cleova": {
       "name": "Cleova",
       "sector": "Skincare",
-      "summary": "The digital home of Cleova, a skincare brand in the YOCA ecosystem — products, routines and a Routine Finder in English and Turkish.",
-      "problem": "Cleova is a skincare brand built within the YOCA ecosystem around four everyday products: Solvera SPF 50+ sun protection, a Deep Hydration hyaluronic serum, a Vita C 15% serum and a salicylic Gel Cleanser.",
+      "summary": "The digital home of Cleova, a skincare brand — products, routines and a Routine Finder in English and Turkish.",
+      "problem": "Cleova is a skincare brand built around four everyday products: Solvera SPF 50+ sun protection, a Deep Hydration hyaluronic serum, a Vita C 15% serum and a salicylic Gel Cleanser.",
       "approach": "YOCA built Cleova’s brand presence and website: product pages, a skincare routine, a Routine Finder, a journal and links into its Instagram, in English and Turkish — on Next.js, with content managed in Sanity.",
       "solution": "The site reads like an editorial magazine — large serif type, the brand’s own photography and generous space. The Routine Finder asks three questions about time, focus and number of steps, then assembles a morning or evening flow from Cleova products.",
       "results": ""
@@ -128,8 +128,8 @@ const CONTENT: Record<Locale, Record<string, LocalizedFields>> = {
     "cleova": {
       "name": "Cleova",
       "sector": "Cilt bakımı",
-      "summary": "YOCA ekosistemindeki cilt bakım markası Cleova’nın dijital evi — ürünler, rutinler ve Routine Finder, İngilizce ve Türkçe.",
-      "problem": "Cleova, YOCA ekosistemi içinde dört günlük ürün etrafında kurulan bir cilt bakım markası: Solvera SPF 50+ güneş koruyucu, Deep Hydration hyalüronik serum, Vita C 15% serum ve salisilik Gel Cleanser.",
+      "summary": "Cilt bakım markası Cleova’nın dijital evi — ürünler, rutinler ve Routine Finder, İngilizce ve Türkçe.",
+      "problem": "Cleova, dört günlük ürün etrafında kurulan bir cilt bakım markası: Solvera SPF 50+ güneş koruyucu, Deep Hydration hyalüronik serum, Vita C 15% serum ve salisilik Gel Cleanser.",
       "approach": "YOCA, Cleova’nın marka varlığını ve web sitesini kurdu: ürün sayfaları, cilt bakım rutini, Routine Finder, journal ve Instagram bağlantıları; İngilizce ve Türkçe, Next.js üzerinde, içerik Sanity ile yönetiliyor.",
       "solution": "Site bir editoryal dergi gibi okunuyor — büyük serif tipografi, markanın kendi fotoğrafları ve cömert boşluklar. Routine Finder zaman, odak ve adım sayısı üzerine üç soru sorup Cleova ürünlerinden bir sabah ya da akşam akışı kuruyor.",
       "results": ""
@@ -175,8 +175,8 @@ const CONTENT: Record<Locale, Record<string, LocalizedFields>> = {
     "cleova": {
       "name": "Cleova",
       "sector": "Dəriyə qulluq",
-      "summary": "YOCA ekosistemindəki dəriyə qulluq brendi Cleova-nın rəqəmsal evi — məhsullar, rutinlər və Routine Finder, ingilis və türk dillərində.",
-      "problem": "Cleova YOCA ekosistemində dörd gündəlik məhsul ətrafında qurulmuş dəriyə qulluq brendidir: Solvera SPF 50+ günəşdən qoruyucu, Deep Hydration hialuron serumu, Vita C 15% serumu və salisil turşulu Gel Cleanser.",
+      "summary": "Dəriyə qulluq brendi Cleova-nın rəqəmsal evi — məhsullar, rutinlər və Routine Finder, ingilis və türk dillərində.",
+      "problem": "Cleova dörd gündəlik məhsul ətrafında qurulmuş dəriyə qulluq brendidir: Solvera SPF 50+ günəşdən qoruyucu, Deep Hydration hialuron serumu, Vita C 15% serumu və salisil turşulu Gel Cleanser.",
       "approach": "YOCA Cleova-nın brend varlığını və veb-saytını qurdu: məhsul səhifələri, dəriyə qulluq rutini, Routine Finder, jurnal və Instagram keçidləri — ingilis və türk dillərində, Next.js üzərində, məzmun Sanity ilə idarə olunur.",
       "solution": "Sayt redaksiya jurnalı kimi oxunur — iri serif tipoqrafiya, brendin öz fotoşəkilləri və geniş boşluqlar. Routine Finder vaxt, fokus və addım sayı haqqında üç sual verir, sonra Cleova məhsullarından səhər və ya axşam axını qurur.",
       "results": ""
@@ -222,8 +222,8 @@ const CONTENT: Record<Locale, Record<string, LocalizedFields>> = {
     "cleova": {
       "name": "Cleova",
       "sector": "العناية بالبشرة",
-      "summary": "البيت الرقمي لـ Cleova، علامة العناية بالبشرة ضمن منظومة YOCA — منتجات وروتينات و«Routine Finder» بالإنجليزية والتركية.",
-      "problem": "Cleova علامة للعناية بالبشرة نشأت ضمن منظومة YOCA حول أربعة منتجات يومية: واقي الشمس Solvera SPF 50+، وسيروم Deep Hydration بحمض الهيالورونيك، وسيروم Vita C 15%، وغسول Gel Cleanser بحمض الساليسيليك.",
+      "summary": "البيت الرقمي لـ Cleova، علامة للعناية بالبشرة — منتجات وروتينات و«Routine Finder» بالإنجليزية والتركية.",
+      "problem": "Cleova علامة للعناية بالبشرة نشأت حول أربعة منتجات يومية: واقي الشمس Solvera SPF 50+، وسيروم Deep Hydration بحمض الهيالورونيك، وسيروم Vita C 15%، وغسول Gel Cleanser بحمض الساليسيليك.",
       "approach": "بنت YOCA حضور علامة Cleova وموقعها: صفحات المنتجات، وروتين العناية، و«Routine Finder»، ومدونة، وروابط إلى إنستغرام — بالإنجليزية والتركية على Next.js، مع إدارة المحتوى عبر Sanity.",
       "solution": "يُقرأ الموقع كمجلة تحريرية — حروف سيريف كبيرة، وصور العلامة الخاصة، ومساحات رحبة. يطرح «Routine Finder» ثلاثة أسئلة عن الوقت والتركيز وعدد الخطوات، ثم يركّب روتينًا صباحيًا أو مسائيًا من منتجات Cleova.",
       "results": ""
@@ -249,9 +249,48 @@ const CONTENT: Record<Locale, Record<string, LocalizedFields>> = {
   }
 };
 
+/**
+ * Service tags and markets are stored in English (also in the admin panel);
+ * pages show them in the visitor's language. Unknown values pass through.
+ */
+const SERVICE_LABEL: Record<string, Partial<Record<Locale, string>>> = {
+  brand: { tr: 'Marka', az: 'Brend', ar: 'العلامة التجارية' },
+  branding: { tr: 'Marka', az: 'Brend', ar: 'العلامة التجارية' },
+  identity: { tr: 'Kurumsal kimlik', az: 'Korporativ üslub', ar: 'الهوية البصرية' },
+  strategy: { tr: 'Strateji', az: 'Strategiya', ar: 'الاستراتيجية' },
+  web: { tr: 'Web tasarım', az: 'Veb dizayn', ar: 'تصميم الويب' },
+  development: { tr: 'Yazılım geliştirme', az: 'Proqramlaşdırma', ar: 'البرمجة' },
+  'e-commerce': { tr: 'E-ticaret', az: 'Elektron ticarət', ar: 'التجارة الإلكترونية' },
+  content: { tr: 'İçerik', az: 'Məzmun', ar: 'المحتوى' },
+  seo: { tr: 'SEO', az: 'SEO', ar: 'تحسين محركات البحث' },
+  growth: { tr: 'Büyüme', az: 'Böyümə', ar: 'النمو' },
+  performance: { tr: 'Performans pazarlama', az: 'Performans marketinqi', ar: 'التسويق بالأداء' },
+  ai: { tr: 'Yapay zekâ', az: 'Süni intellekt', ar: 'الذكاء الاصطناعي' },
+  automation: { tr: 'Otomasyon', az: 'Avtomatlaşdırma', ar: 'الأتمتة' },
+};
+
+const MARKET_LABEL: Record<string, Partial<Record<Locale, string>>> = {
+  türkiye: { en: 'Türkiye', tr: 'Türkiye', az: 'Türkiyə', ar: 'تركيا' },
+  turkey: { en: 'Türkiye', tr: 'Türkiye', az: 'Türkiyə', ar: 'تركيا' },
+  azerbaijan: { en: 'Azerbaijan', tr: 'Azerbaycan', az: 'Azərbaycan', ar: 'أذربيجان' },
+};
+
+export function localizeServices(services: string[], locale: Locale): string[] {
+  return services.map((service) => SERVICE_LABEL[service.trim().toLowerCase()]?.[locale] ?? service);
+}
+
+export function localizeMarket(market: string, locale: Locale): string {
+  return MARKET_LABEL[market.trim().toLocaleLowerCase('tr')]?.[locale] ?? market;
+}
+
 export function staticCaseStudies(locale: Locale): CaseStudy[] {
   const localized = CONTENT[locale] ?? CONTENT.en;
-  return BASE.map((base) => ({ ...base, ...(localized[base.slug] ?? CONTENT.en[base.slug]) }));
+  return BASE.map((base) => ({
+    ...base,
+    services: localizeServices(base.services, locale),
+    market: localizeMarket(base.market, locale),
+    ...(localized[base.slug] ?? CONTENT.en[base.slug]),
+  }));
 }
 
 /** Default rows for the admin panel's "import defaults" action. */
