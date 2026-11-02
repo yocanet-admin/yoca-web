@@ -5,14 +5,16 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, DailyBars, Notice, StatTile } from '@/components/admin/cockpit/Widgets';
 import { LEAD_LABEL, LEAD_PILL, LEAD_STATUSES, OPEN_STATUSES, fmtDate, timeAgo, type LeadStatus } from '@/lib/cockpit/client';
-import { deleteLead, loadLeads, replyHref, updateLead, weeklyCounts, type Lead } from '@/lib/cockpit/leads';
+import { deleteLead, deleteLeads, loadLeads, replyHref, updateLead, updateLeads, weeklyCounts, type Lead } from '@/lib/cockpit/leads';
 import { clientFromLead } from '@/lib/cockpit/crm';
+import { LeadAI } from '@/components/admin/cockpit/LeadAI';
 
 /**
  * Yoca Admin — Lead merkezi.
  * Contact form + Digital Check-Up leads in one pipeline:
  * Yeni → Görüşülüyor → Teklif → Kazanıldı / Kaybedildi (+ Spam).
  * Note, follow-up date, ready-made reply and "make client" (CRM) per lead.
+ * Bulk: tick rows (or "select all" in the current filter) → change status or delete.
  */
 
 type TypeFilter = 'all' | 'contact' | 'checkup';
@@ -29,6 +31,8 @@ function LeadsInner() {
   const [openId, setOpenId] = useState<string | null>(searchParams.get('id'));
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [flash, setFlash] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
 
   const load = async () => {
     const result = await loadLeads();
@@ -62,6 +66,49 @@ function LeadsInner() {
       return true;
     });
   }, [leads, status, type, query]);
+
+  // A new filter starts with a clean selection, so a bulk action never touches rows you cannot see.
+  useEffect(() => setSelected(new Set()), [status, type, query]);
+
+  const keyOf = (lead: Lead) => `${lead.type}:${lead.id}`;
+  const picked = visible.filter((lead) => selected.has(keyOf(lead)));
+  const allPicked = visible.length > 0 && picked.length === visible.length;
+  const toggle = (lead: Lead) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(keyOf(lead))) next.delete(keyOf(lead));
+      else next.add(keyOf(lead));
+      return next;
+    });
+  const toggleAll = () => setSelected(allPicked ? new Set() : new Set(visible.map(keyOf)));
+
+  const bulkStatus = async (next: LeadStatus) => {
+    if (!ready || picked.length === 0) return;
+    setBusy(true);
+    const ok = await updateLeads(picked, { status: next });
+    setBusy(false);
+    if (!ok) return say('Bazı kayıtlar güncellenemedi.');
+    const keys = new Set(picked.map(keyOf));
+    setLeads((current) => current.map((l) => (keys.has(keyOf(l)) ? { ...l, status: next } : l)));
+    setSelected(new Set());
+    say(`${keys.size} lead → ${LEAD_LABEL[next]}`);
+  };
+
+  const bulkDelete = async (targets: Lead[]) => {
+    if (targets.length === 0) return;
+    if (!window.confirm(`${targets.length} lead kalıcı olarak silinsin mi? Bu geri alınamaz.`)) return;
+    setBusy(true);
+    const ok = await deleteLeads(targets);
+    setBusy(false);
+    if (!ok) {
+      say('Bazı kayıtlar silinemedi.');
+      return load();
+    }
+    const keys = new Set(targets.map(keyOf));
+    setLeads((current) => current.filter((l) => !keys.has(keyOf(l))));
+    setSelected(new Set());
+    say(`${keys.size} lead silindi.`);
+  };
 
   const weekAgo = Date.now() - 7 * 86_400_000;
   const real = leads.filter((l) => l.status !== 'spam');
@@ -153,6 +200,59 @@ function LeadsInner() {
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Ara: isim, şirket, e-posta…" className="admin-input !w-auto min-w-[220px] flex-1 !py-1.5 text-[12px]" aria-label="Lead ara" />
       </div>
 
+      {!loading && visible.length > 0 && (
+        <div className="sticky top-0 z-10 -my-2 flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-deep/95 px-4 py-2.5 backdrop-blur">
+          <label className="flex items-center gap-2 text-[12px] font-bold text-soft">
+            <input
+              type="checkbox"
+              checked={allPicked}
+              ref={(el) => {
+                if (el) el.indeterminate = picked.length > 0 && !allPicked;
+              }}
+              onChange={toggleAll}
+              className="h-4 w-4 accent-yoca-lime"
+            />
+            {picked.length > 0 ? `${picked.length} seçili` : `Tümünü seç (${visible.length})`}
+          </label>
+          {picked.length > 0 ? (
+            <>
+              <select
+                value=""
+                disabled={!ready || busy}
+                onChange={(e) => e.target.value && bulkStatus(e.target.value as LeadStatus)}
+                aria-label="Seçilenlerin durumunu değiştir"
+                className="admin-input !w-auto !py-1 text-[12px]"
+              >
+                <option value="">Durumu değiştir…</option>
+                {LEAD_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {LEAD_LABEL[s]}
+                  </option>
+                ))}
+              </select>
+              {status !== 'spam' && (
+                <button type="button" disabled={!ready || busy} onClick={() => bulkStatus('spam')} className="admin-btn !py-1 text-[12px]">
+                  Spam olarak işaretle
+                </button>
+              )}
+              <button type="button" disabled={busy} onClick={() => bulkDelete(picked)} className="admin-btn !py-1 text-[12px] hover:!border-red-400 hover:!text-red-400">
+                Seçilenleri sil
+              </button>
+              <button type="button" onClick={() => setSelected(new Set())} className="text-[12px] text-subtle hover:text-white">
+                Seçimi kaldır
+              </button>
+            </>
+          ) : (
+            status === 'spam' && (
+              <button type="button" disabled={busy} onClick={() => bulkDelete(visible)} className="admin-btn ml-auto !py-1 text-[12px] hover:!border-red-400 hover:!text-red-400">
+                Tüm spamı sil ({visible.length})
+              </button>
+            )
+          )}
+          {busy && <span className="text-[12px] text-subtle">İşleniyor…</span>}
+        </div>
+      )}
+
       {loading ? (
         <p className="text-[14px] text-muted">Yükleniyor…</p>
       ) : visible.length === 0 ? (
@@ -160,13 +260,20 @@ function LeadsInner() {
       ) : (
         <ul className="grid gap-2">
           {visible.map((lead) => {
-            const key = `${lead.type}:${lead.id}`;
+            const key = keyOf(lead);
             const open = openId === lead.id;
             const overdue = lead.followUpOn && lead.followUpOn < new Date().toISOString().slice(0, 10) && OPEN_STATUSES.includes(lead.status);
             return (
-              <li key={key} className={`rounded-md border bg-surface-deep/80 ${open ? 'border-yoca-lime/40' : 'border-line'}`}>
+              <li key={key} className={`rounded-md border bg-surface-deep/80 ${open ? 'border-yoca-lime/40' : selected.has(key) ? 'border-yoca-lime/25' : 'border-line'}`}>
                 <div className="flex flex-wrap items-center gap-3 p-4">
-                  <button type="button" onClick={() => setOpenId(open ? null : lead.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-expanded={open}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(key)}
+                    onChange={() => toggle(lead)}
+                    aria-label={`${lead.name || lead.email} seç`}
+                    className="h-4 w-4 flex-none accent-yoca-lime"
+                  />
+                  <button type="button" onClick={() => setOpenId(open ? null : lead.id)} className="flex min-w-[12rem] flex-1 items-center gap-3 text-left" aria-expanded={open}>
                     {lead.type === 'checkup' ? (
                       <span className="flex h-9 w-9 flex-none items-center justify-center rounded-sm border border-line text-[13px] font-extrabold tabular-nums text-white" title="Check-Up skoru">
                         {lead.score ?? '–'}
@@ -189,6 +296,11 @@ function LeadsInner() {
                     {timeAgo(lead.createdAt)}
                   </span>
                   {overdue && <span className="text-[11px] font-bold text-amber-300">▲ takip gecikti</span>}
+                  {lead.aiSummary && (
+                    <span className="text-[11px] font-bold text-subtle" title={lead.aiSummary.ozet}>
+                      AI {lead.aiSummary.uygunluk}/5
+                    </span>
+                  )}
                   <select
                     value={lead.status}
                     disabled={!ready}
@@ -223,6 +335,18 @@ function LeadsInner() {
                         {fmtDate(lead.createdAt)} · dil: {lead.locale || '—'}
                         {lead.phone ? ` · ${lead.phone}` : ''}
                       </p>
+                      <div className="mt-4">
+                        <LeadAI
+                          lead={lead}
+                          onSummary={(summary, at) =>
+                            setLeads((current) => current.map((l) => (keyOf(l) === key ? { ...l, aiSummary: summary, aiSummaryAt: at } : l)))
+                          }
+                          onNote={(text) => {
+                            setNotes((n) => ({ ...n, [key]: text }));
+                            change(lead, { note: text });
+                          }}
+                        />
+                      </div>
                     </div>
                     <div className="grid content-start gap-3">
                       <label className="grid gap-1 text-[12px] font-bold text-subtle">

@@ -36,6 +36,13 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
       { href: '/admin/signature', label: 'İmza', icon: '✦' },
     ],
   },
+  {
+    title: 'Sistem',
+    items: [
+      { href: '/admin/activity', label: 'İşlem geçmişi', icon: '↺' },
+      { href: '/admin/settings', label: 'Ayarlar', icon: '⚙' },
+    ],
+  },
 ];
 
 export default function AdminShell({ children }: { children: ReactNode }) {
