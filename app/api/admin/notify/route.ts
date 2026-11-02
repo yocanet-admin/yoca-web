@@ -14,6 +14,12 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+/** Why a settings write failed, in the owner's terms. */
+const saveError = () =>
+  integrations().serviceRole
+    ? 'Kaydedilemedi — upgrade-v9 SQL çalıştırıldı mı?'
+    : 'Kaydedilemedi — Vercel’de SUPABASE_SERVICE_ROLE_KEY tanımlı değil.';
+
 const unauthorized = () => NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
 
 export async function GET(request: NextRequest) {
@@ -53,7 +59,7 @@ export async function POST(request: NextRequest) {
         if (typeof input[key] === 'boolean') patch[key] = input[key];
       }
       const ok = await saveNotifySettings(patch);
-      return NextResponse.json({ ok, error: ok ? undefined : 'Kaydedilemedi — upgrade-v9 SQL çalıştırıldı mı?' });
+      return NextResponse.json({ ok, error: ok ? undefined : saveError() });
     }
 
     case 'telegram-link': {
@@ -68,7 +74,7 @@ export async function POST(request: NextRequest) {
       if (!chat) return NextResponse.json({ ok: false, error: 'Bota henüz mesaj gelmemiş. Telegram’da botu açıp /start yazın, sonra tekrar deneyin.' });
       const name = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || chat.username || String(chat.id);
       const saved = await saveNotifySettings({ telegram_chat_id: String(chat.id), telegram_chat_name: name });
-      if (!saved) return NextResponse.json({ ok: false, error: 'Kaydedilemedi — upgrade-v9 SQL çalıştırıldı mı?' });
+      if (!saved) return NextResponse.json({ ok: false, error: saveError() });
       await sendTelegram(String(chat.id), `✅ <b>Yoca kokpit bağlandı.</b>\nYeni lead, site uyarıları ve sabah özeti buraya gelecek.\n\nBağlayan: ${escapeHtml(admin.email ?? 'admin')}`);
       return NextResponse.json({ ok: true, chat: { id: String(chat.id), name } });
     }
