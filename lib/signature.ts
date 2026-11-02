@@ -42,13 +42,16 @@ function escapeHtml(value: string): string {
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 /** Runs once where the snippet is pasted: finds the first solid background behind the signature and picks white or near-black text. */
-const AUTO_SCRIPT = `<script>(function(){var s=document.currentScript,w=s&&s.previousElementSibling,a=w&&w.querySelector('.yoca-credit');if(!a)return;var e=w,rgb=[255,255,255];while(e&&e.nodeType===1){var m=getComputedStyle(e).backgroundColor.match(/[\\d.]+/g);if(m&&m.length>=3&&(m.length<4||+m[3]>0.5)){rgb=m;break}e=e.parentElement}var l=(0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])/255;a.style.color=l>0.55?'#111111':'#ffffff';a.style.opacity='.8'})();</script>`;
+const AUTO_SCRIPT = `<script>(function(){var s=document.currentScript,w=s&&s.previousElementSibling,a=w&&w.querySelector('.yoca-credit');if(!a)return;var e=w,rgb=[255,255,255];while(e&&e.nodeType===1){var m=getComputedStyle(e).backgroundColor.match(/[\\d.]+/g);if(m&&m.length>=3&&(m.length<4||+m[3]>0.5)){rgb=m;break}e=e.parentElement}var l=(0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])/255;a.style.setProperty('color',l>0.55?'#111111':'#ffffff','important');a.style.opacity='.8'})();</script>`;
 
 export function buildSignature({ label, align, color = 'inherit', customColor = '', brandColors = true, center = false }: SignatureOptions): string {
   const position: SignatureAlign = align ?? (center ? 'center' : 'left');
   const text = escapeHtml(label.trim() || 'Built by');
   const fixed =
     color === 'light' ? '#ffffff' : color === 'dark' ? '#111111' : color === 'custom' && HEX.test(customColor.trim()) ? customColor.trim() : 'inherit';
+  // Fixed colours must survive theme rules such as ".elementor-kit-5 a" or "#footer a" → !important + inline style.
+  const lock = fixed !== 'inherit';
+  const colorRule = lock ? `color:${fixed} !important;` : 'color:inherit;';
   const svg = PATHS.map((p) => `      <path fill="${brandColors ? p.fill : 'currentColor'}" d="${p.d}"/>`).join('\n');
   const note =
     color === 'auto'
@@ -61,13 +64,16 @@ export function buildSignature({ label, align, color = 'inherit', customColor = 
   .yoca-credit-wrap{display:flex;justify-content:flex-start;padding:12px 0}
   .yoca-credit-wrap.yoca-credit--center{justify-content:center}
   .yoca-credit-wrap.yoca-credit--right{justify-content:flex-end}
-  .yoca-credit{display:inline-flex;align-items:center;gap:8px;color:${fixed};text-decoration:none;font:500 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;letter-spacing:.04em;opacity:.72;transition:opacity .2s ease}
-  .yoca-credit:hover,.yoca-credit:focus-visible{opacity:1;text-decoration:none;color:${fixed}}
-  .yoca-credit:focus-visible{outline:2px solid currentColor;outline-offset:4px;border-radius:2px}
-  .yoca-credit svg{display:block;height:14px;width:auto;flex:none}
+  .yoca-credit-wrap a.yoca-credit{display:inline-flex;align-items:center;gap:8px;${colorRule}text-decoration:none !important;border:0;box-shadow:none;background:none;font:500 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;letter-spacing:.04em;opacity:.72;transition:opacity .2s ease}
+  .yoca-credit-wrap a.yoca-credit:visited,.yoca-credit-wrap a.yoca-credit:hover,.yoca-credit-wrap a.yoca-credit:focus-visible{${colorRule}text-decoration:none !important}
+  .yoca-credit-wrap a.yoca-credit:hover,.yoca-credit-wrap a.yoca-credit:focus-visible{opacity:1}
+  .yoca-credit-wrap a.yoca-credit:focus-visible{outline:2px solid currentColor;outline-offset:4px;border-radius:2px}
+  .yoca-credit-wrap a.yoca-credit span,.yoca-credit-wrap a.yoca-credit svg{color:inherit !important;font:inherit;letter-spacing:inherit}
+  .yoca-credit-wrap a.yoca-credit svg{display:block;height:14px;width:auto;flex:none}
+  .yoca-credit-wrap a.yoca-credit svg path[fill="currentColor"]{fill:currentColor !important}
 </style>
 <div class="yoca-credit-wrap${position === 'left' ? '' : ` yoca-credit--${position}`}">
-  <a class="yoca-credit" href="https://yoca.net" target="_blank" rel="noopener" aria-label="${text} YOCA">
+  <a class="yoca-credit" href="https://yoca.net" target="_blank" rel="noopener" aria-label="${text} YOCA"${lock ? ` style="color:${fixed} !important"` : ''}>
     <span>${text}</span>
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 69.05" aria-hidden="true" focusable="false">
 ${svg}
