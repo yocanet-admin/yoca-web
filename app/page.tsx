@@ -6,7 +6,7 @@ import SiteFooter from '@/components/SiteFooter';
 import Hero from '@/components/sections/Hero';
 import SystemPillars from '@/components/sections/SystemPillars';
 import BrandBand from '@/components/sections/BrandBand';
-import WorkIndex from '@/components/sections/WorkIndex';
+import WorkShowcase from '@/components/sections/WorkShowcase';
 import ToolsStrip from '@/components/sections/ToolsStrip';
 import CheckupSample from '@/components/checkup/CheckupSample';
 import TeamSection from '@/components/sections/TeamSection';
@@ -59,7 +59,7 @@ export default async function HomePage() {
 
         {/* Selected work — typographic index, honest status labels */}
         <SectionWrapper sectionKey="work">
-          <WorkIndex t={t.work} locale={ctx.locale} base={base} />
+          <WorkShowcase t={t.work} locale={ctx.locale} base={base} />
         </SectionWrapper>
 
         <SectionWrapper sectionKey="services">

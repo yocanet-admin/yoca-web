@@ -192,7 +192,7 @@ export default async function CaseStudyPage({ params }: PageProps) {
                       <ParallaxMedia src={media.desktop[1]} alt={`${study.name} — ${statusLabel} 02`} width={1920} height={1200} className="self-start" />
                     )}
                     {media.mobile && media.mobile.length > 0 && (
-                      <div className="grid grid-cols-2 gap-6 lg:gap-8">
+                      <div className="grid grid-cols-2 items-start gap-6 lg:gap-8">
                         {media.mobile.slice(0, 2).map((src, index) => (
                           <ParallaxMedia
                             key={src}
