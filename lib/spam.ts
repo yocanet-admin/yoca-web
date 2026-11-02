@@ -99,6 +99,18 @@ function looksRandomWord(company: string | undefined): boolean {
   return word.length >= 5 && vowels / word.length < 0.3;
 }
 
+/** Record a dropped submission (reasons only — no personal data). Never throws. */
+export async function logSpam(form: 'contact' | 'checkup', reasons: string[]): Promise<void> {
+  try {
+    const { getSupabaseAdmin } = await import('@/lib/supabase');
+    const admin = getSupabaseAdmin();
+    if (!admin) return;
+    await admin.from('spam_log').insert({ form, reasons });
+  } catch {
+    // table missing (upgrade-v8 not run yet) or Supabase unreachable — ignore
+  }
+}
+
 /** The free-text part of a contact message (planner lines are "[Label] value"). */
 export function freeText(message: string): string {
   const parts = message.split(/\n\s*\n/);

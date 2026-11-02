@@ -1,0 +1,231 @@
+'use client';
+
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { Card, Notice, StatusBadge } from '@/components/admin/cockpit/Widgets';
+import { adminApi, fmtDate } from '@/lib/cockpit/client';
+import { loadSiteRows, removeSite, saveSite, siteIssues, type HealthResponse, type SiteRow } from '@/lib/cockpit/sites';
+import type { SiteCheck } from '@/lib/cockpit/monitor';
+
+/**
+ * Yoca Admin — Müşteri siteleri.
+ * Live checks (up / suspended / slow, signature, SSL, domain) + renewal
+ * calendar + the list of monitored sites (managed here, stored in Supabase).
+ */
+
+const STATE: Record<SiteCheck['state'], { kind: 'good' | 'warning' | 'critical'; label: string }> = {
+  up: { kind: 'good', label: 'Çalışıyor' },
+  slow: { kind: 'warning', label: 'Yavaş' },
+  down: { kind: 'critical', label: 'Erişilemiyor' },
+  suspended: { kind: 'critical', label: 'Askıda' },
+};
+
+function days(value: number | null): string {
+  if (value === null) return 'bilinmiyor';
+  if (value < 0) return 'süresi geçti';
+  return `${value} gün`;
+}
+
+export default function AdminSites() {
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [rows, setRows] = useState<SiteRow[]>([]);
+  const [ready, setReady] = useState(true);
+  const [busy, setBusy] = useState(true);
+  const [draft, setDraft] = useState({ name: '', url: '', expects_signature: true });
+
+  const check = async (fresh = false) => {
+    setBusy(true);
+    setHealth(await adminApi<HealthResponse>(`/api/admin/health${fresh ? '?refresh=1' : ''}`));
+    setBusy(false);
+  };
+  const loadRows = async () => {
+    const result = await loadSiteRows();
+    setRows(result.rows);
+    setReady(result.ready);
+  };
+
+  useEffect(() => {
+    check();
+    loadRows();
+  }, []);
+
+  const renewals = (health?.checks ?? [])
+    .flatMap((c) => [
+      c.domainExpires ? { site: c.name, what: 'Alan adı', date: c.domainExpires } : null,
+      c.sslExpires ? { site: c.name, what: 'SSL sertifikası', date: c.sslExpires } : null,
+      c.hostingRenewsOn ? { site: c.name, what: 'Hosting', date: c.hostingRenewsOn } : null,
+    ])
+    .filter((x): x is { site: string; what: string; date: string } => Boolean(x))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return (
+    <div className="grid gap-6">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-extrabold tracking-tight">Müşteri siteleri</h1>
+          <p className="mt-1.5 text-[14px] text-muted">Açık mı, askıda mı, imza var mı, SSL ve alan adı ne zaman bitiyor.</p>
+        </div>
+        <button type="button" onClick={() => check(true)} disabled={busy} className="admin-btn">
+          {busy ? 'Kontrol ediliyor…' : '↻ Şimdi kontrol et'}
+        </button>
+      </header>
+
+      {!ready && (
+        <Notice tone="warning">
+          Site listesi şu an varsayılan 5 siteden oluşuyor. Site eklemek/düzenlemek ve hosting tarihlerini girmek için <code className="text-yoca-lime">supabase/upgrade-v8-cockpit.sql</code> dosyasını çalıştırın.
+        </Notice>
+      )}
+
+      <div className={`grid gap-3 transition-opacity ${busy && health ? 'opacity-60' : ''}`}>
+        {(health?.checks ?? []).map((c) => {
+          const issues = siteIssues(c);
+          return (
+            <article key={c.url} className="rounded-md border border-line bg-surface-deep/80 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="flex items-center gap-2.5 text-[15px] font-extrabold">
+                    {c.name}
+                    <StatusBadge kind={STATE[c.state].kind}>{STATE[c.state].label}</StatusBadge>
+                  </p>
+                  <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-[12px] text-subtle hover:text-white">
+                    {c.url.replace(/^https?:\/\//, '')} ↗
+                  </a>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-[12px] sm:grid-cols-4">
+                  <div>
+                    <dt className="text-subtle">Yanıt</dt>
+                    <dd className="font-bold tabular-nums text-white">{c.ms !== null ? `${(c.ms / 1000).toFixed(1)} sn` : '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-subtle">İmza</dt>
+                    <dd className="font-bold text-white">{c.signature === null ? '—' : c.signature ? 'Var' : c.expectsSignature ? 'Yok' : 'Gerekmiyor'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-subtle">SSL</dt>
+                    <dd className="font-bold text-white">{days(c.sslDaysLeft)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-subtle">Alan adı</dt>
+                    <dd className="font-bold text-white">{days(c.domainDaysLeft)}</dd>
+                  </div>
+                </dl>
+              </div>
+              {issues.length > 0 && (
+                <ul className="mt-3 flex flex-wrap gap-2">
+                  {issues.map((issue) => (
+                    <li key={issue.text}>
+                      <StatusBadge kind={issue.severity}>{issue.text}</StatusBadge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          );
+        })}
+        {!health && <div className="h-40 animate-pulse rounded-md bg-surface" />}
+        {health?.checks[0] && <p className="text-[12px] text-subtle">Son kontrol: {fmtDate(health.checks[0].checkedAt)} · sonuçlar 10 dakika saklanır.</p>}
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card title="Yenileme takvimi">
+          {renewals.length === 0 ? (
+            <p className="text-[13px] text-subtle">Henüz tarih yok. Alan adı ve SSL tarihleri otomatik okunur; hosting tarihini aşağıdan girin.</p>
+          ) : (
+            <ul className="grid gap-2">
+              {renewals.map((r) => {
+                const left = Math.floor((Date.parse(r.date) - Date.now()) / 86_400_000);
+                return (
+                  <li key={`${r.site}-${r.what}`} className="flex items-center justify-between gap-3 text-[13px]">
+                    <span className="text-soft">
+                      <span className="font-bold text-white">{r.site}</span> · {r.what}
+                    </span>
+                    <span className={`tabular-nums ${left <= 30 ? 'font-bold text-amber-300' : 'text-subtle'}`}>
+                      {fmtDate(r.date, false)} ({days(left)})
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="mt-3 text-[12px] text-subtle">.az gibi bazı uzantılar alan adı bitişini paylaşmaz; o durumda “bilinmiyor” görünür.</p>
+        </Card>
+
+        <Card title="İzlenen siteler">
+          <ul className="grid gap-2">
+            {(ready ? rows : []).map((row) => (
+              <li key={row.id} className="grid gap-2 rounded-sm border border-line p-3 text-[13px]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold">{row.name}</span>
+                  <span className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-[12px] text-subtle">
+                      <input
+                        type="checkbox"
+                        checked={row.expects_signature}
+                        className="accent-yoca-lime"
+                        onChange={async (e) => {
+                          if (await saveSite({ ...row, expects_signature: e.target.checked })) loadRows();
+                        }}
+                      />
+                      imza beklenir
+                    </label>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (window.confirm(`${row.name} izlemeden çıkarılsın mı?`) && (await removeSite(row.id))) {
+                          loadRows();
+                          check(true);
+                        }
+                      }}
+                      className="text-[12px] text-subtle hover:text-red-400"
+                    >
+                      Çıkar
+                    </button>
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[12px] text-subtle">
+                  {row.url}
+                  <label className="ml-auto flex items-center gap-1.5">
+                    Hosting yenileme
+                    <input
+                      type="date"
+                      value={row.hosting_renews_on ?? ''}
+                      onChange={async (e) => {
+                        if (await saveSite({ ...row, hosting_renews_on: e.target.value || null })) loadRows();
+                      }}
+                      className="admin-input !w-auto !py-1 text-[12px]"
+                    />
+                  </label>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {ready && (
+            <form
+              className="mt-3 flex flex-wrap gap-2"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                let url = draft.url.trim();
+                if (!draft.name.trim() || !url) return;
+                if (!/^https?:\/\//.test(url)) url = `https://${url}`;
+                if (await saveSite({ name: draft.name.trim(), url, expects_signature: draft.expects_signature, order_index: rows.length })) {
+                  setDraft({ name: '', url: '', expects_signature: true });
+                  await loadRows();
+                  check(true);
+                }
+              }}
+            >
+              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Ad" aria-label="Site adı" className="admin-input !w-36 !py-1.5 text-[13px]" />
+              <input value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} placeholder="ornek.com" aria-label="Adres" className="admin-input min-w-[160px] flex-1 !py-1.5 text-[13px]" />
+              <button type="submit" className="admin-btn">
+                + Ekle
+              </button>
+            </form>
+          )}
+          <p className="mt-3 text-[12px] text-subtle">
+            İmza kodu: <Link href="/admin/signature" className="underline">İmza</Link> sayfası.
+          </p>
+        </Card>
+      </div>
+    </div>
+  );
+}

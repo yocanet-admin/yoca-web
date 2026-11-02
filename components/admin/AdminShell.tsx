@@ -13,16 +13,29 @@ import { getAdminClient } from '@/lib/adminClient';
  * signed out and the sidebar + content layout when signed in.
  */
 
-const NAV: Array<{ href: string; label: string; icon: string }> = [
-  { href: '/admin', label: 'Panel', icon: '▦' },
-  { href: '/admin/sections', label: 'Bölümler', icon: '◧' },
-  { href: '/admin/menus', label: 'Menüler', icon: '≡' },
-  { href: '/admin/content', label: 'Metinler', icon: '¶' },
-  { href: '/admin/work', label: 'Work / Projeler', icon: '▣' },
-  { href: '/admin/insights', label: 'İçerik / Insights', icon: '✎' },
-  { href: '/admin/team', label: 'Ekip', icon: '◉' },
-  { href: '/admin/submissions', label: 'Başvurular', icon: '✉' },
-  { href: '/admin/signature', label: 'İmza', icon: '✦' },
+const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: string; icon: string }> }> = [
+  {
+    title: 'Kokpit',
+    items: [
+      { href: '/admin', label: 'Kokpit', icon: '▦' },
+      { href: '/admin/submissions', label: 'Leadler', icon: '✉' },
+      { href: '/admin/clients', label: 'Müşteriler', icon: '◎' },
+      { href: '/admin/traffic', label: 'Trafik', icon: '↗' },
+      { href: '/admin/sites', label: 'Siteler', icon: '◍' },
+    ],
+  },
+  {
+    title: 'Site içeriği',
+    items: [
+      { href: '/admin/sections', label: 'Bölümler', icon: '◧' },
+      { href: '/admin/menus', label: 'Menüler', icon: '≡' },
+      { href: '/admin/content', label: 'Metinler', icon: '¶' },
+      { href: '/admin/work', label: 'Work / Projeler', icon: '▣' },
+      { href: '/admin/insights', label: 'İçerik / Insights', icon: '✎' },
+      { href: '/admin/team', label: 'Ekip', icon: '◉' },
+      { href: '/admin/signature', label: 'İmza', icon: '✦' },
+    ],
+  },
 ];
 
 export default function AdminShell({ children }: { children: ReactNode }) {
@@ -160,8 +173,11 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         <Link href="/admin" className="mb-6 block flex-none max-lg:mb-0">
           <img src="/brand/yoca-logo-primary.svg" alt="Yoca" width={120} height={30} className="h-7 w-auto" />
         </Link>
-        <nav aria-label="Admin" className="grid gap-1 max-lg:flex max-lg:gap-1.5">
-          {NAV.map((item) => {
+        <nav aria-label="Admin" className="grid gap-5 max-lg:flex max-lg:gap-1.5">
+          {NAV_GROUPS.map((group) => (
+          <div key={group.title} className="grid gap-1 max-lg:flex max-lg:gap-1.5">
+            <p className="px-3 pb-1 text-[11px] font-bold uppercase tracking-[0.12em] text-subtle/70 max-lg:hidden">{group.title}</p>
+          {group.items.map((item) => {
             const active =
               item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href);
             return (
@@ -179,6 +195,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               </Link>
             );
           })}
+          </div>
+          ))}
         </nav>
         <div className="mt-auto grid gap-2 pt-6 max-lg:mt-0 max-lg:pt-0">
           <p className="truncate text-[12px] text-subtle max-lg:hidden">{session.user.email}</p>

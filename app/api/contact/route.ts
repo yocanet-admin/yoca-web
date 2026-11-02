@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getDict } from '@/lib/i18n';
 import { notifyContact } from '@/lib/notify';
-import { freeText, screenSubmission } from '@/lib/spam';
+import { freeText, logSpam, screenSubmission } from '@/lib/spam';
 import type { Locale } from '@/types';
 
 /** Yoca — contact form endpoint: validate, screen for spam, persist to Supabase, notify. */
@@ -82,6 +82,7 @@ export async function POST(request: NextRequest) {
   });
   if (verdict.spam) {
     console.warn('contact spam dropped:', verdict.reasons.join(','));
+    await logSpam('contact', verdict.reasons);
     return NextResponse.json({ ok: true, message: dict.contact.success });
   }
 
