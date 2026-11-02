@@ -16,6 +16,7 @@ import {
   type InlineAction,
 } from '@/lib/ai/editorial';
 import { researchTopic } from '@/lib/ai/research';
+import { isAllowedAdminEmail } from '@/lib/cockpit/auth';
 
 /**
  * Yoca — admin AI endpoint (server only).
@@ -62,6 +63,8 @@ async function authenticate(request: NextRequest): Promise<{ id: string; email?:
   if (!admin) return null;
   const { data, error } = await admin.auth.getUser(token);
   if (error || !data.user) return null;
+  // Optional ADMIN_EMAILS allowlist (no-op when unset) — same rule as /api/admin/*.
+  if (!isAllowedAdminEmail(data.user.email)) return null;
   return { id: data.user.id, email: data.user.email ?? undefined };
 }
 
