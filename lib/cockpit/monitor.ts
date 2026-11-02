@@ -129,7 +129,8 @@ async function fetchPage(url: string): Promise<{ status: number; ms: number; fin
   }
 }
 
-export async function checkSite(site: MonitoredSite): Promise<SiteCheck> {
+/** `domain: false` skips the RDAP lookup (frequent uptime checks don't need it). */
+export async function checkSite(site: MonitoredSite, options: { domain?: boolean } = {}): Promise<SiteCheck> {
   const hostname = new URL(site.url).hostname;
   const base: SiteCheck = {
     name: site.name,
@@ -152,7 +153,7 @@ export async function checkSite(site: MonitoredSite): Promise<SiteCheck> {
   const [page, ssl, domain] = await Promise.all([
     fetchPage(site.url).catch((error: unknown) => error as Error),
     sslExpiry(hostname),
-    domainExpiry(hostname),
+    options.domain === false ? Promise.resolve(null) : domainExpiry(hostname),
   ]);
 
   base.sslExpires = ssl;
@@ -176,6 +177,6 @@ export async function checkSite(site: MonitoredSite): Promise<SiteCheck> {
   return base;
 }
 
-export async function checkSites(sites: MonitoredSite[]): Promise<SiteCheck[]> {
-  return Promise.all(sites.map((site) => checkSite(site)));
+export async function checkSites(sites: MonitoredSite[], options: { domain?: boolean } = {}): Promise<SiteCheck[]> {
+  return Promise.all(sites.map((site) => checkSite(site, options)));
 }

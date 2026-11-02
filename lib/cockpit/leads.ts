@@ -25,6 +25,21 @@ export interface Lead {
   status: LeadStatus;
   note: string;
   followUpOn: string | null;
+  aiSummary: AiSummary | null;
+  aiSummaryAt: string | null;
+}
+
+/** Saved AI brief (upgrade-v9, written by /api/admin/lead-ai). */
+export interface AiSummary {
+  ozet: string;
+  ihtiyaclar: string[];
+  butce: string;
+  aciliyet: 'düşük' | 'orta' | 'yüksek';
+  uygunluk: number;
+  uygunluk_nedeni: string;
+  spam_olasiligi: 'düşük' | 'orta' | 'yüksek';
+  sonraki_adim: string;
+  sorular: string[];
 }
 
 type Row = Record<string, unknown>;
@@ -63,6 +78,8 @@ export async function loadLeads(): Promise<{ leads: Lead[]; schemaReady: boolean
       status: asStatus(row.status),
       note: String(row.note ?? ''),
       followUpOn: (row.follow_up_on as string | null) ?? null,
+      aiSummary: (row.ai_summary as AiSummary | null) ?? null,
+      aiSummaryAt: (row.ai_summary_at as string | null) ?? null,
     })),
     ...((checkups.data as Row[]) ?? []).map((row) => {
       const contact = (row.contact_info_json ?? {}) as Record<string, unknown>;
@@ -81,6 +98,8 @@ export async function loadLeads(): Promise<{ leads: Lead[]; schemaReady: boolean
         status: asStatus(row.status),
         note: String(row.note ?? ''),
         followUpOn: (row.follow_up_on as string | null) ?? null,
+        aiSummary: (row.ai_summary as AiSummary | null) ?? null,
+        aiSummaryAt: (row.ai_summary_at as string | null) ?? null,
       };
     }),
   ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -107,6 +126,35 @@ export async function deleteLead(lead: Lead): Promise<boolean> {
   if (!supabase) return false;
   const { error } = await supabase.from(table(lead)).delete().eq('id', lead.id);
   return !error;
+}
+
+/** [table, ids] batches of at most 100 ids (keeps the request URL short). */
+function groupByTable(leads: Lead[]): Array<[string, string[]]> {
+  const map = new Map<string, string[]>();
+  for (const lead of leads) map.set(table(lead), [...(map.get(table(lead)) ?? []), lead.id]);
+  const batches: Array<[string, string[]]> = [];
+  for (const [name, ids] of Array.from(map.entries())) {
+    for (let i = 0; i < ids.length; i += 100) batches.push([name, ids.slice(i, i + 100)]);
+  }
+  return batches;
+}
+
+/** Bulk status change; true when every table update succeeded. */
+export async function updateLeads(leads: Lead[], patch: Partial<{ status: LeadStatus }>): Promise<boolean> {
+  const supabase = getAdminClient();
+  if (!supabase || leads.length === 0) return false;
+  const results = await Promise.all(
+    groupByTable(leads).map(([name, ids]) => supabase.from(name).update({ ...patch, updated_at: new Date().toISOString() }).in('id', ids)),
+  );
+  return results.every((r) => !r.error);
+}
+
+/** Bulk delete; true when every table delete succeeded. */
+export async function deleteLeads(leads: Lead[]): Promise<boolean> {
+  const supabase = getAdminClient();
+  if (!supabase || leads.length === 0) return false;
+  const results = await Promise.all(groupByTable(leads).map(([name, ids]) => supabase.from(name).delete().in('id', ids)));
+  return results.every((r) => !r.error);
 }
 
 /** Leads per ISO week (Monday start, Istanbul-agnostic UTC weeks), last `weeks` weeks. */

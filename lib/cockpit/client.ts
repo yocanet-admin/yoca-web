@@ -18,6 +18,20 @@ export async function adminApi<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** POST JSON to an admin API route with the session token. */
+export async function adminPost<T>(path: string, body: unknown): Promise<T> {
+  const supabase = getAdminClient();
+  const { data } = (await supabase?.auth.getSession()) ?? { data: { session: null } };
+  const token = data.session?.access_token;
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+  return (await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }))) as T;
+}
+
 // ── Lead pipeline ─────────────────────────────────────────────────
 
 export const LEAD_STATUSES = ['new', 'contacted', 'proposal', 'won', 'lost', 'spam'] as const;
