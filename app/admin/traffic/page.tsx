@@ -130,7 +130,7 @@ export default function AdminTraffic() {
               empty="Henüz imzadan gelen ziyaret yok. İmza sayfasında “Site adresi”ni doldurup kodu sitelere yeniden ekleyin."
             />
             <p className="mt-3 text-[12px] text-subtle">
-              Müşteri sitelerindeki “Built by YOCA” imzasına tıklayıp yoca.net’e gelenler, siteye göre. Site adresi girilmeden eklenmiş eski imzalardan gelenler “Kaynaklar” listesinde o sitenin adıyla görünebilir.
+              Müşteri sitelerindeki “Built by YOCA” imzasına tıklayıp yoca.net’e gelenler, siteye göre. Takip parametresi olmayan eski imzalar da, site Siteler listesinde izleniyorsa o siteden gelen ziyaretlerle sayılır.
             </p>
           </Card>
 
