@@ -127,8 +127,8 @@ export interface CaseStudyRow {
   services: string[] | null;
   order_index: number;
   is_active: boolean;
-  /** Work status label + filter: client case study, concept project, Yoca product, experimental. */
-  kind: 'client' | 'concept' | 'product' | 'experimental';
+  /** Work status label + filter: client case study, concept project, Yoca product, experimental, Yoca venture. */
+  kind: 'client' | 'concept' | 'product' | 'experimental' | 'venture';
   /** Optional hover-preview video (muted loop) for the Work grid. */
   video_url: string | null;
   /** Optional live/interactive project link shown on the case detail page. */
