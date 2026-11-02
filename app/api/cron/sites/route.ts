@@ -32,12 +32,43 @@ function problem(check: SiteCheck): string {
   return `erişilemiyor (HTTP ${check.httpStatus ?? '—'})`;
 }
 
+/**
+ * SCHEDULED → PUBLISHED for articles whose publish_at has passed. The public
+ * site (and its RLS policy) only shows PUBLISHED rows, so without this step a
+ * scheduled article would never appear. Returns how many went live (null on error).
+ */
+async function publishDueInsights(): Promise<number | null> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('insights')
+      .update({ status: 'PUBLISHED' })
+      .eq('status', 'SCHEDULED')
+      .lte('publish_at', new Date().toISOString())
+      .select('id');
+    if (error) {
+      console.error('cron: scheduled insights publish failed:', error.message);
+      return null;
+    }
+    const count = data?.length ?? 0;
+    if (count > 0) console.log(`cron: published ${count} scheduled insight(s)`);
+    return count;
+  } catch (error) {
+    console.error('cron: scheduled insights publish failed:', (error as Error).message);
+    return null;
+  }
+}
+
 export async function GET(request: NextRequest) {
   if (!cronAuthorized(request)) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
 
+  // Scheduled Insights go live once their time has come (runs even when the site check is throttled).
+  const published = await publishDueInsights();
+
   const state = await getCronState();
   if (state.sites_last_at && Date.now() - Date.parse(state.sites_last_at) < MIN_GAP_MS) {
-    return NextResponse.json({ ok: true, skipped: 'ran less than 5 minutes ago' });
+    return NextResponse.json({ ok: true, skipped: 'ran less than 5 minutes ago', published });
   }
 
   const supabase = getSupabaseAdmin();
@@ -102,5 +133,5 @@ export async function GET(request: NextRequest) {
     sent = await notifyAdmins({ kind: 'site', subject, heading: subject, html, telegram });
   }
 
-  return NextResponse.json({ ok: true, checked: rows.length, down: down.length, recovered: recovered.length, unsigned: unsigned.length, sent });
+  return NextResponse.json({ ok: true, published, checked: rows.length, down: down.length, recovered: recovered.length, unsigned: unsigned.length, sent });
 }
