@@ -259,7 +259,7 @@ export default function AdminWork() {
               onChange={(event) =>
                 setEditing({
                   ...editing,
-                  kind: event.target.value as 'client' | 'concept' | 'product' | 'experimental',
+                  kind: event.target.value as 'client' | 'concept' | 'product' | 'experimental' | 'venture',
                 })
               }
               className="admin-input"
@@ -267,6 +267,7 @@ export default function AdminWork() {
               <option value="client">Müşteri Projesi (doğrulanmış)</option>
               <option value="concept">Konsept Proje</option>
               <option value="product">Yoca Ürünü</option>
+              <option value="venture">Yoca Girişimi</option>
               <option value="experimental">Deneysel</option>
             </select>
           </label>
