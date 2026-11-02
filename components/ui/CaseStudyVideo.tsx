@@ -20,6 +20,7 @@ export default function CaseStudyVideo({ src, poster, alt, className }: CaseStud
   const reduced = useReducedMotion();
   const ref = useRef<HTMLVideoElement>(null);
   const [near, setNear] = useState(false);
+  const visible = useRef(false);
 
   useEffect(() => {
     if (reduced || !ref.current) return;
@@ -27,9 +28,10 @@ export default function CaseStudyVideo({ src, poster, alt, className }: CaseStud
     const io = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
+          visible.current = entry.isIntersecting;
           if (entry.isIntersecting) {
             setNear(true);
-            el.play().catch(() => undefined);
+            if (el.currentSrc) el.play().catch(() => undefined);
           } else {
             el.pause();
           }
@@ -40,6 +42,12 @@ export default function CaseStudyVideo({ src, poster, alt, className }: CaseStud
     io.observe(el);
     return () => io.disconnect();
   }, [reduced]);
+
+  // The source is attached only once the video comes near; start it then
+  // (play() before a source exists never loads with preload="none").
+  useEffect(() => {
+    if (near && visible.current) ref.current?.play().catch(() => undefined);
+  }, [near]);
 
   if (reduced) {
     // eslint-disable-next-line @next/next/no-img-element
