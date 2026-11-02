@@ -83,6 +83,7 @@ export default async function WorkPage() {
                   concept: t.work.statusConcept,
                   product: t.work.statusProduct,
                   experimental: t.work.statusExp,
+                  venture: t.work.statusVenture,
                 },
               }}
             />

@@ -22,6 +22,7 @@ const NAV: Array<{ href: string; label: string; icon: string }> = [
   { href: '/admin/insights', label: 'İçerik / Insights', icon: '✎' },
   { href: '/admin/team', label: 'Ekip', icon: '◉' },
   { href: '/admin/submissions', label: 'Başvurular', icon: '✉' },
+  { href: '/admin/signature', label: 'İmza', icon: '✦' },
 ];
 
 export default function AdminShell({ children }: { children: ReactNode }) {

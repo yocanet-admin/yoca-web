@@ -30,6 +30,7 @@ export default async function WorkIndex({ t, locale, base, limit = 4 }: WorkInde
     concept: t.statusConcept,
     product: t.statusProduct,
     experimental: t.statusExp,
+    venture: t.statusVenture,
   } as const;
 
   return (
