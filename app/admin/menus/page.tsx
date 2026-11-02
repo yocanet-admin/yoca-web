@@ -90,8 +90,9 @@ export default function AdminMenus() {
 
   const remove = async (row: MenuRow) => {
     if (!supabase) return;
-    await supabase.from('menus').delete().eq('id', row.id);
-    flash('Menü silindi.');
+    if (!window.confirm(`“${row.title}” menü öğesi kalıcı olarak silinsin mi? (Sadece gizlemek için “Gizle”yi kullanın.)`)) return;
+    const { error } = await supabase.from('menus').delete().eq('id', row.id);
+    flash(error ? `Silinemedi: ${error.message}` : 'Menü silindi.');
     load();
   };
 
