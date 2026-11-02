@@ -41,7 +41,13 @@ export default async function OverviewPage() {
           products: t.products.items.map((p) => ({ key: p.key, name: p.name, category: p.category })),
           clocks: t.clocks,
           nav: t.nav,
-          workLabels: { concept: t.work.statusConcept },
+          workLabels: {
+            client: t.work.statusClient,
+            concept: t.work.statusConcept,
+            product: t.work.statusProduct,
+            experimental: t.work.statusExp,
+            venture: t.work.statusVenture,
+          },
         }}
         address={COMPANY.address.line}
       />
