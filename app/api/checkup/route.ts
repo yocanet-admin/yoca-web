@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { CHECKUP_WEIGHTS, getDict } from '@/lib/i18n';
 import { notifyCheckup } from '@/lib/notify';
-import { screenSubmission } from '@/lib/spam';
+import { logSpam, screenSubmission } from '@/lib/spam';
 import type { CheckupAnswer, CheckupPayload, Locale } from '@/types';
 
 /**
@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
   });
   if (verdict.spam) {
     console.warn('checkup spam dropped:', verdict.reasons.join(','));
+    await logSpam('checkup', verdict.reasons);
     return NextResponse.json({ ok: true, score: 0 });
   }
 
