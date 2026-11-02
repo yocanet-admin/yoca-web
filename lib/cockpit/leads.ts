@@ -50,17 +50,32 @@ function asStatus(value: unknown): LeadStatus {
     : 'new';
 }
 
-export async function loadLeads(): Promise<{ leads: Lead[]; schemaReady: boolean }> {
+/** Rows read per lead table. Older rows beyond this are not shown (`capped` tells the UI). */
+export const LEAD_LIMIT = 2000;
+
+export interface LeadsResult {
+  leads: Lead[];
+  schemaReady: boolean;
+  /** A lead table could not be read (session expired, network…). */
+  error: string | null;
+  /** At least one table returned LEAD_LIMIT rows — older leads are hidden. */
+  capped: boolean;
+}
+
+export async function loadLeads(): Promise<LeadsResult> {
   const supabase = getAdminClient();
-  if (!supabase) return { leads: [], schemaReady: false };
+  if (!supabase) return { leads: [], schemaReady: false, error: 'Supabase yapılandırılmamış.', capped: false };
 
   const probe = await supabase.from('contact_submissions').select('status').limit(1);
   const schemaReady = !probe.error;
 
   const [contacts, checkups] = await Promise.all([
-    supabase.from('contact_submissions').select('*').order('created_at', { ascending: false }),
-    supabase.from('checkup_submissions').select('*').order('created_at', { ascending: false }),
+    supabase.from('contact_submissions').select('*').order('created_at', { ascending: false }).limit(LEAD_LIMIT),
+    supabase.from('checkup_submissions').select('*').order('created_at', { ascending: false }).limit(LEAD_LIMIT),
   ]);
+  const failed = contacts.error ?? checkups.error;
+  const error = failed ? failed.message || 'Leadler okunamadı.' : null;
+  const capped = (contacts.data?.length ?? 0) >= LEAD_LIMIT || (checkups.data?.length ?? 0) >= LEAD_LIMIT;
 
   const leads: Lead[] = [
     ...((contacts.data as Row[]) ?? []).map((row) => ({
@@ -104,7 +119,7 @@ export async function loadLeads(): Promise<{ leads: Lead[]; schemaReady: boolean
     }),
   ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  return { leads, schemaReady };
+  return { leads, schemaReady, error, capped };
 }
 
 function table(lead: Pick<Lead, 'type'>) {

@@ -7,29 +7,62 @@ import { getAdminClient } from '@/lib/adminClient';
  * adminApi() calls /api/admin/* with the signed-in user's access token.
  */
 
-export async function adminApi<T>(path: string): Promise<T> {
+async function authHeader(): Promise<Record<string, string>> {
   const supabase = getAdminClient();
   const { data } = (await supabase?.auth.getSession()) ?? { data: { session: null } };
   const token = data.session?.access_token;
-  const response = await fetch(path, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    cache: 'no-store',
-  });
-  return (await response.json()) as T;
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-/** POST JSON to an admin API route with the session token. */
+/** Turkish message for a failed admin API response. */
+function failure(status: number | null, detail?: string): { ok: false; error: string } {
+  if (status === 401) return { ok: false, error: 'Oturum süresi dolmuş olabilir — sayfayı yenileyin veya yeniden giriş yapın.' };
+  if (status === 403) return { ok: false, error: 'Bu hesabın yönetim paneline erişim izni yok.' };
+  if (status === 504 || status === 408) return { ok: false, error: 'Sunucu zamanında yanıt vermedi (zaman aşımı). Tekrar deneyin.' };
+  if (status === null) return { ok: false, error: `Sunucuya ulaşılamadı${detail ? `: ${detail}` : ''}. İnternet bağlantınızı kontrol edip tekrar deneyin.` };
+  return { ok: false, error: detail || `Sunucu hatası (HTTP ${status}). Tekrar deneyin.` };
+}
+
+/**
+ * Shared fetch for /api/admin/*. Never throws: a network error, a non-JSON
+ * body (e.g. a platform timeout page) or an HTTP error without a JSON error
+ * becomes `{ ok: false, error }` with a Turkish message.
+ */
+async function request<T>(path: string, init: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(path, { ...init, cache: 'no-store' });
+  } catch (error) {
+    return failure(null, (error as Error)?.message) as T;
+  }
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    return failure(response.status) as T;
+  }
+  if (!body || typeof body !== 'object') return failure(response.status) as T;
+  if (!response.ok) {
+    const record = body as { error?: unknown };
+    const known = failure(response.status);
+    const error = response.status === 401 || response.status === 403 || typeof record.error !== 'string' || record.error === 'unauthorized' ? known.error : record.error;
+    return { ...(body as object), ok: false, error } as T;
+  }
+  return body as T;
+}
+
+/** GET an admin API route with the session token. Never throws (see request()). */
+export async function adminApi<T>(path: string): Promise<T> {
+  return request<T>(path, { headers: await authHeader() });
+}
+
+/** POST JSON to an admin API route with the session token. Never throws. */
 export async function adminPost<T>(path: string, body: unknown): Promise<T> {
-  const supabase = getAdminClient();
-  const { data } = (await supabase?.auth.getSession()) ?? { data: { session: null } };
-  const token = data.session?.access_token;
-  const response = await fetch(path, {
+  return request<T>(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
     body: JSON.stringify(body),
-    cache: 'no-store',
   });
-  return (await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }))) as T;
 }
 
 // ── Lead pipeline ─────────────────────────────────────────────────
@@ -61,6 +94,15 @@ export const OPEN_STATUSES: LeadStatus[] = ['new', 'contacted', 'proposal'];
 // ── Formatting ────────────────────────────────────────────────────
 
 const TZ = 'Europe/Istanbul';
+
+/** Today's calendar date in Istanbul as YYYY-MM-DD (due dates / follow-ups are Istanbul days, not UTC days). */
+export function istanbulToday(): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  } catch {
+    return new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10);
+  }
+}
 
 export function fmtNumber(value: number): string {
   if (value >= 10_000) return new Intl.NumberFormat('tr-TR', { notation: 'compact', maximumFractionDigits: 1 }).format(value);

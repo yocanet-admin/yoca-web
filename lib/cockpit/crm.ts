@@ -161,8 +161,29 @@ export async function deleteActivity(id: string): Promise<boolean> {
   return !error;
 }
 
-/** Lead → client (prospect) with the lead's message as the first note. */
-export async function clientFromLead(lead: Lead): Promise<Client | null> {
+/** The client already created from this lead, if any. */
+export async function findClientForLead(lead: Pick<Lead, 'id' | 'type'>): Promise<Client | null> {
+  const supabase = getAdminClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('clients')
+    .select('*')
+    .eq('source_type', lead.type)
+    .eq('source_id', lead.id)
+    .order('created_at', { ascending: true })
+    .limit(1);
+  if (error || !data || data.length === 0) return null;
+  return data[0] as Client;
+}
+
+/**
+ * Lead → client (prospect) with the lead's message as the first note.
+ * When the lead was already turned into a client, that client is returned
+ * (`existing: true`) instead of creating a duplicate.
+ */
+export async function clientFromLead(lead: Lead): Promise<(Client & { existing?: boolean }) | null> {
+  const found = await findClientForLead(lead);
+  if (found) return { ...found, existing: true };
   const client = await saveClient({
     name: lead.company || lead.name,
     contact_name: lead.name,

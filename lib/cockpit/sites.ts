@@ -18,6 +18,8 @@ export interface SiteRow {
 
 export interface HealthResponse {
   ok: boolean;
+  /** Set when the request failed (session expired, timeout…); `checks` may then be missing. */
+  error?: string;
   sitesFromDatabase: boolean;
   vercelConfigured: boolean;
   checks: SiteCheck[];
@@ -32,11 +34,39 @@ export async function loadSiteRows(): Promise<{ rows: SiteRow[]; ready: boolean 
   return { rows: (data as SiteRow[]) ?? [], ready: true };
 }
 
-export async function saveSite(row: Partial<SiteRow> & { name: string; url: string }): Promise<boolean> {
+/** Fields the admin may change. Cron bookkeeping (fail_count, alerted, last_state…) is never sent from the browser. */
+export type SiteEdit = Partial<Pick<SiteRow, 'name' | 'url' | 'expects_signature' | 'hosting_renews_on' | 'note' | 'is_active' | 'order_index'>>;
+
+/**
+ * A usable site address or null. Adds https:// when missing; rejects spaces,
+ * hosts without a dot and anything that is not http(s).
+ */
+export function normalizeSiteUrl(input: string): string | null {
+  let value = input.trim();
+  if (!value) return null;
+  if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
+  try {
+    const url = new URL(value);
+    if (!/^https?:$/.test(url.protocol)) return null;
+    if (!url.hostname.includes('.') || /\s/.test(input.trim())) return null;
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}
+
+export async function addSite(row: { name: string; url: string; expects_signature: boolean; order_index: number }): Promise<{ ok: boolean; error?: string }> {
+  const supabase = getAdminClient();
+  if (!supabase) return { ok: false, error: 'Supabase yapılandırılmamış.' };
+  const { error } = await supabase.from('monitored_sites').insert(row);
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+/** Update only the given editable fields of one site. */
+export async function updateSite(id: string, patch: SiteEdit): Promise<boolean> {
   const supabase = getAdminClient();
   if (!supabase) return false;
-  const query = row.id ? supabase.from('monitored_sites').update(row).eq('id', row.id) : supabase.from('monitored_sites').insert(row);
-  const { error } = await query;
+  const { error } = await supabase.from('monitored_sites').update(patch).eq('id', id);
   return !error;
 }
 

@@ -73,6 +73,7 @@ export function integrations() {
     email: Boolean(process.env.RESEND_API_KEY),
     openai: Boolean(process.env.OPENAI_API_KEY),
     cronSecret: Boolean(process.env.CRON_SECRET),
+    serviceRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
     emailFrom: process.env.NOTIFY_EMAIL_FROM || 'Yoca <noreply@yoca.net>',
   };
 }

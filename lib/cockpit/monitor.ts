@@ -57,10 +57,13 @@ function daysUntil(iso: string | null): number | null {
 
 function sslExpiry(hostname: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const socket = tls.connect({ host: hostname, port: 443, servername: hostname, timeout: 8000 }, () => {
+    // rejectUnauthorized:false so an expired / invalid certificate still reports its date
+    // (the expiry is then flagged by siteIssues as "süresi geçti").
+    const socket = tls.connect({ host: hostname, port: 443, servername: hostname, timeout: 8000, rejectUnauthorized: false }, () => {
       const cert = socket.getPeerCertificate();
       socket.end();
-      resolve(cert?.valid_to ? new Date(cert.valid_to).toISOString() : null);
+      const expires = cert?.valid_to ? new Date(cert.valid_to) : null;
+      resolve(expires && !Number.isNaN(expires.getTime()) ? expires.toISOString() : null);
     });
     socket.on('error', () => resolve(null));
     socket.on('timeout', () => {
@@ -177,6 +180,37 @@ export async function checkSite(site: MonitoredSite, options: { domain?: boolean
   return base;
 }
 
+/** A check result for a site that could not be checked at all (bad URL, unexpected failure). */
+function failedCheck(site: MonitoredSite, message: string): SiteCheck {
+  return {
+    name: site.name,
+    url: site.url,
+    state: 'down',
+    httpStatus: null,
+    ms: null,
+    finalUrl: null,
+    signature: null,
+    expectsSignature: site.expects_signature,
+    sslExpires: null,
+    sslDaysLeft: null,
+    domainExpires: null,
+    domainDaysLeft: null,
+    hostingRenewsOn: site.hosting_renews_on ?? null,
+    error: message,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+/** One broken entry (e.g. an invalid URL) is reported as that site's error; the others are still checked. */
 export async function checkSites(sites: MonitoredSite[], options: { domain?: boolean } = {}): Promise<SiteCheck[]> {
-  return Promise.all(sites.map((site) => checkSite(site, options)));
+  return Promise.all(
+    sites.map(async (site) => {
+      try {
+        return await checkSite(site, options);
+      } catch (error) {
+        const message = error instanceof TypeError && /url/i.test(error.message) ? 'Geçersiz adres' : (error as Error)?.message?.slice(0, 140) || 'Kontrol başarısız';
+        return failedCheck(site, message);
+      }
+    }),
+  );
 }
