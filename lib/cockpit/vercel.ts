@@ -63,6 +63,8 @@ export interface TrafficReport {
   countries: Array<{ label: string } & Visits>;
   devices: Array<{ label: string } & Visits>;
   events: Array<{ name: string; count: number; visitors: number }>;
+  /** "Built by YOCA" signature visits per client site (signature_visit event). */
+  signatures: Array<{ label: string; count: number; visitors: number }>;
 }
 
 function day(offset: number): string {
@@ -85,7 +87,7 @@ export async function trafficReport(days: number): Promise<TrafficReport> {
   const top = (by: string, limit = 8) =>
     get<AggregateResponse<Record<string, string>>>('/v1/query/web-analytics/visits/aggregate', { ...base, by: [by], limit });
 
-  const [totals, previous, daily, pages, referrers, countries, devices, events] = await Promise.all([
+  const [totals, previous, daily, pages, referrers, countries, devices, events, signatures] = await Promise.all([
     get<CountResponse>('/v1/query/web-analytics/visits/count', base),
     get<CountResponse>('/v1/query/web-analytics/visits/count', { projectId: PROJECT_ID, since: prevSince, until: prevUntil }),
     get<AggregateResponse<{ timestamp: string }>>('/v1/query/web-analytics/visits/aggregate', { ...base, by: ['day'] }),
@@ -97,6 +99,12 @@ export async function trafficReport(days: number): Promise<TrafficReport> {
       ...base,
       by: ['eventName'],
       limit: 20,
+    }).catch(() => ({ data: [] })),
+    get<{ data: Array<Record<string, string | number>> }>('/v1/query/web-analytics/events/aggregate', {
+      ...base,
+      by: ['eventData/site'],
+      filter: "eventName eq 'signature_visit'",
+      limit: 50,
     }).catch(() => ({ data: [] })),
   ]);
 
@@ -118,6 +126,14 @@ export async function trafficReport(days: number): Promise<TrafficReport> {
     countries: rows(countries, 'country'),
     devices: rows(devices, 'deviceType'),
     events: (events.data ?? []).map((row) => ({ name: row.eventName, count: row.count ?? 0, visitors: row.visitors ?? 0 })),
+    signatures: (signatures.data ?? [])
+      .map((row) => {
+        // the dimension comes back under its own key (e.g. "eventData/site"); take the first text value
+        const label = Object.entries(row).find(([key, value]) => typeof value === 'string' && key !== 'timestamp')?.[1];
+        return { label: String(label || '—'), count: Number(row.count ?? 0), visitors: Number(row.visitors ?? 0) };
+      })
+      .filter((row) => row.label !== '—' && row.count > 0)
+      .sort((a, b) => b.count - a.count),
   };
 }
 
