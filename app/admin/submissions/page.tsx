@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, DailyBars, Notice, StatTile } from '@/components/admin/cockpit/Widgets';
-import { LEAD_LABEL, LEAD_PILL, LEAD_STATUSES, OPEN_STATUSES, fmtDate, timeAgo, type LeadStatus } from '@/lib/cockpit/client';
-import { deleteLead, deleteLeads, loadLeads, replyHref, updateLead, updateLeads, weeklyCounts, type Lead } from '@/lib/cockpit/leads';
+import { LEAD_LABEL, LEAD_PILL, LEAD_STATUSES, OPEN_STATUSES, fmtDate, istanbulToday, timeAgo, type LeadStatus } from '@/lib/cockpit/client';
+import { LEAD_LIMIT, deleteLead, deleteLeads, loadLeads, replyHref, updateLead, updateLeads, weeklyCounts, type Lead } from '@/lib/cockpit/leads';
 import { clientFromLead } from '@/lib/cockpit/crm';
 import { LeadAI } from '@/components/admin/cockpit/LeadAI';
 
@@ -18,6 +18,14 @@ import { LeadAI } from '@/components/admin/cockpit/LeadAI';
  */
 
 type TypeFilter = 'all' | 'contact' | 'checkup';
+type StatusFilter = 'all' | 'open' | LeadStatus;
+
+function statusParam(value: string | null): StatusFilter {
+  return value === 'all' || value === 'open' || (LEAD_STATUSES as readonly string[]).includes(value ?? '') ? (value as StatusFilter) : 'open';
+}
+
+/** Refetch on window focus at most this often. */
+const FOCUS_REFRESH_MS = 30_000;
 
 function LeadsInner() {
   const searchParams = useSearchParams();
@@ -25,7 +33,7 @@ function LeadsInner() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [ready, setReady] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<'all' | 'open' | LeadStatus>((searchParams.get('status') as LeadStatus) || 'open');
+  const [status, setStatus] = useState<StatusFilter>(statusParam(searchParams.get('status')));
   const [type, setType] = useState<TypeFilter>(searchParams.get('tab') === 'checkup' ? 'checkup' : 'all');
   const [query, setQuery] = useState('');
   const [openId, setOpenId] = useState<string | null>(searchParams.get('id'));
@@ -33,17 +41,42 @@ function LeadsInner() {
   const [flash, setFlash] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [capped, setCapped] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const lastLoad = useRef(0);
+  const scrolledTo = useRef<string | null>(null);
 
-  const load = async () => {
-    const result = await loadLeads();
-    setLeads(result.leads);
-    setReady(result.schemaReady);
-    setLoading(false);
-  };
+  const load = useCallback(async () => {
+    lastLoad.current = Date.now();
+    setRefreshing(true);
+    try {
+      const result = await loadLeads();
+      setLeads(result.leads);
+      setReady(result.schemaReady);
+      setError(result.error);
+      setCapped(result.capped);
+    } catch (err) {
+      setError((err as Error)?.message || 'Leadler okunamadı.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
+
+  // New leads arrive while the tab is open: refetch when the window regains focus.
+  useEffect(() => {
+    const onFocus = () => {
+      if (Date.now() - lastLoad.current > FOCUS_REFRESH_MS) load();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [load]);
 
   const say = (text: string) => {
     setFlash(text);
@@ -69,6 +102,30 @@ function LeadsInner() {
 
   // A new filter starts with a clean selection, so a bulk action never touches rows you cannot see.
   useEffect(() => setSelected(new Set()), [status, type, query]);
+
+  // Deep link (?id=…): make sure the lead is in the current filter, scroll to it and highlight it once.
+  useEffect(() => {
+    const target = searchParams.get('id');
+    if (!target || loading || scrolledTo.current === target) return;
+    const lead = leads.find((l) => l.id === target);
+    if (!lead) return;
+    if (!visible.some((l) => l.id === target)) {
+      setStatus('all');
+      setType('all');
+      setQuery('');
+      return;
+    }
+    scrolledTo.current = target;
+    setOpenId(target);
+    setHighlightId(target);
+    requestAnimationFrame(() => document.getElementById(`lead-${target}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }, [searchParams, leads, visible, loading]);
+
+  useEffect(() => {
+    if (!highlightId) return;
+    const timer = setTimeout(() => setHighlightId(null), 2500);
+    return () => clearTimeout(timer);
+  }, [highlightId]);
 
   const keyOf = (lead: Lead) => `${lead.type}:${lead.id}`;
   const picked = visible.filter((lead) => selected.has(keyOf(lead)));
@@ -131,17 +188,31 @@ function LeadsInner() {
     say('Kaydedildi.');
   };
 
+  // Note saves for one lead run one after another (blur-save, then "AI özetini nota ekle"),
+  // so an older text can never land after a newer one.
+  const noteQueue = useRef<Record<string, Promise<unknown>>>({});
+  const saveNote = (lead: Lead, text: string) => {
+    const k = keyOf(lead);
+    const run = (noteQueue.current[k] ?? Promise.resolve()).then(() => change(lead, { note: text }));
+    noteQueue.current[k] = run.catch(() => undefined);
+    return run;
+  };
+
   const remove = async (lead: Lead) => {
     if (!window.confirm(`${lead.name} kalıcı olarak silinsin mi?`)) return;
     if (await deleteLead(lead)) {
       setLeads((current) => current.filter((l) => !(l.id === lead.id && l.type === lead.type)));
       say('Silindi.');
-    }
+    } else say('Silinemedi — oturumunuzu kontrol edin.');
   };
 
   const makeClient = async (lead: Lead) => {
     const client = await clientFromLead(lead);
     if (!client) return say('Müşteri oluşturulamadı — CRM tabloları (SQL v8) kurulu mu?');
+    if (client.existing) {
+      say('Bu lead zaten müşteri — mevcut kayıt açılıyor.');
+      return router.push(`/admin/clients?id=${client.id}`);
+    }
     if (lead.status === 'new') await change(lead, { status: 'contacted' });
     router.push(`/admin/clients?id=${client.id}`);
   };
@@ -153,8 +224,27 @@ function LeadsInner() {
           <h1 className="text-2xl font-extrabold tracking-tight">Leadler</h1>
           <p className="mt-1.5 text-[14px] text-muted">İletişim formu ve Digital Check-Up başvuruları — tek akışta.</p>
         </div>
-        {flash && <span role="status" className="text-[13px] font-bold text-yoca-lime">{flash}</span>}
+        <div className="flex items-center gap-3">
+          {flash && <span role="status" className="text-[13px] font-bold text-yoca-lime">{flash}</span>}
+          <button type="button" onClick={load} disabled={refreshing} className="admin-btn">
+            {refreshing && !loading ? 'Yenileniyor…' : '↻ Yenile'}
+          </button>
+        </div>
       </header>
+
+      {error && !loading && (
+        <Notice tone="warning">
+          Leadler okunamadı: {error}{' '}
+          <button type="button" onClick={load} className="font-bold underline">
+            Tekrar dene
+          </button>
+        </Notice>
+      )}
+      {capped && (
+        <Notice tone="warning">
+          Liste en yeni {LEAD_LIMIT} kayıtla sınırlı — daha eski leadler burada görünmüyor. Eski spam kayıtlarını silerek listeyi küçültebilirsiniz.
+        </Notice>
+      )}
 
       {!ready && !loading && (
         <Notice tone="warning">
@@ -201,7 +291,7 @@ function LeadsInner() {
       </div>
 
       {!loading && visible.length > 0 && (
-        <div className="sticky top-0 z-10 -my-2 flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-deep/95 px-4 py-2.5 backdrop-blur">
+        <div className="sticky top-14 z-10 -my-2 lg:top-0 flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-deep/95 px-4 py-2.5 backdrop-blur">
           <label className="flex items-center gap-2 text-[12px] font-bold text-soft">
             <input
               type="checkbox"
@@ -262,9 +352,13 @@ function LeadsInner() {
           {visible.map((lead) => {
             const key = keyOf(lead);
             const open = openId === lead.id;
-            const overdue = lead.followUpOn && lead.followUpOn < new Date().toISOString().slice(0, 10) && OPEN_STATUSES.includes(lead.status);
+            const overdue = lead.followUpOn && lead.followUpOn < istanbulToday() && OPEN_STATUSES.includes(lead.status);
             return (
-              <li key={key} className={`rounded-md border bg-surface-deep/80 ${open ? 'border-yoca-lime/40' : selected.has(key) ? 'border-yoca-lime/25' : 'border-line'}`}>
+              <li
+                key={key}
+                id={`lead-${lead.id}`}
+                className={`scroll-mt-24 rounded-md border bg-surface-deep/80 transition-shadow duration-500 ${highlightId === lead.id ? 'ring-2 ring-yoca-lime/70' : ''} ${open ? 'border-yoca-lime/40' : selected.has(key) ? 'border-yoca-lime/25' : 'border-line'}`}
+              >
                 <div className="flex flex-wrap items-center gap-3 p-4">
                   <input
                     type="checkbox"
@@ -341,9 +435,10 @@ function LeadsInner() {
                           onSummary={(summary, at) =>
                             setLeads((current) => current.map((l) => (keyOf(l) === key ? { ...l, aiSummary: summary, aiSummaryAt: at } : l)))
                           }
+                          currentNote={notes[key] ?? lead.note}
                           onNote={(text) => {
                             setNotes((n) => ({ ...n, [key]: text }));
-                            change(lead, { note: text });
+                            saveNote(lead, text);
                           }}
                         />
                       </div>
@@ -356,7 +451,7 @@ function LeadsInner() {
                           disabled={!ready}
                           value={notes[key] ?? lead.note}
                           onChange={(e) => setNotes((n) => ({ ...n, [key]: e.target.value }))}
-                          onBlur={() => notes[key] !== undefined && notes[key] !== lead.note && change(lead, { note: notes[key] })}
+                          onBlur={() => notes[key] !== undefined && notes[key] !== lead.note && saveNote(lead, notes[key])}
                           className="admin-input text-[13px]"
                           placeholder="Görüşme notu, bütçe, beklenti…"
                         />
