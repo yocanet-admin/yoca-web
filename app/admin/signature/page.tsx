@@ -1,7 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { buildSignature, type SignatureAlign, type SignatureColor } from '@/lib/signature';
+import { useEffect, useMemo, useState } from 'react';
+import { buildSignature, signatureHref, type SignatureAlign, type SignatureColor } from '@/lib/signature';
+import { normalizeSite } from '@/lib/signatureRef';
+import { loadSiteRows } from '@/lib/cockpit/sites';
 
 /**
  * Yoca Admin — "Built by YOCA" imzası.
@@ -22,10 +24,19 @@ export default function SignaturePage() {
   const [customColor, setCustomColor] = useState('#a2ff00');
   const [brandColors, setBrandColors] = useState(true);
   const [testBg, setTestBg] = useState('#1d3b2a');
+  const [site, setSite] = useState('');
+  const [knownSites, setKnownSites] = useState<string[]>([]);
+
+  useEffect(() => {
+    loadSiteRows().then(({ rows }) =>
+      setKnownSites(Array.from(new Set(rows.map((r) => normalizeSite(r.url)).filter((d) => d && d !== 'yoca.net')))),
+    );
+  }, []);
+  const domain = normalizeSite(site);
   const [copied, setCopied] = useState(false);
   const snippet = useMemo(
-    () => buildSignature({ label, align, color, customColor, brandColors }),
-    [label, align, color, customColor, brandColors],
+    () => buildSignature({ label, align, color, customColor, brandColors, site }),
+    [label, align, color, customColor, brandColors, site],
   );
 
   const copy = async () => {
@@ -43,7 +54,7 @@ export default function SignaturePage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'yoca-imza.html';
+    link.download = domain ? `yoca-imza-${domain}.html` : 'yoca-imza.html';
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -84,6 +95,48 @@ export default function SignaturePage() {
             aria-label="İmza yazısı"
             className="admin-input max-w-[360px]"
           />
+        </div>
+        <div className="grid gap-2">
+          <label htmlFor="sig-site" className="text-[13px] font-bold text-muted">
+            Site adresi <span className="font-normal text-subtle">(isteğe bağlı)</span>
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              id="sig-site"
+              list="sig-site-list"
+              value={site}
+              onChange={(event) => setSite(event.target.value)}
+              placeholder="ornek.com"
+              className="admin-input max-w-[360px]"
+            />
+            <datalist id="sig-site-list">
+              {knownSites.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+            {knownSites.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setSite(s)}
+                className={`rounded-sm border px-2.5 py-1 text-[12px] font-bold transition-colors ${domain === s ? 'border-yoca-lime text-white' : 'border-line text-muted hover:text-white'}`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <p className="text-[12px] text-subtle">
+            {domain ? (
+              <>
+                Bu siteden gelen tıklamalar Kokpit → Trafik’te “İmzadan gelenler” altında <strong className="text-soft">{domain}</strong> olarak görünür. Link:{' '}
+                <code className="break-all text-yoca-lime">{signatureHref(domain)}</code>
+              </>
+            ) : site.trim() ? (
+              'Geçerli bir alan adı yazın (ör. primewashcar.com).'
+            ) : (
+              'Doldurursanız imzaya tıklayanların hangi siteden geldiği Trafik sayfasında ayrı ayrı görünür. Boş bırakırsanız sadece yoca.net’e gider.'
+            )}
+          </p>
         </div>
         <div className="grid gap-2">
           <p id="align-label" className="text-[13px] font-bold text-muted">
