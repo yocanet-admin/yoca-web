@@ -3,6 +3,7 @@ import Link from 'next/link';
 import type { InsightSummary } from '@/lib/insights';
 import { formatInsightDate } from '@/lib/insights';
 import type { Locale } from '@/types';
+import { categoryCover } from '@/lib/visuals';
 
 /**
  * Yoca — Insights card. Text-first by design: category · title · excerpt ·
@@ -19,16 +20,18 @@ interface InsightCardProps {
 }
 
 export default function InsightCard({ item, category, base, locale, minRead, featured = false }: InsightCardProps) {
+  // Articles without their own cover borrow the key visual of their topic.
+  const cover = item.cover_url || categoryCover(item.category_key);
   return (
     <Link
       href={`${base}/insights/${item.slug}`}
       className={`group relative flex h-full flex-col overflow-hidden border border-line bg-surface transition-colors duration-300 hover:border-yoca-lime/60 ${featured ? 'lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]' : ''}`}
     >
-      {item.cover_url && (
+      {cover && (
         <span className={`block overflow-hidden ${featured ? 'order-2 aspect-[16/10] lg:aspect-auto' : 'aspect-[16/10]'}`}>
           <img
-            src={item.cover_url}
-            alt={item.cover_alt ?? ''}
+            src={cover}
+            alt={item.cover_url ? item.cover_alt ?? '' : ''}
             width={1600}
             height={1000}
             loading={featured ? 'eager' : 'lazy'}
