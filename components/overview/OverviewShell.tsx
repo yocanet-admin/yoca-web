@@ -37,7 +37,7 @@ interface ShellProps {
     products: Array<{ key: string; name: string; category: string }>;
     clocks: Dict['clocks'];
     nav: Dict['nav'];
-    workLabels: { concept: string };
+    workLabels: Record<'client' | 'concept' | 'product' | 'experimental' | 'venture', string>;
   };
 }
 
@@ -294,7 +294,7 @@ export default function OverviewShell({ locale, base, address, t }: ShellProps) 
               <li>
                 <Link href={`${base}/work/${w.slug}`} onClick={cta('overview_work_click')} className="group flex flex-wrap items-baseline justify-between gap-x-8 gap-y-1 border-b border-line py-5 lg:py-6">
                   <span className="text-[clamp(28px,4.4vw,64px)] font-extrabold uppercase leading-[1] tracking-[-0.03em] text-soft transition-all duration-300 group-hover:translate-x-1 group-hover:text-white rtl:group-hover:-translate-x-1">{w.name}</span>
-                  <span className="flex items-center gap-4 text-[12px] font-bold uppercase tracking-[0.12em] text-subtle"><span>{w.sector}</span><span className="slant bg-surface-elevated px-2.5 py-1 text-[10px] font-extrabold text-soft">{t.workLabels.concept}</span></span>
+                  <span className="flex items-center gap-4 text-[12px] font-bold uppercase tracking-[0.12em] text-subtle"><span>{w.sector}</span><span className="slant bg-surface-elevated px-2.5 py-1 text-[10px] font-extrabold text-soft">{t.workLabels[w.kind]}</span></span>
                 </Link>
               </li>
             </Reveal>
