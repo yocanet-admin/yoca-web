@@ -7,6 +7,8 @@
  * Path data is the official wordmark (public/brand/yoca-logo-light-bg.svg).
  */
 
+import { normalizeSite } from '@/lib/signatureRef';
+
 const PATHS: Array<{ fill: string; d: string }> = [
   { fill: "#A2FF00", d: "M0,16.71L1.36.62h16.18l-1.36,16.09H0Z" },
   { fill: "#40C401", d: "M25.49,16.71l-1.36,16.09H7.95l1.36-16.09h16.18Z" },
@@ -26,6 +28,8 @@ export interface SignatureOptions {
   color?: SignatureColor;
   /** Hex colour for color: 'custom'. */
   customColor?: string;
+  /** Client site domain; adds tracking parameters so the cockpit shows clicks per site. */
+  site?: string;
   /** false = the whole logo in one colour (no lime/green squares). */
   brandColors?: boolean;
   /** @deprecated use align: 'center' */
@@ -44,7 +48,13 @@ const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 /** Runs once where the snippet is pasted: finds the first solid background behind the signature and picks white or near-black text. */
 const AUTO_SCRIPT = `<script>(function(){var s=document.currentScript,w=s&&s.previousElementSibling,a=w&&w.querySelector('.yoca-credit');if(!a)return;var e=w,rgb=[255,255,255];while(e&&e.nodeType===1){var m=getComputedStyle(e).backgroundColor.match(/[\\d.]+/g);if(m&&m.length>=3&&(m.length<4||+m[3]>0.5)){rgb=m;break}e=e.parentElement}var l=(0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])/255;a.style.setProperty('color',l>0.55?'#111111':'#ffffff','important');a.style.opacity='.8'})();</script>`;
 
-export function buildSignature({ label, align, color = 'inherit', customColor = '', brandColors = true, center = false }: SignatureOptions): string {
+/** Signature link; with a site it carries utm_source/medium/campaign (read by yoca.net, see lib/signatureRef). */
+export function signatureHref(site?: string): string {
+  const domain = normalizeSite(site ?? '');
+  return domain ? `https://yoca.net/?utm_source=${domain}&utm_medium=signature&utm_campaign=built_by_yoca` : 'https://yoca.net';
+}
+
+export function buildSignature({ label, align, color = 'inherit', customColor = '', brandColors = true, center = false, site }: SignatureOptions): string {
   const position: SignatureAlign = align ?? (center ? 'center' : 'left');
   const text = escapeHtml(label.trim() || 'Built by');
   const fixed =
@@ -73,7 +83,7 @@ export function buildSignature({ label, align, color = 'inherit', customColor = 
   .yoca-credit-wrap a.yoca-credit svg path[fill="currentColor"]{fill:currentColor !important}
 </style>
 <div class="yoca-credit-wrap${position === 'left' ? '' : ` yoca-credit--${position}`}">
-  <a class="yoca-credit" href="https://yoca.net" target="_blank" rel="noopener" aria-label="${text} YOCA"${lock ? ` style="color:${fixed} !important"` : ''}>
+  <a class="yoca-credit" href="${signatureHref(site).replace(/&/g, '&amp;')}" target="_blank" rel="noopener" aria-label="${text} YOCA"${lock ? ` style="color:${fixed} !important"` : ''}>
     <span>${text}</span>
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 69.05" aria-hidden="true" focusable="false">
 ${svg}
