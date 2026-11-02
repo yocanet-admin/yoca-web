@@ -24,7 +24,8 @@ export interface WorkMedia {
   interaction?: { video: string; poster: string };
 }
 
-/** Captures: live sites, 1440×1000 @2x desktop and 390×844 @3x mobile (Oct–Nov 2026). */
+/** Captures: live sites, 1440×1000 @2x desktop and 390×844 @3x mobile (Oct–Nov 2026).
+ *  mehmet-altioklar: captured in the owner's browser (desktop 1440 wide, mobile 390 wide at 2×), Nov 2026. */
 function real(slug: string): WorkMedia {
   return {
     hero: `/work/${slug}/hero.webp`,
@@ -38,6 +39,7 @@ export const WORK_MEDIA: Record<string, WorkMedia> = {
   'sp-medya': real('sp-medya'),
   cleova: real('cleova'),
   sunsoft: real('sunsoft'),
+  'mehmet-altioklar': real('mehmet-altioklar'),
 };
 
 export function getWorkMedia(slug: string): WorkMedia {

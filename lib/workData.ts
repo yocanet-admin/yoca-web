@@ -7,7 +7,7 @@ import type { CaseStudyRow, Locale } from '@/types';
  * The fully localized defaults below (EN/TR/AZ/AR) act as the fallback when
  * the table is empty — and as the "import defaults" source for the admin panel.
  *
- * REAL WORK ONLY: Prime Wash Car, SP Medya and SunSoft (client work) and
+ * REAL WORK ONLY: Prime Wash Car, SP Medya, SunSoft and Mehmet Altıoklar (client work) and
  * Cleova (Yoca venture). Facts come from the owner's briefs and the live
  * sites. No metrics, results, quotes or awards are attributed to YOCA —
  * `results` stays empty until a verified, client-approved outcome exists
@@ -52,6 +52,7 @@ const BASE: CaseStudyBase[] = [
   {"slug": "prime-wash-car", "year": "2026", "market": "Türkiye", "services": ["Brand", "Web", "Development"], "kind": "client", "liveUrl": "https://primewashcar.com", "image": "/work/prime-wash-car/hero.webp"},
   {"slug": "sp-medya", "year": "", "market": "Türkiye", "services": ["Web", "Development"], "kind": "client", "liveUrl": "https://www.spmedya.com", "image": "/work/sp-medya/hero.webp"},
   {"slug": "cleova", "year": "2026", "market": "", "services": ["Brand", "Web", "Development"], "kind": "venture", "liveUrl": "https://thecleova.com", "image": "/work/cleova/hero.webp"},
+  {"slug": "mehmet-altioklar", "year": "", "market": "Türkiye", "services": ["Web", "Development"], "kind": "client", "liveUrl": "https://mehmetaltioklar.com", "image": "/work/mehmet-altioklar/hero.webp"},
   {"slug": "sunsoft", "year": "2026", "market": "Azerbaijan", "services": ["Identity", "Web", "Development"], "kind": "client", "liveUrl": "https://sunsoft.az", "image": "/work/sunsoft/hero.webp"},
 ];
 
@@ -94,6 +95,15 @@ const CONTENT: Record<Locale, Record<string, LocalizedFields>> = {
       "approach": "YOCA designed and built Sunsoft’s website and the visual language it carries — in Azerbaijani, Turkish, Russian and English, on Next.js: a homepage, six service pages, about, a blog and a project enquiry form.",
       "solution": "The message is one sentence — brand, website and online sales built by one team — and every page follows it: six disciplines explained in plain language, a four-stage way of working and the situations where working together makes sense. The enquiry form asks which area a project belongs to, and the Sunsoft assistant stays one tap away on desktop and phone.",
       "results": ""
+    },
+    "mehmet-altioklar": {
+      "name": "Mehmet Altıoklar",
+      "sector": "Coaching & keynote speaking",
+      "summary": "A personal website for Mehmet Altıoklar — executive coach, trainer, keynote speaker and author — built around his services, events and writing.",
+      "problem": "Mehmet Altıoklar has coached leaders and managers since 2014, runs leadership and personal-development workshops and gives opening keynotes at conferences and company events. He also writes, and storytelling sits at the centre of his work.",
+      "approach": "YOCA designed and built the website on WordPress with Elementor: a homepage, an about page, a page for each service — coaching, workshops and keynote talks — a blog and a contact page.",
+      "solution": "The homepage opens with his handwritten “ma” mark beside a black-and-white portrait, then moves through who he is, all services, upcoming events, a contact form and his latest posts. Black, warm grey and a single purple accent keep the site personal and calm; on phones the same story reads as one column.",
+      "results": ""
     }
   },
   "tr": {
@@ -131,6 +141,15 @@ const CONTENT: Record<Locale, Record<string, LocalizedFields>> = {
       "problem": "Sunsoft; marka, web, pazarlama, içerik, yapay zekâ ve dijital ürün hizmetlerini Azerbaycan pazarındaki şirketler için tek bir ekipte bir araya getiren bir dijital ajans.",
       "approach": "YOCA, Sunsoft’un web sitesini ve taşıdığı görsel dili tasarladı ve geliştirdi — Azerbaycanca, Türkçe, Rusça ve İngilizce, Next.js üzerinde: ana sayfa, altı hizmet sayfası, hakkımızda, blog ve proje talep formu.",
       "solution": "Mesaj tek cümle — marka, web sitesi ve online satış tek ekip tarafından — ve her sayfa onu izliyor: sade bir dille anlatılan altı disiplin, dört aşamalı çalışma biçimi ve birlikte çalışmanın anlamlı olduğu durumlar. Talep formu projenin hangi alana ait olduğunu soruyor; Sunsoft asistanı masaüstünde ve telefonda tek dokunuş uzakta duruyor.",
+      "results": ""
+    },
+    "mehmet-altioklar": {
+      "name": "Mehmet Altıoklar",
+      "sector": "Koçluk ve konuşmacılık",
+      "summary": "Yönetici koçu, eğitmen, konuşmacı ve yazar Mehmet Altıoklar için hizmetleri, etkinlikleri ve yazıları etrafında kurulan kişisel web sitesi.",
+      "problem": "Mehmet Altıoklar 2014’ten beri liderlere ve yöneticilere koçluk yapıyor; liderlik ve kişisel gelişim atölyeleri düzenliyor, konferans ve kurum etkinliklerinde açılış konuşmaları veriyor. Aynı zamanda yazıyor; işinin merkezinde hikâye anlatıcılığı var.",
+      "approach": "YOCA web sitesini WordPress ve Elementor ile tasarladı ve geliştirdi: ana sayfa, hakkında sayfası, her hizmet için ayrı bir sayfa — koçluk, atölyeler ve açılış konuşmaları — blog ve iletişim sayfası.",
+      "solution": "Ana sayfa, siyah-beyaz portrenin yanındaki el yazısı “ma” imzasıyla açılıyor; ardından kim olduğu, tüm hizmetler, yaklaşan etkinlikler, iletişim formu ve son yazılarla devam ediyor. Siyah, sıcak gri ve tek bir mor vurgu siteyi kişisel ve sakin tutuyor; telefonda aynı hikâye tek sütunda okunuyor.",
       "results": ""
     }
   },
@@ -170,6 +189,15 @@ const CONTENT: Record<Locale, Record<string, LocalizedFields>> = {
       "approach": "YOCA Sunsoft-un veb-saytını və onun daşıdığı vizual dili dizayn edib qurdu — Azərbaycan, türk, rus və ingilis dillərində, Next.js üzərində: ana səhifə, altı xidmət səhifəsi, haqqımızda, bloq və layihə sorğusu forması.",
       "solution": "Mesaj bir cümlədir — brend, sayt və onlayn satış bir komanda ilə — və hər səhifə onu izləyir: sadə dildə izah olunan altı istiqamət, dörd mərhələli iş qaydası və birgə işin məntiqli olduğu hallar. Sorğu forması layihənin hansı sahəyə aid olduğunu soruşur; Sunsoft köməkçisi masaüstündə və telefonda bir toxunuş məsafəsindədir.",
       "results": ""
+    },
+    "mehmet-altioklar": {
+      "name": "Mehmet Altıoklar",
+      "sector": "Kouçinq və spikerlik",
+      "summary": "İcraçı kouç, təlimçi, spiker və müəllif Mehmet Altıoklar üçün xidmətləri, tədbirləri və yazıları ətrafında qurulmuş şəxsi veb-sayt.",
+      "problem": "Mehmet Altıoklar 2014-cü ildən liderlərə və menecerlərə kouçinq edir, liderlik və şəxsi inkişaf emalatxanaları keçirir, konfrans və korporativ tədbirlərdə açılış nitqləri söyləyir. O, həm də yazır; işinin mərkəzində hekayə anlatma dayanır.",
+      "approach": "YOCA veb-saytı WordPress və Elementor üzərində dizayn edib qurdu: ana səhifə, haqqında səhifəsi, hər xidmət üçün ayrıca səhifə — kouçinq, emalatxanalar və açılış nitqləri — bloq və əlaqə səhifəsi.",
+      "solution": "Ana səhifə ağ-qara portretin yanındakı əl yazısı ilə “ma” imzası ilə açılır, sonra onun kim olduğu, bütün xidmətlər, qarşıdakı tədbirlər, əlaqə forması və son yazılarla davam edir. Qara, isti boz və tək bənövşəyi vurğu saytı şəxsi və sakit saxlayır; telefonda eyni hekayə bir sütunda oxunur.",
+      "results": ""
     }
   },
   "ar": {
@@ -207,6 +235,15 @@ const CONTENT: Record<Locale, Record<string, LocalizedFields>> = {
       "problem": "Sunsoft وكالة رقمية تجمع خدمات العلامة التجارية والويب والتسويق والمحتوى والذكاء الاصطناعي والمنتجات الرقمية في فريق واحد للشركات العاملة في السوق الأذربيجانية.",
       "approach": "صمّمت YOCA موقع Sunsoft واللغة البصرية التي يحملها وبنته — بالأذربيجانية والتركية والروسية والإنجليزية على Next.js: صفحة رئيسية وست صفحات خدمات وصفحة من نحن ومدونة ونموذج لطلب المشاريع.",
       "solution": "الرسالة جملة واحدة — العلامة والموقع والمبيعات عبر الإنترنت يبنيها فريق واحد — وكل صفحة تتبعها: ستة تخصصات مشروحة بلغة بسيطة، وطريقة عمل من أربع مراحل، والحالات التي يكون فيها التعاون منطقيًا. يسأل نموذج الطلب عن مجال المشروع، ويبقى مساعد Sunsoft على بُعد لمسة على سطح المكتب والهاتف.",
+      "results": ""
+    },
+    "mehmet-altioklar": {
+      "name": "Mehmet Altıoklar",
+      "sector": "التدريب والخطابة",
+      "summary": "موقع شخصي لـ Mehmet Altıoklar — مدرّب تنفيذي ومدرّب ومتحدث وكاتب — مبني حول خدماته وفعالياته وكتاباته.",
+      "problem": "يدرّب Mehmet Altıoklar القادة والمديرين منذ عام 2014، ويقدّم ورش عمل في القيادة والتطوير الشخصي، ويلقي الكلمات الافتتاحية في المؤتمرات وفعاليات الشركات. وهو كاتب أيضًا، وفي قلب عمله يقف فن السرد.",
+      "approach": "صمّمت YOCA الموقع وبنته على WordPress مع Elementor: صفحة رئيسية وصفحة تعريفية وصفحة لكل خدمة — التدريب وورش العمل والكلمات الافتتاحية — ومدونة وصفحة تواصل.",
+      "solution": "تفتتح الصفحة الرئيسية بتوقيع «ma» المكتوب بخط اليد بجانب صورة بالأبيض والأسود، ثم تنتقل إلى من هو، وجميع الخدمات، والفعاليات القادمة، ونموذج التواصل، وأحدث المقالات. الأسود والرمادي الدافئ ولمسة بنفسجية واحدة تُبقي الموقع شخصيًا وهادئًا؛ وعلى الهاتف تُقرأ القصة نفسها في عمود واحد.",
       "results": ""
     }
   }
