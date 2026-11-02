@@ -5,11 +5,12 @@ import { useEffect, useState } from 'react';
 import { getAdminClient } from '@/lib/adminClient';
 import { Card, CardLink, DailyBars, StatTile, StatusBadge } from '@/components/admin/cockpit/Widgets';
 import { TokenHelp } from '@/components/admin/cockpit/TokenHelp';
-import { LEAD_LABEL, LEAD_PILL, OPEN_STATUSES, adminApi, delta, fmtDate, fmtNumber, timeAgo } from '@/lib/cockpit/client';
+import { LEAD_LABEL, LEAD_PILL, OPEN_STATUSES, adminApi, delta, fmtDate, fmtNumber, istanbulToday, timeAgo } from '@/lib/cockpit/client';
 import { loadLeads, type Lead } from '@/lib/cockpit/leads';
 import { loadCrm, money, pipelineByCurrency, type CrmData } from '@/lib/cockpit/crm';
 import { siteIssues, type HealthResponse, type Severity } from '@/lib/cockpit/sites';
 import type { TrafficReport } from '@/lib/cockpit/vercel';
+import { getDefaultCaseStudyRows } from '@/lib/workData';
 
 /**
  * Yoca Admin — Kokpit.
@@ -24,17 +25,22 @@ interface ContentStats {
   drafts: number;
   scheduled: number;
   hiddenSections: number;
-  work: number;
+  /** case_studies rows in the database (null = table unreadable). */
+  work: number | null;
   team: number;
   spam7: number | null;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = istanbulToday;
+/** Shown when the case_studies table is empty: the public site then falls back to these code-defined projects. */
+const staticCaseStudyCount = getDefaultCaseStudyRows().length;
+const VERCEL_DASHBOARD = process.env.NEXT_PUBLIC_VERCEL_DASHBOARD_URL || 'https://vercel.com/mgs-projects-8dc47200/yoca-web';
 const DAY = 86_400_000;
 
 export default function Cockpit() {
   const [leads, setLeads] = useState<Lead[] | null>(null);
   const [leadsReady, setLeadsReady] = useState(true);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
   const [crm, setCrm] = useState<CrmData | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [week, setWeek] = useState<TrafficResponse | null>(null);
@@ -43,15 +49,30 @@ export default function Cockpit() {
 
   const load = (fresh = false) => {
     const q = fresh ? '&refresh=1' : '';
-    loadLeads().then((r) => {
-      setLeads(r.leads);
-      setLeadsReady(r.schemaReady);
-    });
-    loadCrm().then(setCrm);
-    adminApi<HealthResponse>(`/api/admin/health${fresh ? '?refresh=1' : ''}`).then(setHealth).catch(() => null);
-    adminApi<TrafficResponse>(`/api/admin/traffic?days=7${q}`).then(setWeek).catch(() => null);
-    adminApi<TrafficResponse>(`/api/admin/traffic?days=30${q}`).then(setMonth).catch(() => null);
-    loadContent().then(setContent);
+    if (fresh) {
+      setHealth(null);
+      setWeek(null);
+      setMonth(null);
+    }
+    loadLeads()
+      .then((r) => {
+        setLeads(r.leads);
+        setLeadsReady(r.schemaReady);
+        setLeadsError(r.error);
+      })
+      .catch((error: Error) => {
+        setLeads([]);
+        setLeadsError(error?.message || 'Leadler okunamadı.');
+      });
+    loadCrm()
+      .then(setCrm)
+      .catch(() => setCrm({ ready: false, clients: [], deals: [], activities: [] }));
+    adminApi<HealthResponse>(`/api/admin/health${fresh ? '?refresh=1' : ''}`).then(setHealth);
+    adminApi<TrafficResponse>(`/api/admin/traffic?days=7${q}`).then(setWeek);
+    adminApi<TrafficResponse>(`/api/admin/traffic?days=30${q}`).then(setMonth);
+    loadContent()
+      .then(setContent)
+      .catch(() => setContent({ drafts: 0, scheduled: 0, hiddenSections: 0, work: null, team: 0, spam7: null }));
   };
 
   useEffect(() => {
@@ -76,14 +97,17 @@ export default function Cockpit() {
   const checks = health?.checks ?? [];
   const sitesUp = checks.filter((c) => c.state === 'up' || c.state === 'slow').length;
   const latestProd = health?.deployments?.find((d) => d.target === 'production') ?? null;
+  const healthError = health && !health.ok ? health.error ?? 'Site kontrolü alınamadı.' : null;
 
   // ── Attention list ───────────────────────────────────────────
   const attention: Array<{ severity: Severity; text: string; href: string }> = [];
   for (const check of checks) for (const issue of siteIssues(check)) attention.push({ severity: issue.severity, text: `${check.name}: ${issue.text}`, href: '/admin/sites' });
-  if (latestProd && latestProd.state === 'ERROR') attention.push({ severity: 'critical', text: `Son yayın başarısız: “${latestProd.message}”`, href: 'https://vercel.com/mgs-projects-8dc47200/yoca-web' });
+  if (latestProd && latestProd.state === 'ERROR') attention.push({ severity: 'critical', text: `Son yayın başarısız: “${latestProd.message}”`, href: VERCEL_DASHBOARD });
   if (waiting.length) attention.push({ severity: 'warning', text: `${waiting.length} lead 24 saatten uzun süredir yanıt bekliyor`, href: '/admin/submissions?status=new' });
   if (lateFollowUps.length) attention.push({ severity: 'warning', text: `${lateFollowUps.length} lead için takip tarihi geçti`, href: '/admin/submissions' });
   if (lateTasks.length) attention.push({ severity: 'warning', text: `${lateTasks.length} görevin tarihi geçti`, href: '/admin/clients' });
+  if (healthError) attention.push({ severity: 'warning', text: `Site kontrolü yapılamadı: ${healthError}`, href: '/admin/sites' });
+  if (leadsError) attention.push({ severity: 'warning', text: `Leadler okunamadı: ${leadsError}`, href: '/admin/submissions' });
   if (leads && !leadsReady) attention.push({ severity: 'neutral', text: 'Kokpit veritabanı kurulumu bekliyor (SQL v8) — lead durumu, CRM ve spam kaydı için', href: '/admin/submissions' });
   if (week && week.configured === false) attention.push({ severity: 'neutral', text: 'Trafik için Vercel anahtarı eklenmedi', href: '/admin/traffic' });
   const order: Record<Severity, number> = { critical: 0, warning: 1, neutral: 2, good: 3 };
@@ -179,7 +203,12 @@ export default function Cockpit() {
               </div>
             </>
           ) : month && !month.ok ? (
-            <p className="text-[13px] text-subtle">Vercel verisi alınamadı: {month.error}</p>
+            <p className="text-[13px] text-subtle">
+              Vercel verisi alınamadı: {month.error ?? 'bilinmeyen hata'}{' '}
+              <button type="button" onClick={() => load(true)} className="font-bold text-white underline">
+                Tekrar dene
+              </button>
+            </p>
           ) : (
             <div className="h-44 animate-pulse rounded-sm bg-surface" />
           )}
@@ -216,6 +245,15 @@ export default function Cockpit() {
         <Card title="Müşteri siteleri" action={<CardLink href="/admin/sites">Detay</CardLink>}>
           {!health ? (
             <div className="h-32 animate-pulse rounded-sm bg-surface" />
+          ) : healthError ? (
+            <p className="text-[13px] text-subtle">
+              Kontrol alınamadı: {healthError}{' '}
+              <button type="button" onClick={() => load(true)} className="font-bold text-white underline">
+                Tekrar dene
+              </button>
+            </p>
+          ) : checks.length === 0 ? (
+            <p className="text-[13px] text-subtle">İzlenen site yok. <Link href="/admin/sites" className="underline">Siteler</Link>’den ekleyin.</p>
           ) : (
             <ul className="grid gap-2">
               {checks.map((c) => {
@@ -301,7 +339,7 @@ export default function Cockpit() {
             <li className="flex justify-between gap-3">
               <span className="text-subtle">Work projesi</span>
               <Link href="/admin/work" className="font-bold hover:text-yoca-lime">
-                {content ? (content.work || '4 (koddan)') : '…'}
+                {content ? (content.work === null ? '–' : content.work > 0 ? content.work : `${staticCaseStudyCount} (koddan)`) : '…'}
               </Link>
             </li>
             <li className="flex justify-between gap-3">
@@ -319,7 +357,7 @@ export default function Cockpit() {
 
 async function loadContent(): Promise<ContentStats> {
   const supabase = getAdminClient();
-  const empty = { drafts: 0, scheduled: 0, hiddenSections: 0, work: 0, team: 0, spam7: null };
+  const empty: ContentStats = { drafts: 0, scheduled: 0, hiddenSections: 0, work: null, team: 0, spam7: null };
   if (!supabase) return empty;
   const count = async (table: string, filter?: (q: any) => any): Promise<number | null> => {
     try {
@@ -340,5 +378,5 @@ async function loadContent(): Promise<ContentStats> {
     count('team_members'),
     count('spam_log', (q) => q.gte('created_at', since)),
   ]);
-  return { drafts: drafts ?? 0, scheduled: scheduled ?? 0, hiddenSections: hiddenSections ?? 0, work: work ?? 0, team: team ?? 0, spam7 };
+  return { drafts: drafts ?? 0, scheduled: scheduled ?? 0, hiddenSections: hiddenSections ?? 0, work, team: team ?? 0, spam7 };
 }
