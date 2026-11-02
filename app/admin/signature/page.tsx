@@ -119,7 +119,7 @@ export default function SignaturePage() {
           <div role="radiogroup" aria-labelledby="color-label" className="flex flex-wrap items-center gap-2">
             {(
               [
-                ['inherit', 'Sitenin yazı rengi', 'Footer’daki yazı rengini kullanır (çoğu tema için en doğal sonuç).'],
+                ['inherit', 'Sitenin yazı rengi', 'Temanın footer’daki link/yazı rengini kullanır (çoğu tema için en doğal sonuç).'],
                 ['auto', 'Zemine göre otomatik', 'Arkasındaki zemin koyuysa beyaz, açıksa siyah olur.'],
                 ['light', 'Beyaz', 'Koyu zeminler için.'],
                 ['dark', 'Siyah', 'Açık zeminler için.'],
@@ -151,7 +151,7 @@ export default function SignaturePage() {
             {color === 'auto'
               ? 'Küçük bir kod parçası zemin rengini okur. Fotoğraflı veya gradyanlı zeminlerde düz renk görmezse siyah seçer; o durumda Beyaz/Siyah’ı elle seçin.'
               : color === 'inherit'
-                ? 'Footer’ın yazı rengini kullanır; temanın rengi değişirse imza da değişir.'
+                ? 'Temanın footer link/yazı rengini kullanır; tema ana rengi verirse imza da o renkte olur. Kesin beyaz/siyah için Beyaz veya Siyah’ı seçin.'
                 : 'Sabit renk; zemin ne olursa olsun bu renkte görünür.'}
           </p>
           <label className="flex items-center gap-2 text-[13px] font-bold text-muted">
