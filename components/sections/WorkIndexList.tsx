@@ -80,11 +80,14 @@ export default function WorkIndexList({ studies, base, viewCase, status }: WorkI
                 {study.name}
               </motion.span>
               <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] font-bold uppercase tracking-[0.1em] text-subtle">
-                <span>{study.sector}</span>
-                <span aria-hidden="true" className="h-3 w-px bg-line" />
-                <span>{study.services.join(' · ')}</span>
-                <span aria-hidden="true" className="h-3 w-px bg-line" />
-                <span>{study.year}</span>
+                {[study.sector, study.services.join(' · '), study.year]
+                  .filter(Boolean)
+                  .map((part, partIndex) => (
+                    <span key={part} className="flex items-center gap-x-3">
+                      {partIndex > 0 && <span aria-hidden="true" className="h-3 w-px bg-line" />}
+                      <span>{part}</span>
+                    </span>
+                  ))}
               </span>
             </span>
             <span className="flex items-center gap-4 md:justify-self-end">

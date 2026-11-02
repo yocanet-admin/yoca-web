@@ -54,6 +54,7 @@ const STATUS_STYLE: Record<CaseStudy['kind'], string> = {
   concept: 'bg-[#050505] text-white',
   product: 'bg-yoca-green text-black',
   experimental: 'bg-[#E4E4DF] text-[#050505]',
+  venture: 'bg-[#E4E4DF] text-[#050505]',
 };
 
 export default function WorkGrid({ studies, base, labels }: WorkGridProps) {
@@ -76,14 +77,14 @@ export default function WorkGrid({ studies, base, labels }: WorkGridProps) {
     if (filter === 'all') return true;
     if (filter === 'client') return study.kind === 'client';
     if (filter === 'concept') return study.kind === 'concept';
-    return study.kind === 'product' || study.kind === 'experimental';
+    return study.kind === 'product' || study.kind === 'experimental' || study.kind === 'venture';
   });
 
   // Only show filters that actually have content — no empty "Client Case
   // Studies" tab while every project is a concept.
   const hasClient = studies.some((study) => study.kind === 'client');
   const hasConcept = studies.some((study) => study.kind === 'concept');
-  const hasProduct = studies.some((study) => study.kind === 'product' || study.kind === 'experimental');
+  const hasProduct = studies.some((study) => study.kind === 'product' || study.kind === 'experimental' || study.kind === 'venture');
   const tabs: Array<{ key: Filter; label: string }> = [
     { key: 'all', label: labels.all },
     ...(hasClient ? [{ key: 'client' as Filter, label: labels.clients }] : []),
@@ -151,7 +152,7 @@ export default function WorkGrid({ studies, base, labels }: WorkGridProps) {
                 >
                   <Link
                     href={`${base}/work/${study.slug}`}
-                    className="group block h-full"
+                    className="group flex h-full flex-col"
                     aria-label={`${study.name} — ${labels.viewCase}`}
                     onMouseEnter={() => setHovered(study.slug)}
                     onMouseLeave={() => setHovered(null)}
@@ -179,7 +180,7 @@ export default function WorkGrid({ studies, base, labels }: WorkGridProps) {
 
                     {/* Typographic tile — the honest treatment while authentic media is unavailable */}
                     <span
-                      className={`light-card relative flex h-full flex-col justify-between overflow-hidden rounded-sm transition-colors duration-300 group-hover:border-[#050505] ${
+                      className={`light-card relative flex flex-1 flex-col justify-between overflow-hidden rounded-sm transition-colors duration-300 group-hover:border-[#050505] ${
                         featured ? 'min-h-[300px] p-8 lg:min-h-[360px] lg:p-12' : slot.variant === 'portrait' ? 'min-h-[300px] p-7 lg:p-8' : 'min-h-[260px] p-7 lg:p-9'
                       }`}
                     >
@@ -211,11 +212,14 @@ export default function WorkGrid({ studies, base, labels }: WorkGridProps) {
                           {study.name}
                         </span>
                         <span className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-bold uppercase tracking-[0.1em] light-subtle">
-                          <span>{study.sector}</span>
-                          <span aria-hidden="true" className="h-3 w-px bg-[rgba(5,5,5,0.2)]" />
-                          <span>{study.services.join(' · ')}</span>
-                          <span aria-hidden="true" className="h-3 w-px bg-[rgba(5,5,5,0.2)]" />
-                          <span>{study.year}</span>
+                          {[study.sector, study.services.join(' · '), study.year]
+                            .filter(Boolean)
+                            .map((part, partIndex) => (
+                              <span key={part} className="flex items-center gap-x-3">
+                                {partIndex > 0 && <span aria-hidden="true" className="h-3 w-px bg-[rgba(5,5,5,0.2)]" />}
+                                <span>{part}</span>
+                              </span>
+                            ))}
                         </span>
                         {slot.variant !== 'portrait' && (
                           <span className={`light-muted mt-4 block text-[15px] leading-relaxed ${featured ? 'max-w-[56ch] lg:text-[16px]' : 'max-w-[44ch]'}`}>
