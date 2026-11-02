@@ -125,7 +125,7 @@ export default async function CaseStudyPage({ params }: PageProps) {
             [t.work.sector, study.sector],
             [t.work.market, study.market],
             [t.work.year, study.year],
-            [t.work.servicesLabel, study.services.join(', ')],
+            [t.work.servicesLabel, study.services.join(ctx.locale === 'ar' ? '، ' : ', ')],
           ]
             .filter(([, value]) => Boolean(value))
             .map(([label, value]) => (

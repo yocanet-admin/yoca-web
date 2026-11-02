@@ -1,7 +1,7 @@
 import { cache } from 'react';
 import { getSupabase } from '@/lib/supabase';
 import type { CaseStudyRow, Locale } from '@/types';
-import { staticCaseStudies, type CaseStudy } from '@/lib/workData';
+import { staticCaseStudies, type CaseStudy, localizeMarket, localizeServices } from '@/lib/workData';
 
 /**
  * Yoca — selected work / case studies (server data layer).
@@ -36,9 +36,9 @@ function rowToCaseStudy(row: CaseStudyRow, locale: Locale): CaseStudy | null {
   return {
     slug: row.slug,
     year: row.year,
-    market: row.market,
+    market: localizeMarket(row.market ?? '', locale),
     image: row.image_url,
-    services: row.services ?? [],
+    services: localizeServices(row.services ?? [], locale),
     kind: (['client', 'concept', 'product', 'experimental', 'venture'] as const).includes(row.kind)
       ? row.kind
       : 'client',
