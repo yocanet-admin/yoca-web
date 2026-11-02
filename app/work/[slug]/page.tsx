@@ -65,7 +65,11 @@ export default async function CaseStudyPage({ params }: PageProps) {
         ? t.work.statusConcept
         : study.kind === 'product'
           ? t.work.statusProduct
-          : t.work.statusExp;
+          : study.kind === 'venture'
+            ? t.work.statusVenture
+            : t.work.statusExp;
+  /** Verified outcome only: module 4 shows its heading when a real result exists. */
+  const hasResults = Boolean(study.results?.trim()) || Boolean(study.stats?.length);
   const index = all.findIndex((cs) => cs.slug === study.slug);
   const prev = index > 0 ? all[index - 1] : null;
   const next = index < all.length - 1 ? all[index + 1] : null;
@@ -122,7 +126,9 @@ export default async function CaseStudyPage({ params }: PageProps) {
             [t.work.market, study.market],
             [t.work.year, study.year],
             [t.work.servicesLabel, study.services.join(', ')],
-          ].map(([label, value]) => (
+          ]
+            .filter(([, value]) => Boolean(value))
+            .map(([label, value]) => (
             <span key={label} className="grid gap-1">
               <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-subtle">{label}</span>
               <span className="text-[14px] font-semibold text-soft">{value}</span>
@@ -175,7 +181,7 @@ export default async function CaseStudyPage({ params }: PageProps) {
           <section className="relative z-[7] bg-surface-deep py-16 lg:py-24">
             <div className="container-y grid gap-14 lg:gap-24">
               {media.desktop?.[0] && (
-                <ParallaxMedia src={media.desktop[0]} alt={`${study.name} — ${t.work.statusConcept}`} width={1920} height={1200} />
+                <ParallaxMedia src={media.desktop[0]} alt={`${study.name} — ${statusLabel}`} width={1920} height={1200} />
               )}
 
               {(media.desktop?.[1] || media.mobile?.length) && (
@@ -183,7 +189,7 @@ export default async function CaseStudyPage({ params }: PageProps) {
                   <p className="eyebrow mb-8">{t.work.screensLabel}</p>
                   <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-8">
                     {media.desktop?.[1] && (
-                      <ParallaxMedia src={media.desktop[1]} alt={`${study.name} — ${t.work.statusConcept} 02`} width={1920} height={1200} className="self-start" />
+                      <ParallaxMedia src={media.desktop[1]} alt={`${study.name} — ${statusLabel} 02`} width={1920} height={1200} className="self-start" />
                     )}
                     {media.mobile && media.mobile.length > 0 && (
                       <div className="grid grid-cols-2 gap-6 lg:gap-8">
@@ -208,7 +214,7 @@ export default async function CaseStudyPage({ params }: PageProps) {
                   <CaseStudyVideo
                     src={media.interaction.video}
                     poster={media.interaction.poster}
-                    alt={`${study.name} — ${t.work.statusConcept}`}
+                    alt={`${study.name} — ${statusLabel}`}
                   />
                 </div>
               )}
@@ -217,14 +223,20 @@ export default async function CaseStudyPage({ params }: PageProps) {
         )}
 
         {/* Module 4: Verified Results — narrative + stat bars */}
-        <section className="relative z-[7] border-t border-line bg-surface py-16 lg:py-24">
-          <div className="container-y grid gap-10 md:grid-cols-[minmax(200px,1fr)_2fr] md:gap-8">
+        {/* Without a verified result only the live link remains — no empty "Verified Results". */}
+        {(hasResults || study.liveUrl) && (
+        <section className={`relative z-[7] border-t border-line bg-surface ${hasResults ? 'py-16 lg:py-24' : 'py-12 lg:py-16'}`}>
+          <div className={`container-y grid gap-10 md:gap-8 ${hasResults ? 'md:grid-cols-[minmax(200px,1fr)_2fr]' : ''}`}>
+            {hasResults && (
             <div>
               <span className="text-[13px] font-extrabold tracking-[0.1em] text-yoca-lime">04</span>
               <h2 className="mt-2 text-xl font-extrabold">{resultsHeading}</h2>
             </div>
+            )}
             <div>
-              <p className="max-w-[62ch] text-[17px] leading-[1.8] text-soft">{study.results}</p>
+              {study.results?.trim() && (
+                <p className="max-w-[62ch] text-[17px] leading-[1.8] text-soft">{study.results}</p>
+              )}
               {study.stats && study.stats.length > 0 && (
                 <div className="mt-9 grid gap-5">
                   {study.stats.map((stat) => (
@@ -255,7 +267,7 @@ export default async function CaseStudyPage({ params }: PageProps) {
                   href={study.liveUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="btn-ghost mt-8"
+                  className={`btn-ghost ${hasResults ? 'mt-8' : ''}`}
                 >
                   {t.work.liveLabel} ↗
                 </a>
@@ -263,6 +275,7 @@ export default async function CaseStudyPage({ params }: PageProps) {
             </div>
           </div>
         </section>
+        )}
 
         {/* Module 5: Client Quote — renders only when a real quote exists */}
         {study.quote && (
