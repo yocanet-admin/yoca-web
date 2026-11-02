@@ -6,6 +6,7 @@ import type { Locale } from '@/types';
 import FlowDiagram from '@/components/ui/FlowDiagram';
 import Honeypot from '@/components/ui/Honeypot';
 import { track } from '@vercel/analytics';
+import { refData } from '@/lib/signatureRef';
 
 /** Yoca — contact form (client): validates, posts to /api/contact. */
 
@@ -101,7 +102,7 @@ export default function ContactForm({
       });
       const result = (await response.json()) as { ok: boolean; message?: string; error?: string };
       if (response.ok && result.ok) {
-        track('contact_submit', { locale });
+        track('contact_submit', { locale, ...refData() });
         setSuccessMessage(result.message || t.success);
         setStatus('success');
       } else {
