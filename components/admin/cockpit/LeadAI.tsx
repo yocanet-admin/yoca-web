@@ -14,7 +14,18 @@ import type { AiSummary, Lead } from '@/lib/cockpit/leads';
 const LEVEL: Record<AiSummary['aciliyet'], 'good' | 'warning' | 'critical'> = { düşük: 'good', orta: 'warning', yüksek: 'critical' };
 const SPAM: Record<AiSummary['spam_olasiligi'], 'good' | 'warning' | 'critical'> = { düşük: 'good', orta: 'warning', yüksek: 'critical' };
 
-export function LeadAI({ lead, onSummary, onNote }: { lead: Lead; onSummary: (summary: AiSummary, at: string) => void; onNote: (text: string) => void }) {
+export function LeadAI({
+  lead,
+  currentNote,
+  onSummary,
+  onNote,
+}: {
+  lead: Lead;
+  /** The note as currently shown in the editor (may hold unsaved typing); the AI line is appended to this. */
+  currentNote?: string;
+  onSummary: (summary: AiSummary, at: string) => void;
+  onNote: (text: string) => void;
+}) {
   const [busy, setBusy] = useState<'summary' | 'reply' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reply, setReply] = useState<{ konu: string; metin: string } | null>(null);
@@ -93,7 +104,7 @@ export function LeadAI({ lead, onSummary, onNote }: { lead: Lead; onSummary: (su
             <button
               type="button"
               className="underline hover:text-white"
-              onClick={() => onNote([lead.note, `AI özeti: ${summary.ozet} Sonraki adım: ${summary.sonraki_adim}`].filter(Boolean).join('\n'))}
+              onClick={() => onNote([currentNote ?? lead.note, `AI özeti: ${summary.ozet} Sonraki adım: ${summary.sonraki_adim}`].filter(Boolean).join('\n'))}
             >
               Nota ekle
             </button>

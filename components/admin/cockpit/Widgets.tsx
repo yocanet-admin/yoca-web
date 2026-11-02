@@ -168,7 +168,9 @@ export function DailyBars({ data, label }: { data: Array<{ date: string; value: 
           </p>
         </div>
       )}
-      <table className="sr-only">
+      {/* Tables ignore height:1px, so the visually-hidden wrapper must be a block (a bare sr-only table stretched the page ~800px). */}
+      <div className="sr-only">
+      <table>
         <caption>{label}</caption>
         <tbody>
           {data.map((d) => (
@@ -179,6 +181,7 @@ export function DailyBars({ data, label }: { data: Array<{ date: string; value: 
           ))}
         </tbody>
       </table>
+      </div>
     </figure>
   );
 }
