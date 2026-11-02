@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { CHECKUP_WEIGHTS, getDict } from '@/lib/i18n';
@@ -113,7 +114,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: dict.checkup.errorGeneric }, { status: 503 });
   }
 
+  const id = randomUUID();
   const { error } = await supabase.from('checkup_submissions').insert({
+    id,
     data_json: answers,
     contact_info_json: { name, company, email, phone, locale, score: finalScore },
   });
@@ -123,7 +126,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: dict.checkup.errorGeneric }, { status: 500 });
   }
 
-  await notifyCheckup({ name, email, company, phone, locale, score: finalScore, answers });
+  await notifyCheckup({ id, name, email, company, phone, locale, score: finalScore, answers });
 
   return NextResponse.json({ ok: true, score: finalScore });
 }
