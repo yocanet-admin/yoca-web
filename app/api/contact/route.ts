@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getDict } from '@/lib/i18n';
@@ -91,16 +92,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: dict.checkup.errorGeneric }, { status: 503 });
   }
 
-  const { error } = await supabase
-    .from('contact_submissions')
-    .insert({ name, email, company, message, locale });
+  const id = randomUUID();
+  const { error } = await supabase.from('contact_submissions').insert({ id, name, email, company, message, locale });
 
   if (error) {
     console.error('contact insert failed:', error.message);
     return NextResponse.json({ ok: false, error: dict.checkup.errorGeneric }, { status: 500 });
   }
 
-  await notifyContact({ name, email, company, message, locale });
+  await notifyContact({ id, name, email, company, message, locale });
 
   return NextResponse.json({ ok: true, message: dict.contact.success });
 }
