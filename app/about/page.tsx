@@ -10,6 +10,7 @@ import SectionWrapper from '@/components/SectionWrapper';
 import Reveal from '@/components/ui/Reveal';
 import BrandMark from '@/components/ui/BrandMark';
 import Manifesto from '@/components/ui/Manifesto';
+import PageVisual from '@/components/ui/PageVisual';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { buildMetadata, breadcrumbSchema, getRequestContext, jsonLdString } from '@/lib/seo';
@@ -22,6 +23,7 @@ export function generateMetadata(): Metadata {
     path: '/about',
     title: t.about.metaTitle,
     description: t.about.metaDescription,
+    ogImagePath: '/visuals/og/about.jpg',
   });
 }
 
@@ -64,6 +66,7 @@ export default async function AboutPage() {
       <main id="main">
         {/* ── Intro ─────────────────────────────────────────────── */}
         <PageIntro eyebrow={a.eyebrow} title={a.heading} sub={a.sub} subTone="lime" titleMax="max-w-[22ch]" />
+        <PageVisual src="/visuals/about.webp" priority />
 
         {/* ── Editorial spread: sticky manifesto + flowing methodology ── */}
         <section className="relative z-[7] border-t border-line bg-surface py-16 lg:py-28">
