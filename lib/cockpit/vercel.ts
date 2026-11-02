@@ -100,8 +100,11 @@ export async function trafficReport(days: number): Promise<TrafficReport> {
     }).catch(() => ({ data: [] })),
   ]);
 
-  const rows = (list: AggregateResponse<Record<string, string>>, key: string) =>
-    (list.data ?? []).map((row) => ({ label: row[key] || '—', pageviews: row.pageviews ?? 0, visitors: row.visitors ?? 0 }));
+  // Sorted by the figure the cockpit shows: page views for pages, visitors for the rest.
+  const rows = (list: AggregateResponse<Record<string, string>>, key: string, sortBy: keyof Visits = 'visitors') =>
+    (list.data ?? [])
+      .map((row) => ({ label: row[key] || '—', pageviews: row.pageviews ?? 0, visitors: row.visitors ?? 0 }))
+      .sort((a, b) => b[sortBy] - a[sortBy]);
 
   return {
     range: { days, since, until },
@@ -110,7 +113,7 @@ export async function trafficReport(days: number): Promise<TrafficReport> {
     daily: (daily.data ?? [])
       .map((row) => ({ date: row.timestamp.slice(0, 10), pageviews: row.pageviews ?? 0, visitors: row.visitors ?? 0 }))
       .filter((row) => row.date < until),
-    pages: rows(pages, 'requestPath'),
+    pages: rows(pages, 'requestPath', 'pageviews'),
     referrers: rows(referrers, 'referrerHostname'),
     countries: rows(countries, 'country'),
     devices: rows(devices, 'deviceType'),

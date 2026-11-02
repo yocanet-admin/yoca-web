@@ -78,24 +78,37 @@ function registrableDomain(hostname: string): string {
   return twoLevel.includes(lastTwo) ? parts.slice(-3).join('.') : lastTwo;
 }
 
-async function domainExpiry(hostname: string): Promise<string | null> {
+/** RDAP endpoints asked directly (rdap.org is only a redirector and can refuse datacentre traffic). */
+const RDAP_DIRECT: Record<string, string> = {
+  com: 'https://rdap.verisign.com/com/v1/domain/',
+  net: 'https://rdap.verisign.com/net/v1/domain/',
+  org: 'https://rdap.publicinterestregistry.org/rdap/domain/',
+};
+
+async function rdapExpiry(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    const response = await fetch(`https://rdap.org/domain/${registrableDomain(hostname)}`, {
+    const response = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: 'application/rdap+json' },
+      headers: { Accept: 'application/rdap+json, application/json', 'User-Agent': 'YocaCockpit/1.0 (+https://yoca.net)' },
       redirect: 'follow',
       cache: 'no-store',
     });
-    clearTimeout(timer);
     if (!response.ok) return null;
     const data = (await response.json()) as { events?: Array<{ eventAction?: string; eventDate?: string }> };
-    const event = data.events?.find((e) => e.eventAction === 'expiration');
-    return event?.eventDate ?? null;
+    return data.events?.find((e) => e.eventAction === 'expiration')?.eventDate ?? null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+async function domainExpiry(hostname: string): Promise<string | null> {
+  const domain = registrableDomain(hostname);
+  const direct = RDAP_DIRECT[domain.split('.').pop() ?? ''];
+  return (direct ? await rdapExpiry(direct + domain) : null) ?? (await rdapExpiry(`https://rdap.org/domain/${domain}`));
 }
 
 async function fetchPage(url: string): Promise<{ status: number; ms: number; finalUrl: string; html: string }> {
