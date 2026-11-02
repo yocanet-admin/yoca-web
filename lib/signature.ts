@@ -1,8 +1,9 @@
 /**
  * Yoca — "Built by YOCA" signature for client sites (WordPress etc.).
  * Self-contained HTML (inline SVG + scoped CSS): paste into a "Custom HTML"
- * block. The wordmark letters use currentColor so they follow the footer's
- * text colour; the brand squares keep their lime/green.
+ * block. Colour modes: the footer's own text colour (default), automatic
+ * white/black from the background behind it, fixed white/black, or a custom
+ * colour. The brand squares keep lime/green unless "tek renk" is chosen.
  * Path data is the official wordmark (public/brand/yoca-logo-light-bg.svg).
  */
 
@@ -19,33 +20,59 @@ const PATHS: Array<{ fill: string; d: string }> = [
 export interface SignatureOptions {
   /** Text before the logo, e.g. "Built by". */
   label: string;
-  /** Centre the signature in its container. */
+  /** Position in its container (default: left). */
+  align?: SignatureAlign;
+  /** Text/wordmark colour mode (default: inherit = footer text colour). */
+  color?: SignatureColor;
+  /** Hex colour for color: 'custom'. */
+  customColor?: string;
+  /** false = the whole logo in one colour (no lime/green squares). */
+  brandColors?: boolean;
+  /** @deprecated use align: 'center' */
   center?: boolean;
 }
+
+export type SignatureAlign = 'left' | 'center' | 'right';
+export type SignatureColor = 'inherit' | 'auto' | 'light' | 'dark' | 'custom';
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-export function buildSignature({ label, center = false }: SignatureOptions): string {
+const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+/** Runs once where the snippet is pasted: finds the first solid background behind the signature and picks white or near-black text. */
+const AUTO_SCRIPT = `<script>(function(){var s=document.currentScript,w=s&&s.previousElementSibling,a=w&&w.querySelector('.yoca-credit');if(!a)return;var e=w,rgb=[255,255,255];while(e&&e.nodeType===1){var m=getComputedStyle(e).backgroundColor.match(/[\\d.]+/g);if(m&&m.length>=3&&(m.length<4||+m[3]>0.5)){rgb=m;break}e=e.parentElement}var l=(0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])/255;a.style.color=l>0.55?'#111111':'#ffffff';a.style.opacity='.8'})();</script>`;
+
+export function buildSignature({ label, align, color = 'inherit', customColor = '', brandColors = true, center = false }: SignatureOptions): string {
+  const position: SignatureAlign = align ?? (center ? 'center' : 'left');
   const text = escapeHtml(label.trim() || 'Built by');
-  const svg = PATHS.map((p) => `      <path fill="${p.fill}" d="${p.d}"/>`).join('\n');
-  return `<!-- YOCA imzası — WordPress: "Özel HTML" bloğuna olduğu gibi yapıştırın. Harfler footer'ın yazı rengini alır. -->
+  const fixed =
+    color === 'light' ? '#ffffff' : color === 'dark' ? '#111111' : color === 'custom' && HEX.test(customColor.trim()) ? customColor.trim() : 'inherit';
+  const svg = PATHS.map((p) => `      <path fill="${brandColors ? p.fill : 'currentColor'}" d="${p.d}"/>`).join('\n');
+  const note =
+    color === 'auto'
+      ? 'Yazı rengi, imzanın arkasındaki zemine göre otomatik beyaz/siyah seçilir.'
+      : fixed === 'inherit'
+        ? "Harfler footer'ın yazı rengini alır."
+        : `Yazı rengi sabit: ${fixed}.`;
+  return `<!-- YOCA imzası — WordPress: "Özel HTML" bloğuna olduğu gibi yapıştırın. ${note} -->
 <style>
   .yoca-credit-wrap{display:flex;justify-content:flex-start;padding:12px 0}
   .yoca-credit-wrap.yoca-credit--center{justify-content:center}
-  .yoca-credit{display:inline-flex;align-items:center;gap:8px;color:inherit;text-decoration:none;font:500 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;letter-spacing:.04em;opacity:.72;transition:opacity .2s ease}
-  .yoca-credit:hover,.yoca-credit:focus-visible{opacity:1;text-decoration:none;color:inherit}
+  .yoca-credit-wrap.yoca-credit--right{justify-content:flex-end}
+  .yoca-credit{display:inline-flex;align-items:center;gap:8px;color:${fixed};text-decoration:none;font:500 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;letter-spacing:.04em;opacity:.72;transition:opacity .2s ease}
+  .yoca-credit:hover,.yoca-credit:focus-visible{opacity:1;text-decoration:none;color:${fixed}}
   .yoca-credit:focus-visible{outline:2px solid currentColor;outline-offset:4px;border-radius:2px}
   .yoca-credit svg{display:block;height:14px;width:auto;flex:none}
 </style>
-<div class="yoca-credit-wrap${center ? ' yoca-credit--center' : ''}">
+<div class="yoca-credit-wrap${position === 'left' ? '' : ` yoca-credit--${position}`}">
   <a class="yoca-credit" href="https://yoca.net" target="_blank" rel="noopener" aria-label="${text} YOCA">
     <span>${text}</span>
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 69.05" aria-hidden="true" focusable="false">
 ${svg}
     </svg>
   </a>
-</div>
+</div>${color === 'auto' ? `\n${AUTO_SCRIPT}` : ''}
 `;
 }
