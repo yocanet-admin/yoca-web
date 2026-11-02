@@ -63,7 +63,11 @@ export interface TrafficReport {
   countries: Array<{ label: string } & Visits>;
   devices: Array<{ label: string } & Visits>;
   events: Array<{ name: string; count: number; visitors: number }>;
-  /** "Built by YOCA" signature visits per client site (signature_visit event). */
+  /**
+   * "Built by YOCA" signature visits per client site: the signature_visit event
+   * (links with UTM) or, for older plain links, visits referred by a monitored
+   * client domain — whichever is higher, so one click is never counted twice.
+   */
   signatures: Array<{ label: string; count: number; visitors: number }>;
 }
 
@@ -77,7 +81,11 @@ function day(offset: number): string {
 /** Conversion events sent with track() from the public site. */
 export const CONVERSION_EVENTS = ['cta_click', 'checkup_start', 'checkup_submit', 'contact_submit'] as const;
 
-export async function trafficReport(days: number): Promise<TrafficReport> {
+const DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+const bare = (host: string) => host.toLowerCase().replace(/^www\./, '');
+
+/** siteDomains: monitored client sites (e.g. "mehmetaltioklar.com") whose referred visits count as signature clicks. */
+export async function trafficReport(days: number, siteDomains: string[] = []): Promise<TrafficReport> {
   // `until` is inclusive and day-granular: tomorrow (UTC) covers today.
   const since = day(-(days - 1));
   const until = day(1);
@@ -87,7 +95,10 @@ export async function trafficReport(days: number): Promise<TrafficReport> {
   const top = (by: string, limit = 8) =>
     get<AggregateResponse<Record<string, string>>>('/v1/query/web-analytics/visits/aggregate', { ...base, by: [by], limit });
 
-  const [totals, previous, daily, pages, referrers, countries, devices, events, signatures] = await Promise.all([
+  const domains = Array.from(new Set(siteDomains.map(bare).filter((d) => DOMAIN.test(d)))).slice(0, 40);
+  const hosts = domains.flatMap((d) => [d, `www.${d}`]);
+
+  const [totals, previous, daily, pages, referrers, countries, devices, events, signatures, siteReferrers] = await Promise.all([
     get<CountResponse>('/v1/query/web-analytics/visits/count', base),
     get<CountResponse>('/v1/query/web-analytics/visits/count', { projectId: PROJECT_ID, since: prevSince, until: prevUntil }),
     get<AggregateResponse<{ timestamp: string }>>('/v1/query/web-analytics/visits/aggregate', { ...base, by: ['day'] }),
@@ -106,7 +117,37 @@ export async function trafficReport(days: number): Promise<TrafficReport> {
       filter: "eventName eq 'signature_visit'",
       limit: 50,
     }).catch(() => ({ data: [] })),
+    hosts.length
+      ? get<AggregateResponse<Record<string, string>>>('/v1/query/web-analytics/visits/aggregate', {
+          ...base,
+          by: ['referrerHostname'],
+          filter: `referrerHostname in (${hosts.map((h) => `'${h}'`).join(',')})`,
+          limit: 100,
+        }).catch(() => ({ data: [] }) as AggregateResponse<Record<string, string>>)
+      : Promise.resolve({ data: [] } as AggregateResponse<Record<string, string>>),
   ]);
+
+  // signature_visit events per site
+  const bySite = new Map<string, { count: number; visitors: number }>();
+  for (const row of (signatures.data ?? []) as Array<Record<string, string | number>>) {
+    const label = Object.entries(row).find(([key, value]) => typeof value === 'string' && key !== 'timestamp')?.[1];
+    const count = Number(row.count ?? 0);
+    if (!label || !count) continue;
+    bySite.set(String(label), { count, visitors: Number(row.visitors ?? 0) });
+  }
+  // visits referred by a monitored client site (older signatures without UTM)
+  const referred = new Map<string, { count: number; visitors: number }>();
+  for (const row of siteReferrers.data ?? []) {
+    const host = bare(String(row.referrerHostname ?? ''));
+    if (!host) continue;
+    const prev = referred.get(host) ?? { count: 0, visitors: 0 };
+    referred.set(host, { count: prev.count + (row.pageviews ?? 0), visitors: prev.visitors + (row.visitors ?? 0) });
+  }
+  for (const [host, ref] of Array.from(referred.entries())) {
+    const ev = bySite.get(host);
+    // a UTM click from the same site usually carries the referrer too → take the larger, never the sum
+    if (!ev || ref.visitors > ev.visitors) bySite.set(host, { count: Math.max(ev?.count ?? 0, ref.visitors), visitors: Math.max(ev?.visitors ?? 0, ref.visitors) });
+  }
 
   // Sorted by the figure the cockpit shows: page views for pages, visitors for the rest.
   const rows = (list: AggregateResponse<Record<string, string>>, key: string, sortBy: keyof Visits = 'visitors') =>
@@ -126,13 +167,8 @@ export async function trafficReport(days: number): Promise<TrafficReport> {
     countries: rows(countries, 'country'),
     devices: rows(devices, 'deviceType'),
     events: (events.data ?? []).map((row) => ({ name: row.eventName, count: row.count ?? 0, visitors: row.visitors ?? 0 })),
-    signatures: (signatures.data ?? [])
-      .map((row) => {
-        // the dimension comes back under its own key (e.g. "eventData/site"); take the first text value
-        const label = Object.entries(row).find(([key, value]) => typeof value === 'string' && key !== 'timestamp')?.[1];
-        return { label: String(label || '—'), count: Number(row.count ?? 0), visitors: Number(row.visitors ?? 0) };
-      })
-      .filter((row) => row.label !== '—' && row.count > 0)
+    signatures: Array.from(bySite.entries())
+      .map(([label, v]) => ({ label, ...v }))
       .sort((a, b) => b.count - a.count),
   };
 }
