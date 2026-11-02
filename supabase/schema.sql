@@ -86,7 +86,7 @@ create table if not exists public.case_studies (
   order_index integer not null default 0,
   is_active boolean not null default true,
   -- work status: client case study / concept project / Yoca product / experimental
-  kind text not null default 'client' check (kind in ('client', 'concept', 'product', 'experimental')),
+  kind text not null default 'client' check (kind in ('client', 'concept', 'product', 'experimental', 'venture')),
   -- optional hover-preview video for the Work grid
   video_url text,
   -- optional live/interactive project link (case detail page)
