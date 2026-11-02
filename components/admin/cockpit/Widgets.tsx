@@ -186,10 +186,11 @@ export function DailyBars({ data, label }: { data: Array<{ date: string; value: 
 /** Ranked list with thin proportional bars (top pages, referrers, countries). */
 export function RankList({ rows, empty = 'Veri yok.', format }: { rows: Array<{ label: string; value: number }>; empty?: string; format?: (label: string) => string }) {
   if (rows.length === 0) return <p className="text-[13px] text-subtle">{empty}</p>;
-  const max = Math.max(1, ...rows.map((r) => r.value));
+  const sorted = [...rows].sort((a, b) => b.value - a.value);
+  const max = Math.max(1, ...sorted.map((r) => r.value));
   return (
     <ul className="grid gap-2.5">
-      {rows.map((row) => (
+      {sorted.map((row) => (
         <li key={row.label} className="grid gap-1">
           <div className="flex items-baseline justify-between gap-3 text-[13px]">
             <span className="min-w-0 truncate text-soft" title={row.label}>
