@@ -15,6 +15,7 @@ export function generateMetadata(): Metadata {
     path: '/checkup',
     title: t.meta.checkupTitle,
     description: t.meta.checkupDescription,
+    ogImagePath: '/visuals/og/checkup.jpg',
   });
 }
 
@@ -40,10 +41,15 @@ export default async function CheckupPage() {
         <PageIntro eyebrow={t.checkup.eyebrow} title={t.checkup.introTitle} sub={t.checkup.introSub} compact titleMax="max-w-[22ch]" />
 
         <section className="relative z-[7] bg-surface py-16 lg:py-20">
-          <div className="container-y">
-            <div className="mx-auto max-w-3xl">
+          <div className="container-y xl:grid xl:grid-cols-[minmax(0,48rem)_minmax(0,1fr)] xl:items-start xl:gap-16">
+            <div className="mx-auto max-w-3xl xl:mx-0 xl:w-full">
               <CheckUpWizard locale={ctx.locale} t={t.checkup} />
             </div>
+            {/* Decorative key visual beside the wizard on wide screens only. */}
+            <figure aria-hidden="true" className="sticky top-28 hidden overflow-hidden rounded-md border border-line bg-[#0b0b0b] xl:block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/visuals/checkup.webp" alt="" width={1536} height={1024} loading="lazy" decoding="async" className="block aspect-[4/5] h-auto w-full object-cover object-[60%_50%]" />
+            </figure>
           </div>
         </section>
       </main>
