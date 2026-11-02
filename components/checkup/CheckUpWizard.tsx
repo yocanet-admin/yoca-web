@@ -7,6 +7,7 @@ import type { Dict } from '@/lib/i18n';
 import { DUR, EASE_YOCA } from '@/lib/motion';
 import Honeypot from '@/components/ui/Honeypot';
 import { track } from '@vercel/analytics';
+import { refData } from '@/lib/signatureRef';
 
 /**
  * Yoca — Digital Marketing Check-Up Wizard.
@@ -88,7 +89,7 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
   const selectOption = (questionKey: string, optionIndex: number) => {
     if (!startedTracked.current) {
       startedTracked.current = true;
-      track('checkup_start', { locale });
+      track('checkup_start', { locale, ...refData() });
     }
     setAnswers((current) => ({ ...current, [questionKey]: optionIndex }));
     if (advanceTimer.current) clearTimeout(advanceTimer.current);
@@ -135,7 +136,7 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
       });
       const result = (await response.json()) as { ok: boolean; error?: string };
       if (response.ok && result.ok) {
-        track('checkup_submit', { locale });
+        track('checkup_submit', { locale, ...refData() });
         setStatus('success');
         scrollToTop();
       } else {
