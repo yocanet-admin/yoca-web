@@ -39,7 +39,7 @@ function rowToCaseStudy(row: CaseStudyRow, locale: Locale): CaseStudy | null {
     market: row.market,
     image: row.image_url,
     services: row.services ?? [],
-    kind: (['client', 'concept', 'product', 'experimental'] as const).includes(row.kind)
+    kind: (['client', 'concept', 'product', 'experimental', 'venture'] as const).includes(row.kind)
       ? row.kind
       : 'client',
     videoUrl: row.video_url,
