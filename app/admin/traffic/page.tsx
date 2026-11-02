@@ -124,6 +124,16 @@ export default function AdminTraffic() {
             </Card>
           </div>
 
+          <Card title="İmzadan gelenler">
+            <RankList
+              rows={(report?.signatures ?? []).map((r) => ({ label: r.label, value: r.count }))}
+              empty="Henüz imzadan gelen ziyaret yok. İmza sayfasında “Site adresi”ni doldurup kodu sitelere yeniden ekleyin."
+            />
+            <p className="mt-3 text-[12px] text-subtle">
+              Müşteri sitelerindeki “Built by YOCA” imzasına tıklayıp yoca.net’e gelenler, siteye göre. Site adresi girilmeden eklenmiş eski imzalardan gelenler “Kaynaklar” listesinde o sitenin adıyla görünebilir.
+            </p>
+          </Card>
+
           <Card title="Dönüşüm hunisi">
             <RankList
               rows={[
