@@ -337,15 +337,27 @@ export default function AdminWork() {
     load();
   };
 
+  /**
+   * Two different actions behind one handler, named differently in the UI:
+   *  - code project slug → "Varsayılana dön": the database copy is removed and the
+   *    site shows the code version again (edits in the copy are lost);
+   *  - database-only project → "Kalıcı sil": the project is gone for good.
+   * Hiding without losing anything is "Sitede gizle".
+   */
   const remove = async (row: CaseStudyRow) => {
     if (!supabase) return;
     const name = row.content?.tr?.name || row.content?.en?.name || row.slug;
-    const backToCode = DEFAULT_CASE_STUDY_SLUGS.includes(row.slug)
-      ? ' Bu slug koddaki varsayılan bir projeye ait: silerseniz sitede koddaki varsayılan sürüm yeniden görünür.'
-      : '';
-    if (!window.confirm(`“${name}” kalıcı olarak silinsin mi? Bu geri alınamaz.${backToCode} (Sadece sitede gizlemek için “Gizle”yi kullanın.)`)) return;
+    const isCodeSlug = DEFAULT_CASE_STUDY_SLUGS.includes(row.slug);
+    const question = isCodeSlug
+      ? `“${name}” koddaki varsayılan sürüme döndürülsün mü?\n\n` +
+        '• Bu projede panelden yaptığınız düzenlemeler (veritabanı kaydı) kaldırılır, geri getirilemez.\n' +
+        (row.is_active
+          ? '• Sitede koddaki varsayılan metin ve görseller görünür.'
+          : '• DİKKAT: proje şu an gizli. Varsayılana dönünce koddaki sürüm sitede YENİDEN YAYINLANIR. Gizli kalmasını istiyorsanız iptal edin.')
+      : `“${name}” kalıcı olarak silinsin mi?\n\n• Proje sitede ve panelde tamamen kaybolur, geri alınamaz.\n• Yalnızca sitede gizlemek için “Sitede gizle”yi kullanın.`;
+    if (!window.confirm(question)) return;
     const { error: deleteError } = await supabase.from('case_studies').delete().eq('id', row.id);
-    flash(deleteError ? saveErrorText(deleteError) : 'Proje silindi.');
+    flash(deleteError ? saveErrorText(deleteError) : isCodeSlug ? 'Proje koddaki varsayılan sürüme döndü.' : 'Proje kalıcı olarak silindi.');
     load();
   };
 
@@ -413,7 +425,7 @@ export default function AdminWork() {
         )}
         {!editing.is_active && (
           <Notice tone="warning">
-            Bu proje gizli: sitede hiç görünmez (koddaki varsayılan sürüm de geri gelmez). Listeden “Göster” ile yayına alın.
+            Bu proje gizli: sitede hiç görünmez (koddaki varsayılan sürüm de geri gelmez). Listeden “Sitede göster” ile yayına alın.
           </Notice>
         )}
 
@@ -596,8 +608,9 @@ export default function AdminWork() {
         veritabanı kaydı olmadığı sürece koddan gösterilir; düzenlemek için “Düzenlemeye al” o projeyi tüm dilleriyle tek bir
         veritabanı kaydına kopyalar (koddaki {DEFAULT_CASE_STUDY_SLUGS.length} projeden {takenOverCount} tanesi alındı).
         <br />
-        <strong>Gizle</strong>: proje sitede tamamen gizlenir — koddaki varsayılan sürüm geri gelmez. Koddaki sürüme dönmek için
-        kaydı silin.
+        <strong>Sitede gizle</strong>: proje sitede görünmez, hiçbir şey silinmez; koddaki varsayılan sürüm de geri gelmez.{' '}
+        <strong>Varsayılana dön</strong> (yalnızca koddan alınan projelerde): paneldeki düzenlemeler kaldırılır, sitede
+        koddaki sürüm görünür. <strong>Kalıcı sil</strong> (yalnızca panelde oluşturulan projelerde): proje tamamen silinir.
       </Notice>
 
       {loadError && (
@@ -703,7 +716,7 @@ export default function AdminWork() {
                     }
                     onClick={() => toggle(row)}
                   >
-                    {row.is_active ? 'Gizle' : 'Göster'}
+                    {row.is_active ? 'Sitede gizle' : 'Sitede göster'}
                   </button>
                   <button
                     type="button"
@@ -715,9 +728,14 @@ export default function AdminWork() {
                   <button
                     type="button"
                     className="admin-btn hover:!border-red-400 hover:!text-red-400"
+                    title={
+                      DEFAULT_CASE_STUDY_SLUGS.includes(row.slug)
+                        ? 'Paneldeki düzenlemeleri kaldırır; sitede koddaki varsayılan sürüm görünür.'
+                        : 'Projeyi tamamen ve geri alınamaz şekilde siler.'
+                    }
                     onClick={() => remove(row)}
                   >
-                    Sil
+                    {DEFAULT_CASE_STUDY_SLUGS.includes(row.slug) ? 'Varsayılana dön' : 'Kalıcı sil'}
                   </button>
                 </div>
               </div>
