@@ -10,7 +10,8 @@
 --   authenticated admins → all rows (unchanged: "auth manage …" policies)
 --   service role (server)→ all rows (bypasses RLS; the site reads hidden
 --                          project slugs this way, never their content)
--- Nothing is deleted; no data changes. Undo: supabase/rollback-v11.sql
+-- Nothing is deleted; no data changes. No routine undo (see YAYIN-SIRASI.md);
+-- emergency only, reopens the leak: supabase/emergency/reopen-pre-v11-public-reads.sql
 --
 -- Guard: stops without changes if the live policies are not what this file
 -- expects (pre-v11 "using (true)" or already v11). Then compare with

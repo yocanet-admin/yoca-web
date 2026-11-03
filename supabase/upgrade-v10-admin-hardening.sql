@@ -10,7 +10,7 @@
 --   3. audit_row(): activities are labelled with their text in the log.
 --
 -- PART B: SUPERSEDED — do not uncomment. Use upgrade-v12-admin-only.sql
---   (guard, policy backup, rollback-v12.sql, self-checks).
+--   (guard, policy backup, self-checks).
 --
 -- Nothing is deleted; existing rows are untouched.
 -- ═══════════════════════════════════════════════════════════════

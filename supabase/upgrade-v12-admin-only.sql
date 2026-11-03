@@ -11,7 +11,7 @@
 --   1. Stops (raises an error, changes nothing) when admin_users is empty
 --      or is_admin() is missing.
 --   2. Copies every policy it will touch, exactly as it is now, into
---      public.policy_backup_v12 (rollback-v12.sql restores from there).
+--      public.policy_backup_v12 (emergency/reopen-pre-v12-policies.sql reads it).
 --   3. Every policy whose ONLY role is "authenticated" (the "auth …" admin
 --      policies, in schema public and on storage.objects) gets
 --      "and public.is_admin()" added to its existing condition. The existing
@@ -24,7 +24,8 @@
 -- bypasses RLS. Nothing is deleted; no row data changes.
 -- Safe to re-run: policies that already call is_admin() are skipped and the
 -- backup keeps the ORIGINAL definition.
--- Undo: supabase/rollback-v12.sql
+-- No routine undo: app rollback keeps this in place (YAYIN-SIRASI.md).
+-- Emergency only (reopens the gap): supabase/emergency/reopen-pre-v12-policies.sql
 -- ═══════════════════════════════════════════════════════════════
 
 begin;
