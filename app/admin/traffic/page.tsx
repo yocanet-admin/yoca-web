@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Card, DailyBars, Notice, RankList, StatTile } from '@/components/admin/cockpit/Widgets';
 import { adminApi, delta, fmtNumber } from '@/lib/cockpit/client';
-import { loadLeads, type Lead } from '@/lib/cockpit/leads';
+import { getAdminClient } from '@/lib/adminClient';
 import type { TrafficReport } from '@/lib/cockpit/vercel';
 import { TokenHelp } from '@/components/admin/cockpit/TokenHelp';
 
@@ -35,10 +35,8 @@ const DEVICE: Record<string, string> = { desktop: 'Masaüstü', mobile: 'Mobil',
 
 export default function AdminTraffic() {
   const [days, setDays] = useState(30);
-  const [crm, setCrm] = useState<Lead[] | null>(null);
-  useEffect(() => {
-    loadLeads().then((r) => setCrm(r.error ? null : r.leads)).catch(() => setCrm(null));
-  }, []);
+  // Server-side lead counts for the same UTC range (null = not readable).
+  const [server, setServer] = useState<{ accepted: number | null; dropped: number | null; stored: number | null } | null>(null);
   const [metric, setMetric] = useState<'visitors' | 'pageviews'>('visitors');
   const [result, setResult] = useState<Response | null>(null);
   const [busy, setBusy] = useState(true);
@@ -62,19 +60,51 @@ export default function AdminTraffic() {
   const report = result?.report;
   const events = report?.events ?? [];
   const eventCount = (name: string) => events.find((e) => e.name === name)?.count ?? 0;
-  // Analytics events = successful form responses seen by the browser (silently dropped spam
-  // also gets a success response, and deleted leads stay counted). CRM rows = what is stored now.
-  const leads = eventCount('contact_submit') + eventCount('checkup_submit');
+  // Browser event: fired when the form gets a success response. Silently dropped spam and
+  // re-sends get the same response, so this is an upper bound, not a lead count.
+  const browserSubmits = eventCount('contact_submit') + eventCount('checkup_submit');
+  // Same range as the Vercel query: whole UTC days (lib/cockpit/vercel.ts).
   const sinceUtc = (() => {
     const d = new Date();
     d.setUTCHours(0, 0, 0, 0);
     d.setUTCDate(d.getUTCDate() - (days - 1));
     return d.toISOString();
   })();
-  const stored = crm ? crm.filter((l) => l.createdAt >= sinceUtc && l.status !== 'spam').length : null;
-  // A rate over a tiny sample reads as a trend; only show it with enough data.
-  const enough = !!report && report.totals.visitors >= 100 && leads >= 3;
-  const conversion = report && report.totals.visitors ? ((leads / report.totals.visitors) * 100).toFixed(1) : null;
+
+  useEffect(() => {
+    const supabase = getAdminClient();
+    if (!supabase) {
+      setServer({ accepted: null, dropped: null, stored: null });
+      return;
+    }
+    let cancelled = false;
+    setServer(null);
+    const count = async (q: PromiseLike<{ count: number | null; error: unknown }>) => {
+      const r = await q;
+      return r.error ? null : r.count ?? 0;
+    };
+    Promise.all([
+      // Accepted = rows the server stored, as recorded by the audit trigger (survives later deletes).
+      count(supabase.from('audit_log').select('id', { count: 'exact', head: true }).eq('action', 'insert').in('entity', ['contact_submissions', 'checkup_submissions']).gte('at', sinceUtc)),
+      // Dropped = spam and duplicate re-sends the server answered "ok" without storing.
+      count(supabase.from('spam_log').select('id', { count: 'exact', head: true }).gte('created_at', sinceUtc)),
+      // Stored now = still in Leadler, not marked spam.
+      Promise.all([
+        count(supabase.from('contact_submissions').select('id', { count: 'exact', head: true }).gte('created_at', sinceUtc).neq('status', 'spam')),
+        count(supabase.from('checkup_submissions').select('id', { count: 'exact', head: true }).gte('created_at', sinceUtc).neq('status', 'spam')),
+      ]).then(([a, b]) => (a === null || b === null ? null : a + b)),
+    ]).then(([accepted, dropped, stored]) => {
+      if (!cancelled) setServer({ accepted, dropped, stored });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sinceUtc]);
+
+  const visitors = report?.totals.visitors ?? 0;
+  const accepted = server?.accepted ?? null;
+  const rate = accepted !== null && visitors > 0 ? ((accepted / visitors) * 100).toFixed(1) : null;
+  const show = (n: number | null | undefined) => (n === null || n === undefined ? '–' : fmtNumber(n));
 
   return (
     <div className="grid gap-6">
@@ -116,18 +146,23 @@ export default function AdminTraffic() {
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatTile label="Ziyaretçi" value={report ? fmtNumber(report.totals.visitors) : null} deltaPct={report ? delta(report.totals.visitors, report.previous.visitors) : null} deltaLabel={`önceki ${days} güne göre`} />
             <StatTile label="Sayfa görüntüleme" value={report ? fmtNumber(report.totals.pageviews) : null} deltaPct={report ? delta(report.totals.pageviews, report.previous.pageviews) : null} deltaLabel={`önceki ${days} güne göre`} />
-            <StatTile label="Başarılı form gönderimi" value={report ? fmtNumber(leads) : null} hint={`Analitik olayı · CRM'de şu an ${stored === null ? '–' : fmtNumber(stored)} kayıt`} />
+            <StatTile label="Kaydedilen başvuru" value={report && server ? show(accepted) : null} hint="Sunucuda kabul edilip kaydedilen (İletişim + Check-Up)" />
             <StatTile
-              label="Dönüşüm oranı"
-              value={report ? (conversion === null ? '–' : enough ? `%${conversion}` : `${fmtNumber(leads)} / ${fmtNumber(report.totals.visitors)}`) : null}
-              hint={enough ? 'gönderim / ziyaretçi' : 'Örneklem küçük: oran yerine sayılar gösteriliyor'}
+              label="Başvuru / ziyaretçi"
+              value={report && server ? (rate === null ? '–' : `%${rate}`) : null}
+              hint={`${show(accepted)} başvuru / ${show(visitors)} ziyaretçi`}
             />
           </div>
 
-          <p className="-mt-2 text-[12px] leading-relaxed text-subtle">
-            <strong className="text-muted">Başarılı form gönderimi</strong>: sunucu “tamam” dediği anda tarayıcıda sayılan analitik olayı. Sessizce elenen spam da bu yanıtı alır; sonradan silinen veya spam işaretlenen kayıtlar sayımdan düşmez.{' '}
-            <strong className="text-muted">CRM kaydı</strong>: Leadler’de şu an duran, spam olmayan kayıtlar. Gün aralığı UTC’ye göredir (İstanbul’da 03:00’te başlar).
-          </p>
+          <div className="-mt-2 grid gap-2 rounded-md border border-line bg-surface-deep/60 p-4 text-[12px] leading-relaxed text-subtle">
+            <p>
+              <strong className="text-muted">Bu aralıkta:</strong> tarayıcıda gönderim olayı {show(browserSubmits)} · sunucuda kaydedilen {show(accepted)} · elenen (spam / tekrar) {show(server?.dropped)} · şu an Leadler’de duran {show(server?.stored)}.
+            </p>
+            <p>
+              <strong className="text-muted">Tanımlar:</strong> “Kaydedilen başvuru” sunucunun veritabanına yazdığı kayıttır (işlem geçmişinden sayılır, sonradan silinse de düşmez). “Tarayıcıda gönderim olayı” formun başarı yanıtı aldığı an Vercel’e giden olaydır; sessizce elenen spam ve tekrar gönderimler de aynı yanıtı aldığı için kaydedilen sayıdan büyük olabilir. Oran, kaydedilen başvurunun benzersiz ziyaretçiye bölümüdür; ziyaretçi sayısı küçükken tek bir başvuru oranı çok oynatır, bu yüzden sayıları yanında gösteriyoruz.
+            </p>
+            <p>Gün aralığı UTC’dir (İstanbul’da 03:00’te başlar). İşlem geçmişi v9 SQL’den önceki kayıtları içermez.</p>
+          </div>
 
           <Card
             title={metric === 'visitors' ? 'Günlük ziyaretçi' : 'Günlük sayfa görüntüleme'}
