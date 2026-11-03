@@ -108,7 +108,27 @@ Patterns to remove (with the Turkish forms that matter most)
 - Formatting slop: emoji, bold sprinkled mid-sentence, bullets where prose argues better, headings over two-sentence sections.
 - Em dashes: none in short copy; at most one or two in a long article, never clustered.
 - Empty words (cut unless they carry meaning): delve, leverage, utilize, robust, seamless, empower, elevate, transformative, cutting-edge, game changer, tapestry, realm, journey (figurative), holistic, synergy; Turkish: "yolculuk" (mecaz), "dönüşüm yolculuğu", "sinerji", "bütüncül" (dolgu), "kapıları aralamak", "bir adım öne çıkın", "gerçekten", "inanılmaz derecede", "son derece".
-Other languages: in Azerbaijani avoid "Müasir sürətlə dəyişən rəqəmsal dünyada", "Bu sadəcə X deyil, həm də Y", "araşdırmalar göstərir" without a source; in Arabic avoid "في عالمنا الرقمي المتسارع", "ليس مجرد … بل …" as a crutch, "تشير الدراسات" without a source, and "ثوري/فريد من نوعه" without evidence. Same principles: plain, specific, sourced.`;
+Same patterns in the other site languages (apply them when the text is in that language; the principles above are identical):
+- English: the English examples above are the reference list. Also: "In an era where…", "Let's dive in", "It's worth noting that", "plays a crucial role", "unlock the potential", "navigate the complexities", "In conclusion,".
+- Azerbaijani (az):
+  - Empty openers: "Müasir sürətlə dəyişən rəqəmsal dünyada", "Rəqəmsal əsrdə", "Texnologiyanın sürətlə inkişaf etdiyi bu dövrdə", "Heç düşünmüsünüzmü…?".
+  - Binary contrast: "Bu sadəcə X deyil, həm də Y", "Məsələ X-də deyil, Y-dədir".
+  - Weasel attribution: "Araşdırmalar göstərir ki", "Mütəxəssislər hesab edir ki", "Hamıya məlumdur ki", "Bildiyimiz kimi" — name the source or flag it.
+  - Puffery: "inqilabi", "misilsiz", "unikal həllər", "oyunun qaydalarını dəyişən", "əvəzolunmaz", "həyati əhəmiyyət daşıyır", "əsas rol oynayır".
+  - Metadiscourse: "Qeyd etmək lazımdır ki", "Xüsusilə vurğulamaq istərdik ki", "Diqqət yetirilməli olan məqam".
+  - Fake-strong verbs: "körpü rolunu oynayır", "mövqelənir", "açar rol oynayır".
+  - Endings: "Nəticə olaraq", "Yekun olaraq", "Xülasə", "Unutmayın ki…" with a slogan.
+  - Empty words: "səyahət" (figurative), "transformasiya səyahəti", "sinergiya", "yeni üfüqlər açmaq", "bir addım öndə olun", "həqiqətən", "inanılmaz dərəcədə", "son dərəcə".
+- Arabic (ar):
+  - Empty openers: "في عالمنا الرقمي المتسارع", "في ظل التطورات المتلاحقة", "في عصرنا الحالي", "في عصر التكنولوجيا", "هل تساءلت يوماً…؟".
+  - Binary contrast: "ليس مجرد … بل …", "لا يقتصر الأمر على … بل يتعداه إلى", "المسألة ليست … وإنما …" used as a crutch.
+  - Weasel attribution: "تشير الدراسات إلى", "يرى الخبراء أن", "من المعروف أن", "كما هو معلوم" — name the source or flag it.
+  - Puffery: "ثوري", "فريد من نوعه", "لا مثيل له", "نقلة نوعية", "يغيّر قواعد اللعبة", "بالغ الأهمية", "يلعب دوراً محورياً".
+  - Metadiscourse: "تجدر الإشارة إلى أن", "من الجدير بالذكر", "لا بد من التأكيد على".
+  - Fake-strong verbs: "يمثّل جسراً", "يتموضع", "يضطلع بدور رئيسي".
+  - Endings: "وفي الختام", "خلاصة القول", "ختاماً", "تذكّر دائماً أن…" with a slogan.
+  - Empty words: "رحلة" (figurative), "رحلة التحول", "تآزر", "آفاق جديدة", "خطوة إلى الأمام", "حقاً", "للغاية", "بشكل لا يصدق".
+  - Write Modern Standard Arabic; keep Latin product and brand names as they are; do not add tatweel or decorative punctuation.`;
 
 export const NO_AI_SLOP_DETECT = `Job: DETECT only. Read the full text. For every place where one of the listed patterns appears, return the exact excerpt (copy it character for character from the text, a sentence or shorter), the pattern id, and a short fix suggestion (max ~15 words, in Turkish). Do not rewrite the text, do not score it, do not guess whether AI wrote it, do not report a "% AI" figure. Report each distinct occurrence once; at most 40 findings. A repeated construction across paragraphs (e.g. "Bu sadece X değil" three times, identical paragraph shapes) is one finding per occurrence for binary contrasts and one finding for robotic rhythm. Do not flag technical terms, quotations, real hedges or concrete detail. If there are no findings, return an empty list.`;
 

@@ -125,16 +125,43 @@ export const FaqSchema = {
   schema: { type: 'object', additionalProperties: false, required: ['faq'], properties: { faq: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['q', 'a'], properties: { q: str, a: str } } } } },
 };
 
+/** Every text field of an Insight that is shown to readers or search engines. */
 export const TranslationSchema = {
   name: 'translation',
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['title', 'excerpt', 'body', 'seoTitle', 'metaDescription', 'slug'],
-    properties: { title: str, excerpt: str, body: str, seoTitle: str, metaDescription: str, slug: str },
+    required: ['title', 'excerpt', 'body', 'seoTitle', 'metaDescription', 'ogTitle', 'ogDescription', 'faq', 'tags', 'coverAlt', 'coverCaption', 'slug'],
+    properties: {
+      title: str,
+      excerpt: str,
+      body: str,
+      seoTitle: str,
+      metaDescription: str,
+      ogTitle: str,
+      ogDescription: str,
+      faq: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['q', 'a'], properties: { q: str, a: str } } },
+      tags: strArr,
+      coverAlt: str,
+      coverCaption: str,
+      slug: str,
+    },
   },
 };
-export interface Translation { title: string; excerpt: string; body: string; seoTitle: string; metaDescription: string; slug: string }
+export interface Translation {
+  title: string;
+  excerpt: string;
+  body: string;
+  seoTitle: string;
+  metaDescription: string;
+  ogTitle: string;
+  ogDescription: string;
+  faq: Array<{ q: string; a: string }>;
+  tags: string[];
+  coverAlt: string;
+  coverCaption: string;
+  slug: string;
+}
 
 export const RepurposeSchema = {
   name: 'repurposed_content',
@@ -292,7 +319,21 @@ export function validateReview(v: unknown): v is EditorialReview {
 }
 export function validateTranslation(v: unknown): v is Translation {
   const d = v as Partial<Translation>;
-  return !!d && isString(d.title, 300) && isString(d.excerpt, 1000) && isString(d.body) && isString(d.seoTitle, 200) && isString(d.metaDescription, 400) && isString(d.slug, 200);
+  return (
+    !!d &&
+    isString(d.title, 300) && d.title.trim().length > 0 &&
+    isString(d.excerpt, 1000) &&
+    isString(d.body) && d.body.trim().length > 0 &&
+    isString(d.seoTitle, 200) &&
+    isString(d.metaDescription, 400) &&
+    isString(d.ogTitle, 300) &&
+    isString(d.ogDescription, 600) &&
+    Array.isArray(d.faq) && d.faq.length <= 20 && d.faq.every((f) => !!f && isString(f.q, 500) && isString(f.a, 3000)) &&
+    isStringArray(d.tags, 30) &&
+    isString(d.coverAlt, 400) &&
+    isString(d.coverCaption, 400) &&
+    isString(d.slug, 200)
+  );
 }
 export function validatePolish(v: unknown): v is Polish {
   const d = v as Partial<Polish>;

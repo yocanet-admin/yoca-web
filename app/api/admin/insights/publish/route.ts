@@ -16,6 +16,8 @@ import { countSourceMarkers } from '@/lib/ai/sourceText';
  * from the private draft bucket to the public "insights" bucket and the
  * references are replaced with public URLs. A snapshot revision is stored.
  * The article row is updated with the admin's own session (audit log actor).
+ * A translation made from a source article (v15 source_insight_id) needs
+ * language_reviewed = true before it can be published or scheduled.
  */
 
 export const runtime = 'nodejs';
@@ -49,6 +51,10 @@ export async function POST(request: NextRequest) {
   }
 
   if (!a.title.trim() || !a.slug.trim() || !a.body_md.trim()) return NextResponse.json({ ok: false, error: 'Başlık, slug ve gövde dolu olmalı.' }, { status: 422 });
+  // v15: a machine translation is published only after a person who reads
+  // that language ticked "Dil kontrolü yapıldı" (and saved).
+  const t = article as { source_insight_id?: string | null; language_reviewed?: boolean };
+  if (t.source_insight_id && !t.language_reviewed) return NextResponse.json({ ok: false, code: 'language_review', error: 'Bu çeviri için “Dil kontrolü yapıldı” işaretlenmedi. Metni o dili bilen biri okuyup işaretledikten ve kaydettikten sonra yayınlayın.' }, { status: 422 });
   if (countSourceMarkers(a.body_md) > 0) return NextResponse.json({ ok: false, error: 'Metinde hâlâ [KAYNAK GEREKLİ] işareti var. Kaynağı ekleyin ya da iddiayı çıkarın.' }, { status: 422 });
   let publishAt = new Date().toISOString();
   if (action === 'schedule') {

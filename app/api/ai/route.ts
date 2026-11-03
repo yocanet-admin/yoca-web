@@ -214,7 +214,21 @@ export async function POST(request: NextRequest) {
       case 'translate': {
         const to = String(payload.to ?? '');
         if (!LOCALES.has(to) || to === locale) throw new OpenAIError('Geçersiz hedef dil.', 400, 'bad_request');
-        result = take(await translateArticle(model, { title: str(payload.title, 300), excerpt: str(payload.excerpt, 1000), body: str(payload.body, cap), seoTitle: str(payload.seoTitle, 200), metaDescription: str(payload.metaDescription, 400) }, locale, to));
+        const faqIn = Array.isArray(payload.faq) ? (payload.faq as Array<{ q?: unknown; a?: unknown }>).slice(0, 20).map((f) => ({ q: str(f?.q, 500), a: str(f?.a, 3000) })) : [];
+        const tagsIn = Array.isArray(payload.tags) ? (payload.tags as unknown[]).filter((t): t is string => typeof t === 'string').map((t) => t.slice(0, 80)).slice(0, 30) : [];
+        result = take(await translateArticle(model, {
+          title: str(payload.title, 300),
+          excerpt: str(payload.excerpt, 1000),
+          body: str(payload.body, cap),
+          seoTitle: str(payload.seoTitle, 200),
+          metaDescription: str(payload.metaDescription, 400),
+          ogTitle: str(payload.ogTitle, 300),
+          ogDescription: str(payload.ogDescription, 600),
+          faq: faqIn,
+          tags: tagsIn,
+          coverAlt: str(payload.coverAlt, 400),
+          coverCaption: str(payload.coverCaption, 400),
+        }, locale, to, settings.maxOutputTokens));
         break;
       }
       case 'faq':
@@ -238,20 +252,20 @@ export async function POST(request: NextRequest) {
         const quality = (preset ?? settings.imagePreset) === 'quality' ? 'high' : 'medium';
         const bytes = take(await generateImage({ model, prompt, size: '1536x1024', quality }));
         const dims = imageSize(bytes);
-        const saved = await storeDraftImage(bytes, { insightId, groupId: str(payload.groupId, 64) || null, kind: variant > 0 ? 'alternative' : 'generated', origin: 'ai', prompt, brief, model, size: '1536x1024', width: dims?.width, height: dims?.height, altText: str(payload.alt, 300), aiRunId: runId, createdBy, mime: dims?.mime ?? 'image/png' });
-        result = { imageId: saved.id };
+        const saved = await storeDraftImage(bytes, { insightId, groupId: str(payload.groupId, 64) || null, kind: variant > 0 ? 'alternative' : 'generated', origin: 'ai', prompt, brief, model, size: '1536x1024', width: dims?.width, height: dims?.height, altText: str(payload.alt, 300), aiRunId: runId, createdBy, mime: dims?.mime ?? 'image/png', brand: true });
+        result = { imageId: saved.id, logo: saved.logo };
         break;
       }
       case 'image_edit': {
         const imageId = str(payload.imageId, 64);
         const instruction = str(payload.instruction, 1500);
         if (!/^[0-9a-f-]{36}$/.test(imageId) || !instruction.trim()) throw new OpenAIError('Görsel ve talimat gerekli.', 400, 'bad_request');
-        const source = await readDraftImage(imageId);
+        const source = await readDraftImage(imageId, { master: true }); // edit the logo-free original
         const prompt = buildEditPrompt(instruction);
         const bytes = take(await editImage({ model, prompt, image: source.bytes, mime: source.mime, size: 'auto' }));
         const dims = imageSize(bytes);
-        const saved = await storeDraftImage(bytes, { insightId, groupId: (source.row.group_id as string) ?? null, kind: 'edited', origin: 'ai', prompt, brief: (source.row.brief as string) ?? null, model, size: dims ? `${dims.width}x${dims.height}` : null, width: dims?.width, height: dims?.height, parentId: imageId, altText: String(source.row.alt_text ?? ''), aiRunId: runId, createdBy, mime: dims?.mime ?? 'image/png' });
-        result = { imageId: saved.id };
+        const saved = await storeDraftImage(bytes, { insightId, groupId: (source.row.group_id as string) ?? null, kind: 'edited', origin: 'ai', prompt, brief: (source.row.brief as string) ?? null, model, size: dims ? `${dims.width}x${dims.height}` : null, width: dims?.width, height: dims?.height, parentId: imageId, altText: String(source.row.alt_text ?? ''), aiRunId: runId, createdBy, mime: dims?.mime ?? 'image/png', brand: true });
+        result = { imageId: saved.id, logo: saved.logo };
         break;
       }
       default:

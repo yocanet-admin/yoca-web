@@ -218,6 +218,14 @@ export interface InsightRow {
   sources: InsightSource[];
   faq: InsightFaq[];
   reading_minutes: number;
+  /** v15: the source article of a translation (null on the source itself). */
+  source_insight_id?: string | null;
+  /** v15: SHA-256 of the source fields when this translation was made. */
+  source_hash?: string | null;
+  /** v15: a person who reads this language checked it (required to publish a translation). */
+  language_reviewed?: boolean;
+  language_reviewed_at?: string | null;
+  language_reviewed_by?: string | null;
   created_at: string;
   updated_at: string;
 }

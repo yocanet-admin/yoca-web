@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { insightXDefault } from '@/lib/insightAlternates';
 import { headers } from 'next/headers';
 import {
   absoluteLocalizedUrl,
@@ -65,6 +66,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const siblings = insights.filter((r) => r.group_id === row.group_id);
     const languages: Record<string, string> = {};
     for (const sib of siblings) languages[HREFLANG[sib.locale]] = absoluteLocalizedUrl(host, sib.locale, `/insights/${sib.slug}`);
+    const xDefault = insightXDefault(siblings, row.locale);
+    const xRow = siblings.find((sib) => sib.locale === xDefault) ?? row;
+    languages['x-default'] = absoluteLocalizedUrl(host, xRow.locale, `/insights/${xRow.slug}`);
     entries.push({
       url: absoluteLocalizedUrl(host, row.locale, `/insights/${row.slug}`),
       lastModified: new Date(row.updated_at),

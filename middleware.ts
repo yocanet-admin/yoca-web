@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { insightSlugFromPath } from '@/lib/insightAlternates';
 
 /**
  * Yoca — edge middleware for path-based i18n routing.
@@ -12,6 +13,11 @@ import { NextRequest, NextResponse } from 'next/server';
  * - /admin, /api, /_vercel (Web Analytics), sitemap/robots/manifest and all static files bypass
  *   locale handling entirely.
  * - www.* hosts 308-redirect to the apex host.
+ * - /{locale}/insights/{slug} without a published article in that language
+ *   is rewritten to an unknown path, so the visitor gets the branded 404
+ *   page WITH a real 404 status (notFound() inside the streamed page would
+ *   answer 200 + noindex). Draft previews (?preview=) skip the check; any
+ *   lookup error fails open (the page itself still shows not-found).
  */
 
 const LOCALES = ['en', 'tr', 'az', 'ar'] as const;
@@ -26,7 +32,40 @@ function isLocale(value: string | undefined): value is AppLocale {
   return !!value && (LOCALES as readonly string[]).includes(value);
 }
 
-export function middleware(request: NextRequest) {
+const NOT_FOUND_PATH = '/__yoca-not-found';
+
+/** true = published row exists, false = definitely missing, null = unknown (fail open). */
+async function insightExists(locale: AppLocale, slug: string): Promise<boolean | null> {
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!base || !key) return null;
+  const params = new URLSearchParams({
+    select: 'id',
+    locale: `eq.${locale}`,
+    slug: `eq.${slug}`,
+    status: 'eq.PUBLISHED',
+    publish_at: `lte.${new Date().toISOString()}`,
+    limit: '1',
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const res = await fetch(`${base.replace(/\/$/, '')}/rest/v1/insights?${params.toString()}`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as unknown[];
+    return Array.isArray(rows) ? rows.length > 0 : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function middleware(request: NextRequest) {
   const rawHost = (request.headers.get('host') ?? '').toLowerCase();
   const host = rawHost.split(':')[0];
 
@@ -47,6 +86,12 @@ export function middleware(request: NextRequest) {
     const rest = pathname.slice(segment.length + 1) || '/';
     const url = request.nextUrl.clone();
     url.pathname = rest;
+
+    const slug = insightSlugFromPath(rest);
+    if (slug && !request.nextUrl.searchParams.has('preview')) {
+      const exists = await insightExists(segment, slug);
+      if (exists === false) url.pathname = NOT_FOUND_PATH;
+    }
 
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('x-yoca-locale', segment);

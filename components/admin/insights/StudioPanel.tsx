@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { adminFetch, callAi, INSIGHT_LOCALES, type AiRunInfo, type EditableInsight } from '@/lib/insightsAdmin';
 import type { ArticleDraft, SeoPack, SourceClaim, StyleFinding, Translation } from '@/lib/ai/schemas';
+import MultilangPanel, { type SiblingInfo } from '@/components/admin/insights/MultilangPanel';
 import type { InsightSource, Locale } from '@/types';
 import { SLOP_PATTERNS } from '@/lib/ai/prompts/no-ai-slop';
 import DiffView from '@/components/admin/insights/DiffView';
@@ -13,14 +14,16 @@ import ImageStudio, { type StudioImage } from '@/components/admin/insights/Image
  * Yoca Admin — İçerik stüdyosu (AI panel beside the editor).
  *
  * Default guided flow, one step at a time without re-asking:
- *   Konu → Taslak → Editörlük kontrolü → Görsel → Önizleme → İnceleme → Yayın
+ *   Konu → Taslak → Editörlük kontrolü → Görsel → Önizleme → İnceleme → Diller → Yayın
  * Any step can also be opened directly. Every AI result is a PROPOSAL: the
  * editor previews it and applies it; applying first stores the current text
  * as a revision, and only "Kaydet" writes the article. Nothing here publishes.
  * Style check (no-ai-slop patterns) and source check are separate tools.
+ * "Diller" translates a finished source article into every other language
+ * and reviews/edits each one in its own language (MultilangPanel).
  */
 
-type Step = 'topic' | 'draft' | 'check' | 'image' | 'preview' | 'review' | 'publish';
+type Step = 'topic' | 'draft' | 'check' | 'image' | 'preview' | 'review' | 'langs' | 'publish';
 const STEPS: Array<{ key: Step; label: string }> = [
   { key: 'topic', label: 'Konu' },
   { key: 'draft', label: 'Taslak' },
@@ -28,6 +31,7 @@ const STEPS: Array<{ key: Step; label: string }> = [
   { key: 'image', label: 'Görsel' },
   { key: 'preview', label: 'Önizleme' },
   { key: 'review', label: 'İnceleme' },
+  { key: 'langs', label: 'Diller' },
   { key: 'publish', label: 'Yayın' },
 ];
 
@@ -57,7 +61,9 @@ interface Props {
   onSetTitle: (title: string) => void;
   onApplySeo: (seo: Partial<Pick<EditableInsight, 'seo_title' | 'meta_description'>>) => void;
   onApplyFaq: (faq: Array<{ q: string; a: string }>) => void;
-  onCreateTranslation: (to: Locale, tr: Translation) => void;
+  dirty: boolean;
+  siblings: SiblingInfo[];
+  onSaveTranslations: (items: Array<{ locale: Locale; translation: Translation }>, fingerprint: string) => Promise<Record<string, string>>;
   onInsertImage: (markdown: string) => void;
   onOpenPreview: () => void;
   onSetLocale: (locale: Locale) => void;
@@ -100,7 +106,6 @@ export default function StudioPanel(props: Props) {
   const [edit, setEdit] = useState<{ before: string; after: string; changes: string[] } | null>(null);
   const [check, setCheck] = useState<{ sources: FetchedInfo[]; claims: SourceClaim[]; unsupportedNumbers: Array<{ sentence: string; numbers: string[] }> } | null>(null);
   const [seo, setSeo] = useState<SeoPack | null>(null);
-  const [translateTo, setTranslateTo] = useState<Locale>(article.locale === 'tr' ? 'en' : 'tr');
   const [repurposed, setRepurposed] = useState<{ platform: string; output: string } | null>(null);
 
   const urlList = () => sourceUrls.split(/\s+/).map((u) => u.trim()).filter((u) => /^https?:\/\//i.test(u)).slice(0, 5);
@@ -447,24 +452,32 @@ export default function StudioPanel(props: Props) {
               <button type="button" className="admin-btn-primary w-fit" onClick={() => { props.onApplySeo({ seo_title: seo.seoTitle, meta_description: seo.metaDescription }); setSeo(null); }}>SEO alanlarını uygula</button>
             </div>
           )}
+          <button type="button" className="admin-btn w-fit" onClick={next}>Sonraki adım → Diller</button>
+        </div>
+      )}
+
+      {/* ── 7 · Diller ── */}
+      {step === 'langs' && (
+        <div className="grid gap-3">
+          <MultilangPanel
+            article={article}
+            dirty={props.dirty}
+            siblings={props.siblings}
+            preset={textPreset}
+            busy={busy}
+            setBusy={setBusy}
+            onRun={setLastRun}
+            onSave={props.onSaveTranslations}
+          />
           <button type="button" className="admin-btn w-fit" onClick={next}>Sonraki adım → Yayın</button>
         </div>
       )}
 
-      {/* ── 7 · Yayın ── */}
+      {/* ── 8 · Yayın ── */}
       {step === 'publish' && (
         <div className="grid gap-3 text-[13px]">
-          <p className="text-muted">Yayınlama ve zamanlama yalnızca “Yayın” sekmesindeki ayrı düğmelerle yapılır. Yapay zekâ işlemleri hiçbir zaman yayınlamaz.</p>
+          <p className="text-muted">Yayınlama ve zamanlama yalnızca “Yayın” sekmesindeki ayrı düğmelerle yapılır. Yapay zekâ işlemleri hiçbir zaman yayınlamaz. Kaynak yazıda “Tüm dilleri yayınla”, yalnızca dil kontrolü işaretlenmiş çevirileri yayınlar.</p>
           <button type="button" className="admin-btn-primary w-fit" onClick={props.onGoPublish}>Yayın sekmesine git</button>
-          <div className="grid gap-2 border-t border-line pt-3">
-            <p className="font-bold text-white">Çevir</p>
-            <p className="text-[12px] text-muted">Çeviri aynı grupta yeni bir taslak olarak açılır.</p>
-            <div className="flex flex-wrap items-center gap-2">
-              <select value={translateTo} onChange={(e) => setTranslateTo(e.target.value as Locale)} className={`${field} !w-auto`}>{INSIGHT_LOCALES.filter((l) => l.code !== article.locale).map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</select>
-              <button type="button" className="admin-btn" disabled={!!busy || !article.id || !article.body_md} onClick={async () => { const r = await ai<Translation>('Çeviri hazırlanıyor…', { action: 'translate', to: translateTo, title: article.title, excerpt: article.excerpt, body: article.body_md, seoTitle: article.seo_title, metaDescription: article.meta_description }); if (r) props.onCreateTranslation(translateTo, r); }}>Çevir (taslak)</button>
-            </div>
-            {!article.id && <p className="text-[12px] text-yellow-300">Önce kaydedin.</p>}
-          </div>
           <div className="grid gap-2 border-t border-line pt-3">
             <p className="font-bold text-white">Sosyal medya / bülten metni</p>
             <p className="text-[12px] text-muted">Yazıdan kısa bir paylaşım metni önerir; hiçbir yere gönderilmez, kopyalayıp siz paylaşırsınız.</p>
