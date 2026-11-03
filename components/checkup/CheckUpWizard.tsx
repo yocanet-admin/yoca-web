@@ -34,6 +34,8 @@ const SECTION_KEYS: string[][] = [
   ['analytics', 'crm'], // 5 · Measurement
   ['budget', 'goal'], // 6 · Goals
 ];
+/** Dictionary section key for each group above (labels are looked up by key, not position). */
+const SECTION_NAMES = ['business', 'brand', 'website', 'marketing', 'measurement', 'goals'];
 
 export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
   const prefersReducedMotion = useReducedMotion();
@@ -212,7 +214,7 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
               {t.sectionWord} 1–6
             </p>
             <ul className="mt-3 flex flex-wrap gap-2">
-              {t.sections.map((section, index) => (
+              {SECTION_NAMES.map((name) => t.sections.find((sec) => sec.key === name)).filter((sec): sec is { key: string; label: string } => !!sec).map((section, index) => (
                 <li
                   key={section.key}
                   className="rounded-sm border border-line bg-surface px-3 py-1.5 text-[12px] font-bold text-soft"
@@ -246,7 +248,7 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
             {isContactStep
               ? `${t.step} ${step + 1} ${t.of} ${totalSteps}`
               : `${t.sectionWord} ${sectionIndexOf(questions[step].key) + 1}/6 — ${
-                  t.sections[sectionIndexOf(questions[step].key)]?.label ?? ''
+                  t.sections.find((sec) => sec.key === SECTION_NAMES[sectionIndexOf(questions[step].key)])?.label ?? ''
                 }`}
           </span>
           {/* Honest counter: answered questions, never "Step 1 of 17" */}
