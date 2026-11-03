@@ -9,8 +9,8 @@
 --      (the audit trigger runs as security definer and keeps working).
 --   3. audit_row(): activities are labelled with their text in the log.
 --
--- PART B (OPTIONAL — commented out): switch every admin policy from
---   "any signed-in user" to is_admin(). Read the checklist there first.
+-- PART B: SUPERSEDED — do not uncomment. Use upgrade-v12-admin-only.sql
+--   (guard, policy backup, rollback-v12.sql, self-checks).
 --
 -- Nothing is deleted; existing rows are untouched.
 -- ═══════════════════════════════════════════════════════════════
@@ -104,7 +104,7 @@ $$;
 
 
 -- ═══════════════════════════════════════════════════════════════
--- PART B — OPTIONAL: only admins in admin_users may manage data.
+-- PART B — SUPERSEDED BY upgrade-v12-admin-only.sql. Kept for reference only.
 --
 -- Checklist BEFORE removing the comment markers:
 --   [ ] select * from public.admin_users;  lists EVERY admin e-mail
