@@ -1,14 +1,14 @@
 import type { NextRequest } from 'next/server';
-import { getSupabaseAdmin } from '@/lib/supabase';
+import { getSupabaseAdmin, getSupabaseAsUser } from '@/lib/supabase';
 
 /**
  * Yoca — admin API guard (server only).
  * The admin panel signs in with Supabase Auth in the browser; its API calls
  * send the access token as `Authorization: Bearer …`.
  *
- * Optional allowlist: ADMIN_EMAILS (comma-separated, case-insensitive). When it
- * is set, only those signed-in users count as admins. When it is unset, any
- * signed-in Supabase user is an admin (same rule as the RLS policies).
+ * Admins are the e-mails in public.admin_users (checked through is_admin()).
+ * ADMIN_EMAILS (optional, comma-separated) narrows this further; it can never
+ * add someone who is not in admin_users.
  */
 
 /** The ADMIN_EMAILS allowlist, lower-cased; null when the env var is unset or empty. */
@@ -43,11 +43,41 @@ export async function sessionUser(request: NextRequest): Promise<{ id: string; e
   }
 }
 
-/** The signed-in admin (allowlist applied), or null. */
+export type AdminCheck = { ok: true } | { ok: false; reason: 'not_admin' | 'check_failed' };
+
+/**
+ * Is this session an admin? The database decides: public.is_admin() (v10) reads
+ * public.admin_users with the caller's own JWT — the same rule the RLS policies use
+ * (v12), so the app and direct API access can never disagree. If the function is
+ * missing or the call fails, the answer is "no" (fail closed) with reason check_failed.
+ */
+export async function adminCheck(token: string): Promise<AdminCheck> {
+  const client = getSupabaseAsUser(token);
+  if (!client) return { ok: false, reason: 'check_failed' };
+  try {
+    const { data, error } = await client.rpc('is_admin');
+    if (error) {
+      console.error('adminCheck: is_admin() failed:', error.message);
+      return { ok: false, reason: 'check_failed' };
+    }
+    return data === true ? { ok: true } : { ok: false, reason: 'not_admin' };
+  } catch (error) {
+    console.error('adminCheck: is_admin() failed:', (error as Error).message);
+    return { ok: false, reason: 'check_failed' };
+  }
+}
+
+export function bearerToken(request: NextRequest): string {
+  const header = request.headers.get('authorization') ?? '';
+  return header.startsWith('Bearer ') ? header.slice(7) : '';
+}
+
+/** The signed-in admin, or null: valid session + optional ADMIN_EMAILS + database is_admin(). */
 export async function requireAdmin(request: NextRequest): Promise<{ id: string; email?: string } | null> {
   const user = await sessionUser(request);
   if (!user || !isAllowedAdminEmail(user.email)) return null;
-  return user;
+  const check = await adminCheck(bearerToken(request));
+  return check.ok ? user : null;
 }
 
 /** Tiny in-memory cache per serverless instance (keeps API quotas calm). */
