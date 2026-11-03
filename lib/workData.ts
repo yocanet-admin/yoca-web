@@ -294,6 +294,25 @@ export function staticCaseStudies(locale: Locale): CaseStudy[] {
   }));
 }
 
+/** Database row → the same CaseStudy shape the code projects use (shared by the site and the takeover check). */
+export function rowToCaseStudy(row: CaseStudyRow, locale: Locale): CaseStudy | null {
+  const localized = row.content?.[locale] ?? row.content?.en;
+  if (!localized) return null;
+  return {
+    slug: row.slug,
+    year: row.year,
+    market: localizeMarket(row.market ?? '', locale),
+    image: row.image_url,
+    services: localizeServices(row.services ?? [], locale),
+    kind: (['client', 'concept', 'product', 'experimental', 'venture'] as const).includes(row.kind)
+      ? row.kind
+      : 'client',
+    videoUrl: row.video_url,
+    liveUrl: row.live_url,
+    ...localized,
+  };
+}
+
 /** Default rows: every code project as a ready-to-insert `case_studies` row (order_index = its code position). */
 export function getDefaultCaseStudyRows(): Array<Omit<CaseStudyRow, 'id'>> {
   return BASE.map((base, index) => ({

@@ -41,6 +41,12 @@ export function getSupabaseAdmin(): SupabaseClient | null {
   return createClient(SUPABASE_URL, key, { auth: { persistSession: false }, global: { fetch: noStoreFetch } });
 }
 
+/** Strict service-role client: null when SUPABASE_SERVICE_ROLE_KEY is missing (never falls back to anon). */
+export function getSupabaseServiceRole(): SupabaseClient | null {
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return null;
+  return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false }, global: { fetch: noStoreFetch } });
+}
+
 /**
  * Client that acts as the signed-in admin (their verified access token), so
  * row-level security applies and the audit trigger records THEIR e-mail as
