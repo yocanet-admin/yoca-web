@@ -74,7 +74,7 @@ export function integrations() {
     telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN),
     email: Boolean(process.env.RESEND_API_KEY),
     openai: Boolean(process.env.OPENAI_API_KEY),
-    cronSecret: Boolean(process.env.CRON_SECRET),
+    cronSecret: (process.env.CRON_SECRET ?? '').trim().length >= 32,
     serviceRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
     emailFrom: process.env.NOTIFY_EMAIL_FROM || 'Yoca <noreply@yoca.net>',
   };

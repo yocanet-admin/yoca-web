@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cronAuthorized } from '@/lib/cockpit/cron';
+import { cronAuth } from '@/lib/cockpit/cron';
 import { getCronState, getNotifySettings, istanbulDate, saveCronState } from '@/lib/cockpit/settings';
 import { buildMorningSummary } from '@/lib/cockpit/summary';
 import { notifyAdmins } from '@/lib/notify';
@@ -14,7 +14,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
-  if (!cronAuthorized(request)) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  const auth = cronAuth(request);
+  if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
 
   const today = istanbulDate();
   const [state, settings] = await Promise.all([getCronState(), getNotifySettings()]);
