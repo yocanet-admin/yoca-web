@@ -16,6 +16,8 @@ interface ContactFormProps {
   errorRequired: string;
   errorEmail: string;
   errorGeneric: string;
+  /** Optional opening line for the message (e.g. from a product card). */
+  prefillMessage?: string;
 }
 
 type Status = 'idle' | 'submitting' | 'success';
@@ -26,8 +28,9 @@ export default function ContactForm({
   errorRequired,
   errorEmail,
   errorGeneric,
+  prefillMessage = '',
 }: ContactFormProps) {
-  const [form, setForm] = useState({ name: '', email: '', company: '', message: '', phone: '', website: '' });
+  const [form, setForm] = useState({ name: '', email: '', company: '', message: prefillMessage, phone: '', website: '' });
   const [selectedSystems, setSelectedSystems] = useState<string[]>([]);
   const [budget, setBudget] = useState<string>('');
   const [launch, setLaunch] = useState<string>('');
@@ -137,7 +140,7 @@ export default function ContactForm({
     'min-h-12 w-full rounded-sm border border-line bg-surface-secondary px-3.5 text-[15px] text-white transition-colors focus:border-yoca-lime focus:outline-none';
 
   return (
-    <form onSubmit={submit} noValidate className="relative grid gap-5">
+    <form id="contact-form" onSubmit={submit} noValidate className="relative grid scroll-mt-28 gap-5">
       <Honeypot id="cf-homepage" value={honeypot} onChange={setHoneypot} />
       {error && (
         <div

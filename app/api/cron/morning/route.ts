@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
   await saveCronState({ morning_last: today, morning_last_at: new Date().toISOString() });
 
   const summary = await buildMorningSummary();
-  const sent = await notifyAdmins({ kind: 'summary', subject: summary.subject, heading: summary.heading, html: summary.html, telegram: summary.telegram });
+  const sent = await notifyAdmins({ kind: 'summary', subject: summary.subject, email: summary.email, telegram: summary.telegram, keyboard: summary.keyboard });
 
   return NextResponse.json({ ok: true, counts: summary.counts, sent });
 }

@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from '@/lib/supabase';
+import { getSupabaseAdmin, getSupabaseAsUser } from '@/lib/supabase';
 
 /**
  * Yoca cockpit — notification settings + small cron state (server only).
@@ -38,8 +38,10 @@ async function readKey<T>(key: string): Promise<{ ready: boolean; value: T | nul
   return { ready: true, value: (data?.value as T) ?? null };
 }
 
-async function writeKey(key: string, value: unknown): Promise<boolean> {
-  const supabase = getSupabaseAdmin();
+async function writeKey(key: string, value: unknown, asUserToken?: string): Promise<boolean> {
+  // An admin's change is written with their own session (audit shows who did it);
+  // cron bookkeeping keeps the service role (audit shows "sistem").
+  const supabase = asUserToken ? getSupabaseAsUser(asUserToken) : getSupabaseAdmin();
   if (!supabase) return false;
   const { error } = await supabase.from('cockpit_settings').upsert({ key, value, updated_at: new Date().toISOString() });
   return !error;
@@ -52,10 +54,10 @@ export async function getNotifySettings(): Promise<NotifySettings & { ready: boo
   return { ...merged, ready };
 }
 
-export async function saveNotifySettings(patch: Partial<NotifySettings>): Promise<boolean> {
+export async function saveNotifySettings(patch: Partial<NotifySettings>, asUserToken?: string): Promise<boolean> {
   const { ready, ...current } = await getNotifySettings();
   if (!ready) return false;
-  return writeKey('notify', { ...current, ...patch });
+  return writeKey('notify', { ...current, ...patch }, asUserToken);
 }
 
 export async function getCronState(): Promise<CronState> {

@@ -3,25 +3,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getDict } from '@/lib/i18n';
 import { notifyContact } from '@/lib/notify';
+import { clientIp, contactFingerprint, rateLimited } from '@/lib/formGuard';
 import { freeText, logSpam, screenSubmission } from '@/lib/spam';
 import type { Locale } from '@/types';
+
+/** A re-send with IDENTICAL content inside this window is treated as one submission. */
+const DUPLICATE_WINDOW_MS = 30 * 60 * 1000;
+
+const TOO_MANY: Record<string, string> = {"tr": "Kısa sürede çok fazla gönderim yapıldı. Lütfen biraz sonra tekrar deneyin.", "en": "Too many submissions. Please try again later.", "az": "Qısa müddətdə çox göndəriş edildi. Bir az sonra yenidən cəhd edin.", "ar": "عدد كبير من الإرسالات. يرجى المحاولة لاحقًا."};
 
 /** Yoca — contact form endpoint: validate, screen for spam, persist to Supabase, notify. */
 
 export const runtime = 'nodejs';
 
-const hits = new Map<string, number[]>();
-const RATE_LIMIT = 5;
-const WINDOW_MS = 60 * 60 * 1000;
-
-function rateLimited(ip: string): boolean {
-  const now = Date.now();
-  const list = (hits.get(ip) ?? []).filter((ts) => ts > now - WINDOW_MS);
-  if (list.length >= RATE_LIMIT) return true;
-  list.push(now);
-  hits.set(ip, list);
-  return false;
-}
+// Rate limit: lib/formGuard.ts (shared across instances once v13 is installed).
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LOCALES: Locale[] = ['en', 'tr', 'az', 'ar'];
@@ -44,13 +39,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const ip =
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip') ||
-    'unknown';
-  if (rateLimited(ip)) {
+  if (await rateLimited('contact', clientIp(request.headers))) {
     return NextResponse.json(
-      { ok: false, error: 'Too many submissions. Please try again later.' },
+      { ok: false, error: TOO_MANY[String((payload as { locale?: string }).locale)] ?? TOO_MANY.en },
       { status: 429 },
     );
   }
@@ -90,6 +81,23 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json({ ok: false, error: dict.checkup.errorGeneric }, { status: 503 });
+  }
+
+  // Re-send of the same message (double click, retry after a slow response): answer like a
+  // success, but keep one row and one notification. Logged as "duplicate" in spam_log.
+  const since = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+  // Identical content only: a changed name, company or message is a new submission.
+  const fingerprint = contactFingerprint({ name, company, email, message });
+  const recent = await supabase
+    .from('contact_submissions')
+    .select('name, company, email, message')
+    .eq('email', email)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(10);
+  if (!recent.error && (recent.data ?? []).some((row) => contactFingerprint(row) === fingerprint)) {
+    await logSpam('contact', ['duplicate']);
+    return NextResponse.json({ ok: true, message: dict.contact.success });
   }
 
   const id = randomUUID();

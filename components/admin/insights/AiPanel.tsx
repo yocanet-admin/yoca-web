@@ -23,16 +23,21 @@ interface AiPanelProps {
   onApplyFaq: (faq: Array<{ q: string; a: string }>) => void;
   onCreateTranslation: (to: Locale, tr: Translation) => void;
   onSetTitle: (title: string) => void;
+  onSetCover: (url: string, alt: string) => void;
 }
 
-type Busy = null | 'direction' | 'draft' | 'research' | 'rewrite' | 'review' | 'seo' | 'faq' | 'translate' | 'repurpose' | 'topics' | 'brief';
-type Tab = 'draft' | 'improve' | 'seo' | 'research' | 'translate' | 'more';
+type DraftResult = ArticleDraft & { polishChanges?: string[] };
+type CoverResult = { url: string; alt: string; subject: string };
+
+type Busy = null | 'direction' | 'draft' | 'research' | 'rewrite' | 'review' | 'seo' | 'faq' | 'translate' | 'repurpose' | 'topics' | 'brief' | 'cover';
+type Tab = 'draft' | 'improve' | 'cover' | 'seo' | 'research' | 'translate' | 'more';
 
 const OBJECTIVES = ['Thought Leadership', 'SEO', 'Educational', 'Lead Generation', 'Product Insight', 'Industry Perspective'];
 const AUDIENCES = ['Founder', 'Marketing Director', 'Brand Manager', 'Product Team', 'Growth Team', 'General Business Audience'];
 const SERVICES = ['brand-strategy-identity', 'web-digital-experiences', 'growth-performance', 'creative-production', 'ai-automation', 'digital-product-development'];
 const PRODUCTS = ['yocaserve', 'wonkick', 'yocastudio', 'demo-hub', 'labs'];
 const INLINE: Array<{ key: string; label: string }> = [
+  { key: 'house-style', label: 'Yapay dili temizle' },
   { key: 'rewrite', label: 'Yeniden yaz' }, { key: 'shorter', label: 'Daha kısa' }, { key: 'natural', label: 'Daha doğal' },
   { key: 'clearer', label: 'Daha net' }, { key: 'technical', label: 'Daha teknik' }, { key: 'editorial', label: 'Daha editoryal' },
   { key: 'yoca-tone', label: 'Yoca tonuna getir' }, { key: 'strengthen-intro', label: 'Girişi güçlendir' },
@@ -59,7 +64,9 @@ export default function AiPanel(props: AiPanelProps) {
   const [direction, setDirection] = useState<ArticleDirection | null>(null);
   const [chosenTitle, setChosenTitle] = useState('');
   const [research, setResearch] = useState<{ digest: string; sources: InsightSource[] } | null>(null);
-  const [draft, setDraft] = useState<ArticleDraft | null>(null);
+  const [draft, setDraft] = useState<DraftResult | null>(null);
+  const [cover, setCover] = useState<CoverResult | null>(null);
+  const [withCover, setWithCover] = useState(true);
 
   // Improve
   const [rewritePreview, setRewritePreview] = useState<string | null>(null);
@@ -105,18 +112,25 @@ export default function AiPanel(props: AiPanelProps) {
   };
   const doDraft = async (direct = false) => {
     if (researchMode && !research) { const r = await doResearch(); if (!r) return; }
-    const d = await run<ArticleDraft>('draft', { action: 'draft', ...briefPayload(), research: research?.digest, direction: direct ? undefined : direction ? { ...direction, chosenTitle } : undefined });
-    if (d) setDraft(d);
+    const d = await run<DraftResult>('draft', { action: 'draft', ...briefPayload(), research: research?.digest, direction: direct ? undefined : direction ? { ...direction, chosenTitle } : undefined });
+    if (d) {
+      setDraft(d);
+      if (withCover) await doCover(d.title, d.excerpt);
+    }
+  };
+  const doCover = async (title = article.title, excerpt = article.excerpt) => {
+    const c = await run<CoverResult>('cover', { action: 'cover', title, excerpt, groupId: article.group_id });
+    if (c) setCover(c);
   };
 
   const busyLabel: Record<Exclude<Busy, null>, string> = {
     direction: 'Yön hazırlanıyor…', draft: 'Taslak hazırlanıyor…', research: 'Araştırma yapılıyor…', rewrite: 'Metin yeniden yazılıyor…',
     review: 'Editör kontrolü yapılıyor…', seo: 'SEO alanları hazırlanıyor…', faq: 'FAQ üretiliyor…', translate: 'Çeviri hazırlanıyor…',
-    repurpose: 'İçerik dönüştürülüyor…', topics: 'Konular öneriliyor…', brief: 'Brief hazırlanıyor…',
+    repurpose: 'İçerik dönüştürülüyor…', topics: 'Konular öneriliyor…', brief: 'Brief hazırlanıyor…', cover: 'Kapak görseli üretiliyor (1 dk kadar)…',
   };
 
   const tabs: Array<{ key: Tab; label: string }> = [
-    { key: 'draft', label: 'Taslak Oluştur' }, { key: 'improve', label: 'Metni İyileştir' }, { key: 'seo', label: 'SEO' },
+    { key: 'draft', label: 'Taslak Oluştur' }, { key: 'improve', label: 'Metni İyileştir' }, { key: 'cover', label: 'Kapak' }, { key: 'seo', label: 'SEO' },
     { key: 'research', label: 'Araştır' }, { key: 'translate', label: 'Çevir' }, { key: 'more', label: 'Diğer' },
   ];
 
@@ -151,6 +165,7 @@ export default function AiPanel(props: AiPanelProps) {
             <label className={label}>Derinlik<select value={depth} onChange={(e) => setDepth(e.target.value as 'short')} className={field}><option value="short">Kısa (600–900)</option><option value="standard">Standart (1000–1500)</option><option value="deep">Derinlemesine (1800–2800)</option></select></label>
             <label className={label}>Ton<select value={tone} onChange={(e) => setTone(e.target.value)} className={field}><option value="default">Yoca Editorial</option><option value="analytical">Daha analitik</option><option value="concise">Daha öz</option><option value="technical">Daha teknik</option><option value="provocative">Daha iddialı</option><option value="educational">Daha eğitici</option></select></label>
           </div>
+          <label className="flex items-center gap-2 text-[12px] font-semibold text-muted"><input type="checkbox" checked={withCover} onChange={(e) => setWithCover(e.target.checked)} /> Taslakla birlikte kapak görseli üret</label>
           <label className="flex items-center gap-2 text-[12px] font-semibold text-muted">
             <input type="checkbox" checked={researchMode} onChange={(e) => setResearchMode(e.target.checked)} /> Araştırmalı Taslak (web araması + kaynaklar)
           </label>
@@ -180,8 +195,22 @@ export default function AiPanel(props: AiPanelProps) {
               <p className="font-bold text-white">{draft.title}</p>
               <p className="text-muted">{draft.excerpt}</p>
               <p className="max-h-40 overflow-auto whitespace-pre-wrap border border-line p-2 text-[12px] text-muted">{draft.body.slice(0, 1500)}{draft.body.length > 1500 ? '…' : ''}</p>
+              {!!draft.polishChanges?.length && (
+                <details className="text-[12px] text-muted">
+                  <summary className="cursor-pointer font-bold text-white">Yazım temizliği: {draft.polishChanges.length} düzeltme</summary>
+                  <ul className="mt-1 list-disc ps-5">{draft.polishChanges.map((c) => <li key={c}>{c}</li>)}</ul>
+                </details>
+              )}
+              {cover && (
+                <figure className="grid gap-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={cover.url} alt={cover.alt} className="aspect-[3/2] w-full border border-line object-cover" />
+                  <figcaption className="text-[11px] text-subtle">Kapak önerisi · {cover.alt}</figcaption>
+                </figure>
+              )}
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => { props.onApplyDraft(draft, research?.sources); setDraft(null); }} className="admin-btn-primary">Editöre aktar (taslak)</button>
+                <button type="button" onClick={() => { props.onApplyDraft(draft, research?.sources); if (cover) props.onSetCover(cover.url, cover.alt); setDraft(null); setCover(null); }} className="admin-btn-primary">{cover ? 'Taslağı ve kapağı aktar' : 'Editöre aktar (taslak)'}</button>
+                {!cover && <button type="button" disabled={!!busy} onClick={() => doCover(draft.title, draft.excerpt)} className="admin-btn">Kapak üret</button>}
                 <button type="button" onClick={() => setDraft(null)} className="admin-btn">Vazgeç</button>
               </div>
             </div>
@@ -216,6 +245,28 @@ export default function AiPanel(props: AiPanelProps) {
               <button type="button" disabled={!selection || !!busy} onClick={async () => { const r = await run<{ text: string }>('rewrite', { action: 'rewrite', inlineAction: 'expand', selection, context: article.body_md }); if (r) setRewritePreview(r.text); }} className="admin-btn !px-2.5 !py-1 !text-[12px]">Seçimi derinleştir</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Kapak ─────────────────────────────────────────────── */}
+      {tab === 'cover' && (
+        <div className="grid gap-3 text-[13px]">
+          <p className="text-muted">Sitedeki görsellerle aynı dilde soyut bir stüdyo görseli üretir: koyu zemin, taş/metal nesneler, tek lime ışık. Yazı, insan, ekran ve logo içermez.</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={!article.title || !!busy} onClick={() => doCover()} className="admin-btn-primary">{cover ? 'Yeniden üret' : 'Kapak görseli üret'}</button>
+          </div>
+          {!article.title && <p className="text-[12px] text-subtle">Önce bir başlık yazın.</p>}
+          {cover && (
+            <figure className="grid gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={cover.url} alt={cover.alt} className="aspect-[3/2] w-full border border-line object-cover" />
+              <figcaption className="text-[12px] text-subtle">{cover.alt}</figcaption>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => { props.onSetCover(cover.url, cover.alt); setCover(null); }} className="admin-btn-primary">Kapak yap</button>
+                <button type="button" onClick={() => setCover(null)} className="admin-btn">Vazgeç</button>
+              </div>
+            </figure>
+          )}
         </div>
       )}
 

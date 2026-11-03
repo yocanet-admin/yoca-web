@@ -3,6 +3,7 @@ import { siteIssues } from '@/lib/cockpit/issues';
 import { istanbulDate } from '@/lib/cockpit/settings';
 import { trafficReport, vercelConfigured } from '@/lib/cockpit/vercel';
 import { escapeHtml } from '@/lib/notify';
+import { buttons, emailLayout, emptyLine, kicker, section, stats, statusList, title, type TelegramButton, type Tone } from '@/lib/notifyTemplates';
 import { getSupabaseAdmin } from '@/lib/supabase';
 
 /**
@@ -54,8 +55,10 @@ function who(lead: SummaryLead): string {
 export interface MorningSummary {
   subject: string;
   heading: string;
-  html: string;
+  /** Full e-mail document. */
+  email: string;
   telegram: string;
+  keyboard: TelegramButton[][];
   counts: { newLeads: number; due: number; waiting: number; siteIssues: number };
 }
 
@@ -107,35 +110,53 @@ export async function buildMorningSummary(now = Date.now()): Promise<MorningSumm
   const spamCount = spam?.count ?? 0;
   const counts = { newLeads: fresh.length, due: due.length + dueTasks.length, waiting: waiting.length, siteIssues: issues.length };
 
-  // ── Sections (plain lines; rendered for e-mail and Telegram) ──
-  const sections: Array<{ title: string; lines: string[]; empty?: string }> = [
-    { title: `Yeni leadler (son 24 saat): ${fresh.length}`, lines: fresh.slice(0, 8).map(who), empty: 'Yeni lead yok.' },
+  // ── Sections: one list for e-mail (status rows) and Telegram (bullets) ──
+  type Line = { tone: Tone; title: string; detail?: string; href?: string };
+  const leadLine = (l: SummaryLead, detail?: string): Line => ({
+    tone: l.type === 'checkup' ? 'lime' : 'green',
+    title: [l.name || '—', l.company].filter(Boolean).join(' · '),
+    detail: [l.type === 'checkup' ? `Check-Up ${l.score ?? '–'}/100` : 'Proje formu', l.fit ? `uygunluk ${l.fit}/5` : '', detail ?? ''].filter(Boolean).join(' · '),
+    href: `${SITE}/admin/submissions?id=${encodeURIComponent(l.id)}`,
+  });
+  const sections: Array<{ title: string; note?: string; lines: Line[]; empty?: string; icon: string }> = [
+    { icon: '✉️', title: 'Yeni leadler', note: 'son 24 saat', lines: fresh.slice(0, 8).map((l) => leadLine(l)), empty: 'Yeni lead yok.' },
     {
-      title: `Bugün takip: ${due.length + dueTasks.length}`,
+      icon: '📌',
+      title: 'Bugün takip',
       lines: [
-        ...due.map((l) => `${who(l)} — takip ${l.followUpOn! < today ? `gecikti (${l.followUpOn})` : 'bugün'}`),
-        ...dueTasks.map((t) => `Görev: ${t.body}${t.client ? ` (${t.client})` : ''}${t.dueOn < today ? ` — gecikti (${t.dueOn})` : ''}`),
+        ...due.map((l) => leadLine(l, l.followUpOn! < today ? `takip gecikti (${l.followUpOn})` : 'takip bugün')),
+        ...dueTasks.map((t): Line => ({
+          tone: t.dueOn < today ? 'red' : 'amber',
+          title: t.body,
+          detail: [t.client, t.dueOn < today ? `gecikti (${t.dueOn})` : 'bugün'].filter(Boolean).join(' · '),
+          href: `${SITE}/admin/clients`,
+        })),
       ],
       empty: 'Bugüne planlı takip veya görev yok.',
     },
-    ...(waiting.length ? [{ title: `Yanıt bekleyen: ${waiting.length}`, lines: waiting.slice(0, 5).map(who) }] : []),
+    ...(waiting.length ? [{ icon: '⏳', title: 'Yanıt bekleyen', note: '24 saatten eski', lines: waiting.slice(0, 5).map((l) => leadLine(l)) }] : []),
     {
-      title: `Siteler: ${issues.length ? `${issues.length} uyarı` : 'sorun yok'}`,
-      lines: issues.map((i) => `${i.severity === 'critical' ? '🔴' : '🟠'} ${i.site}: ${i.text}`),
+      icon: '🌐',
+      title: 'Siteler',
+      lines: issues.map((i): Line => ({ tone: i.severity === 'critical' ? 'red' : 'amber', title: i.site, detail: i.text, href: `${SITE}/admin/sites` })),
       empty: `${checks.length} sitenin hepsi çalışıyor.`,
     },
     ...(traffic
       ? [
           {
+            icon: '📈',
             title: 'Trafik',
             lines: [
-              traffic.yesterday ? `Dün: ${traffic.yesterday.visitors} ziyaretçi, ${traffic.yesterday.pageviews} görüntüleme` : 'Dün: veri yok',
-              `Son 7 gün: ${traffic.week} ziyaretçi (önceki 7 gün: ${traffic.prev})`,
+              { tone: 'muted' as Tone, title: traffic.yesterday ? `Dün ${traffic.yesterday.visitors} ziyaretçi` : 'Dün: veri yok', detail: traffic.yesterday ? `${traffic.yesterday.pageviews} sayfa görüntüleme` : undefined },
+              {
+                tone: (traffic.week >= traffic.prev ? 'green' : 'amber') as Tone,
+                title: `Son 7 gün ${traffic.week} ziyaretçi`,
+                detail: `önceki 7 gün ${traffic.prev}${traffic.prev ? ` · ${traffic.week >= traffic.prev ? '+' : ''}${Math.round(((traffic.week - traffic.prev) / traffic.prev) * 100)}%` : ''}`,
+              },
             ],
           },
         ]
       : []),
-    { title: `Engellenen spam (24 saat): ${spamCount}`, lines: [] },
   ];
 
   const date = new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long', weekday: 'long', timeZone: 'Europe/Istanbul' }).format(now);
@@ -146,26 +167,38 @@ export async function buildMorningSummary(now = Date.now()): Promise<MorningSumm
   ].filter(Boolean);
   const subject = `Günaydın — ${headline.length ? headline.join(', ') : 'sakin bir gün'} (${date})`;
 
-  const html =
-    sections
-      .map(
-        (s) =>
-          `<p style="margin:18px 0 6px 0;"><strong style="color:#ffffff;">${escapeHtml(s.title)}</strong></p>` +
-          (s.lines.length
-            ? `<ul style="margin:0;padding-left:18px;">${s.lines.map((l) => `<li style="margin:0 0 4px 0;">${escapeHtml(l)}</li>`).join('')}</ul>`
-            : s.empty
-              ? `<p style="margin:0;">${escapeHtml(s.empty)}</p>`
-              : ''),
-      )
-      .join('') +
-    `<p style="margin:22px 0 0 0;"><a href="${SITE}/admin" style="display:inline-block;background:#A2FF00;color:#000000;font-weight:bold;text-decoration:none;padding:10px 16px;border-radius:4px;">Kokpiti aç</a></p>`;
+  const email = emailLayout({
+    preheader: headline.length ? `Bugün: ${headline.join(', ')}.` : 'Bugün sakin görünüyor.',
+    label: 'Sabah özeti',
+    body:
+      kicker(`Sabah özeti · ${date}`) +
+      title(headline.length ? 'Bugün seni bekleyenler' : 'Sakin bir gün') +
+      stats([
+        { label: 'Yeni lead', value: fresh.length, tone: fresh.length ? 'lime' : 'muted' },
+        { label: 'Takip', value: counts.due, tone: counts.due ? 'amber' : 'muted' },
+        { label: 'Yanıt bekleyen', value: waiting.length, tone: waiting.length ? 'amber' : 'muted' },
+        { label: 'Site uyarısı', value: issues.length, tone: issues.length ? 'red' : 'muted' },
+      ]) +
+      sections.map((sec) => section(sec.title, sec.lines.length ? statusList(sec.lines) : emptyLine(sec.empty ?? ''), sec.note)).join('') +
+      (spamCount ? emptyLine(`Son 24 saatte ${spamCount} spam mesaj engellendi.`) : '') +
+      `<div style="height:14px;line-height:14px;font-size:0;">&nbsp;</div>` +
+      buttons([{ label: 'Kokpiti aç', href: `${SITE}/admin`, primary: true }, { label: 'Leadler', href: `${SITE}/admin/submissions` }]),
+  });
 
   const telegram =
-    `☀️ <b>Günaydın</b> — ${escapeHtml(date)}\n\n` +
+    `☀️ <b>GÜNAYDIN</b>  ·  ${escapeHtml(date)}\n━━━━━━━━━━━━━━\n` +
+    `✉️ <b>${fresh.length}</b> yeni   📌 <b>${counts.due}</b> takip   ⏳ <b>${waiting.length}</b> bekleyen   🌐 <b>${issues.length}</b> uyarı\n\n` +
     sections
-      .map((s) => `<b>${escapeHtml(s.title)}</b>${s.lines.length ? `\n${s.lines.slice(0, 8).map((l) => `• ${escapeHtml(l)}`).join('\n')}` : s.empty ? `\n${escapeHtml(s.empty)}` : ''}`)
+      .map(
+        (sec) =>
+          `${sec.icon} <b>${escapeHtml(sec.title)}</b>${sec.note ? ` <i>· ${escapeHtml(sec.note)}</i>` : ''}\n` +
+          (sec.lines.length
+            ? sec.lines.slice(0, 6).map((l) => `   • ${escapeHtml(l.title)}${l.detail ? ` — <i>${escapeHtml(l.detail)}</i>` : ''}`).join('\n')
+            : `   <i>${escapeHtml(sec.empty ?? '')}</i>`),
+      )
       .join('\n\n') +
-    `\n\n<a href="${SITE}/admin">Kokpiti aç</a>`;
+    (spamCount ? `\n\n🛡 <i>${spamCount} spam engellendi</i>` : '');
+  const keyboard: TelegramButton[][] = [[{ text: 'Kokpiti aç →', url: `${SITE}/admin` }, { text: 'Leadler', url: `${SITE}/admin/submissions` }]];
 
-  return { subject, heading: `Günaydın — ${date}`, html, telegram, counts };
+  return { subject, heading: `Günaydın — ${date}`, email, telegram, keyboard, counts };
 }

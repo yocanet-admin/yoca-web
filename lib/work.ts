@@ -1,60 +1,91 @@
 import { cache } from 'react';
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase, getSupabaseServiceRole } from '@/lib/supabase';
 import type { CaseStudyRow, Locale } from '@/types';
-import { staticCaseStudies, type CaseStudy, localizeMarket, localizeServices } from '@/lib/workData';
+import { mergeWorkSources, rowToCaseStudy, staticCaseStudies, type CaseStudy } from '@/lib/workData';
 
 /**
  * Yoca — selected work / case studies (server data layer).
- * Content is managed from the admin panel (Supabase `case_studies` table);
- * the localized defaults in lib/workData.ts act as the fallback when the
- * table is empty or Supabase is unreachable.
+ *
+ * One content model, merged per slug (lib/workData.ts → mergeWorkSources):
+ *  - every active `case_studies` row is shown (ordered by order_index);
+ *  - a code project from lib/workData.ts is shown only while its slug has NO
+ *    row in the table — a hidden row (is_active = false) hides that slug;
+ *  - code projects keep their code position (order_index = code index).
+ * Fail closed: when Supabase is configured but the hidden slugs cannot be
+ * read (no service-role key, read error), code projects are NOT shown — a
+ * project an admin hid must never come back by accident. Only a site with no
+ * Supabase at all (local dev) shows the code projects alone.
  */
 
 export type { CaseStudy } from '@/lib/workData';
 
-/** Fetch active case studies once per request (deduped via React cache). */
-const fetchCaseStudyRows = cache(async (): Promise<CaseStudyRow[] | null> => {
+/**
+ * Rows for the merge, or null when Supabase is not configured at all (local dev:
+ * code projects only). When Supabase IS configured the merge needs two things,
+ * and if either is missing it fails CLOSED — code projects are left out rather
+ * than risking re-publishing one that an admin hid:
+ *   1. active rows (anon key; with v11 visitors only see active rows), and
+ *   2. the slugs of hidden rows, read with the service role (slug + flag only).
+ */
+export type WorkSourceStatus = 'ok' | 'not_configured' | 'missing_service_role' | 'read_failed';
+
+const fetchCaseStudyRows = cache(async (): Promise<{ rows: CaseStudyRow[] | null; status: WorkSourceStatus }> => {
   const supabase = getSupabase();
-  if (!supabase) return null;
+  if (!supabase) return { rows: null, status: 'not_configured' };
   try {
     const { data, error } = await supabase
       .from('case_studies')
       .select('*')
-      .eq('is_active', true)
       .order('order_index', { ascending: true })
+      .order('id', { ascending: true })
       .returns<CaseStudyRow[]>();
-    if (error || !data || data.length === 0) return null;
-    return data;
-  } catch {
-    return null;
+    if (error || !data) {
+      console.error('[work] case_studies read failed — code projects withheld:', error?.message);
+      return { rows: [], status: 'read_failed' };
+    }
+    const service = getSupabaseServiceRole();
+    if (!service) {
+      console.error('[work] SUPABASE_SERVICE_ROLE_KEY missing — hidden projects cannot be checked, code projects withheld');
+      return { rows: data.filter((row) => row.is_active), status: 'missing_service_role' };
+    }
+    const hidden = await service.from('case_studies').select('id, slug, is_active, order_index').eq('is_active', false);
+    if (hidden.error) {
+      console.error('[work] hidden slugs read failed — code projects withheld:', hidden.error.message);
+      return { rows: data.filter((row) => row.is_active), status: 'read_failed' };
+    }
+    const seen = new Set(data.map((row) => row.slug));
+    for (const row of (hidden.data ?? []) as Array<Pick<CaseStudyRow, 'id' | 'slug' | 'is_active' | 'order_index'>>) {
+      if (!seen.has(row.slug)) data.push({ ...(row as CaseStudyRow), content: {} as CaseStudyRow['content'] });
+    }
+    return { rows: data, status: 'ok' };
+  } catch (error) {
+    console.error('[work] case_studies read failed — code projects withheld:', (error as Error).message);
+    return { rows: [], status: 'read_failed' };
   }
 });
 
-function rowToCaseStudy(row: CaseStudyRow, locale: Locale): CaseStudy | null {
-  const localized = row.content?.[locale] ?? row.content?.en;
-  if (!localized) return null;
-  return {
-    slug: row.slug,
-    year: row.year,
-    market: localizeMarket(row.market ?? '', locale),
-    image: row.image_url,
-    services: localizeServices(row.services ?? [], locale),
-    kind: (['client', 'concept', 'product', 'experimental', 'venture'] as const).includes(row.kind)
-      ? row.kind
-      : 'client',
-    videoUrl: row.video_url,
-    liveUrl: row.live_url,
-    ...localized,
-  };
+/** Whether code projects may be shown (only when hidden rows could be checked). */
+function codeAllowed(status: WorkSourceStatus): boolean {
+  return status === 'ok' || status === 'not_configured';
+}
+
+/** For the admin/health checks: why code projects are (not) shown. */
+export async function getWorkSourceStatus(): Promise<WorkSourceStatus> {
+  return (await fetchCaseStudyRows()).status;
+}
+
+/** Public merge; code projects only when hidden rows could be checked (fail closed). */
+async function publicEntries() {
+  const { rows, status } = await fetchCaseStudyRows();
+  const allowCode = codeAllowed(status);
+  return mergeWorkSources(rows ?? [], { includeHidden: false }).filter((entry) => allowCode || entry.source === 'db');
 }
 
 export async function getCaseStudies(locale: Locale): Promise<CaseStudy[]> {
-  const rows = await fetchCaseStudyRows();
-  if (!rows) return staticCaseStudies(locale);
-  const mapped = rows
-    .map((row) => rowToCaseStudy(row, locale))
+  const code = new Map(staticCaseStudies(locale).map((cs) => [cs.slug, cs]));
+  return (await publicEntries())
+    .map((entry) => (entry.source === 'db' ? rowToCaseStudy(entry.row, locale) : code.get(entry.slug) ?? null))
     .filter((cs): cs is CaseStudy => cs !== null);
-  return mapped.length > 0 ? mapped : staticCaseStudies(locale);
 }
 
 export async function getCaseStudy(locale: Locale, slug: string): Promise<CaseStudy | null> {
@@ -62,8 +93,7 @@ export async function getCaseStudy(locale: Locale, slug: string): Promise<CaseSt
   return all.find((cs) => cs.slug === slug) ?? null;
 }
 
+/** Every publicly visible slug (same merge rule as getCaseStudies). */
 export async function getAllSlugs(): Promise<string[]> {
-  const rows = await fetchCaseStudyRows();
-  if (!rows) return staticCaseStudies('en').map((cs) => cs.slug);
-  return rows.map((row) => row.slug);
+  return (await publicEntries()).map((entry) => entry.slug);
 }

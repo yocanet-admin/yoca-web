@@ -9,6 +9,7 @@ import { EASE_YOCA } from '@/lib/motion';
 import { staticCaseStudies } from '@/lib/workData';
 import BrandMark from '@/components/ui/BrandMark';
 import LanguageMenu from '@/components/ui/LanguageMenu';
+import { brandText } from '@/components/ui/BrandText';
 
 /**
  * Yoca — Overview shell (the only client boundary of /overview).
@@ -293,7 +294,7 @@ export default function OverviewShell({ locale, base, address, t }: ShellProps) 
             <Reveal key={w.slug} reduced={!!reduced} delay={0.08 * i}>
               <li>
                 <Link href={`${base}/work/${w.slug}`} onClick={cta('overview_work_click')} className="group flex flex-wrap items-baseline justify-between gap-x-8 gap-y-1 border-b border-line py-5 lg:py-6">
-                  <span className="text-[clamp(28px,4.4vw,64px)] font-extrabold uppercase leading-[1] tracking-[-0.03em] text-soft transition-all duration-300 group-hover:translate-x-1 group-hover:text-white rtl:group-hover:-translate-x-1">{w.name}</span>
+                  <span className="text-[clamp(28px,4.4vw,64px)] font-extrabold uppercase leading-[1] tracking-[-0.03em] text-soft transition-all duration-300 group-hover:translate-x-1 group-hover:text-white rtl:group-hover:-translate-x-1" lang="en">{w.name}</span>
                   <span className="flex items-center gap-4 text-[12px] font-bold uppercase tracking-[0.12em] text-subtle"><span>{w.sector}</span><span className="slant bg-surface-elevated px-2.5 py-1 text-[10px] font-extrabold text-soft">{t.workLabels[w.kind]}</span></span>
                 </Link>
               </li>
@@ -444,7 +445,7 @@ function ProductsScene({ t, open, reveal, cta, base, onCta, reduced }: { t: Arra
               <button type="button" onMouseEnter={() => setActive(i)} onFocus={() => setActive(i)} onClick={() => setActive(i)} aria-pressed={active === i} className={`flex w-full flex-col gap-2 border-t border-line py-4 text-start transition-colors lg:min-h-[140px] ${active === i ? 'text-white' : 'text-subtle hover:text-soft'}`}>
                 <span className={`text-[12px] font-extrabold tracking-[0.1em] ${active === i ? 'text-yoca-lime' : ''}`}>{String(i + 1).padStart(2, '0')}</span>
                 <span className={`font-extrabold tracking-[-0.02em] transition-all duration-300 ${active === i ? 'text-[clamp(22px,2.4vw,30px)]' : 'text-[clamp(18px,1.8vw,22px)]'}`}>{p.name}</span>
-                <span className="text-[11px] font-bold uppercase tracking-[0.12em] opacity-80">{p.category}</span>
+                <span className="text-[11px] font-bold uppercase tracking-[0.12em] opacity-80">{brandText(p.category)}</span>
               </button>
             </li>
           </Reveal>

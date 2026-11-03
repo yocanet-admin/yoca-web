@@ -14,6 +14,7 @@ import PageVisual from '@/components/ui/PageVisual';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { buildMetadata, breadcrumbSchema, getRequestContext, jsonLdString } from '@/lib/seo';
+import { brandText } from '@/components/ui/BrandText';
 
 export function generateMetadata(): Metadata {
   const ctx = getRequestContext();
@@ -98,7 +99,7 @@ export default async function AboutPage() {
                     </span>
                     <div>
                       <h3 className="text-[clamp(20px,2vw,26px)] font-extrabold tracking-[-0.02em]">{system.name}</h3>
-                      <p className="mt-1 text-[12px] font-bold uppercase tracking-[0.12em] text-subtle">{system.tagline}</p>
+                      <p className="mt-1 text-[12px] font-bold uppercase tracking-[0.12em] text-subtle">{brandText(system.tagline)}</p>
                       <p className="mt-4 max-w-[52ch] text-[15px] leading-relaxed text-muted">{system.body}</p>
                       <ul className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
                         {system.points.map((point) => (

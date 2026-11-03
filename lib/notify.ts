@@ -1,4 +1,24 @@
 import { getNotifySettings } from '@/lib/cockpit/settings';
+import { getDict } from '@/lib/i18n';
+import {
+  SITE,
+  buttons,
+  emailLayout,
+  esc,
+  facts,
+  istanbulTime,
+  kicker,
+  para,
+  quote,
+  score as scoreBlock,
+  section,
+  tgBar,
+  tgFacts,
+  tgHead,
+  tgQuote,
+  title,
+  type TelegramButton,
+} from '@/lib/notifyTemplates';
 
 /**
  * Yoca — admin notifications (server only): e-mail (Resend) + Telegram.
@@ -14,52 +34,37 @@ import { getNotifySettings } from '@/lib/cockpit/settings';
  *   recipient e-mail, Telegram chat, and on/off switches per alert kind.
  */
 
-const SITE = 'https://yoca.net';
 const NOTIFY_FROM = process.env.NOTIFY_EMAIL_FROM ?? 'Yoca <noreply@yoca.net>';
+// Test environments point these at a capture server; production leaves them unset.
+const RESEND_ENDPOINT = process.env.NOTIFY_RESEND_ENDPOINT || 'https://api.resend.com/emails';
+// A test capture endpoint behind the Supabase gateway also needs the key as `apikey`.
+const CAPTURE_MODE = Boolean(process.env.NOTIFY_RESEND_ENDPOINT);
+const TELEGRAM_API = (process.env.NOTIFY_TELEGRAM_API || 'https://api.telegram.org').replace(/\/$/, '');
 
 export type ChannelResult = 'sent' | 'skipped' | 'error';
 export type AlertKind = 'lead' | 'site' | 'summary' | 'test';
 
 export function escapeHtml(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return esc(value);
 }
 
+/** Simple message in the shared layout (kept for older callers). */
 export function wrapTemplate(heading: string, bodyHtml: string): string {
-  return `<!doctype html>
-<html>
-<body style="margin:0;padding:0;background:#050505;font-family:Arial,Helvetica,sans-serif;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#050505;padding:32px 16px;">
-<tr><td align="center">
-<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
-  <tr><td style="padding:0 8px 24px 8px;">
-    <span style="font-size:22px;font-weight:bold;color:#ffffff;letter-spacing:1px;">YOCA</span><span style="font-size:22px;font-weight:bold;color:#A2FF00;">.</span>
-  </td></tr>
-  <tr><td style="background:#0C0C0C;border:1px solid #292929;border-radius:8px;padding:32px 28px;">
-    <h1 style="margin:0 0 16px 0;font-size:20px;line-height:1.4;color:#ffffff;">${escapeHtml(heading)}</h1>
-    <div style="font-size:14px;line-height:1.7;color:#A1A1A1;">${bodyHtml}</div>
-  </td></tr>
-  <tr><td style="padding:20px 8px;font-size:12px;color:#737373;">
-    Yoca kokpit · <a href="${SITE}/admin" style="color:#A2FF00;">yoca.net/admin</a> · Bildirim ayarları: Ayarlar sayfası
-  </td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>`;
+  return emailLayout({ preheader: heading, label: heading, body: title(heading) + `<div style="font:400 14px/1.65 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#A1A1A1;">${bodyHtml}</div>` });
 }
 
-export async function sendEmail(to: string, subject: string, heading: string, bodyHtml: string, replyTo?: string): Promise<ChannelResult> {
+export async function sendEmail(to: string, subject: string, html: string, replyTo?: string): Promise<ChannelResult> {
   const key = process.env.RESEND_API_KEY;
   if (!key || !to) return 'skipped';
   try {
-    const response = await fetch('https://api.resend.com/emails', {
+    const response = await fetch(RESEND_ENDPOINT, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(CAPTURE_MODE ? { apikey: key } : {}) },
       body: JSON.stringify({
         from: NOTIFY_FROM,
         to: to.split(',').map((x) => x.trim()).filter(Boolean),
         subject,
-        html: wrapTemplate(heading, bodyHtml),
+        html,
         ...(replyTo ? { reply_to: replyTo } : {}),
       }),
     });
@@ -79,7 +84,7 @@ export async function telegramApi<T = unknown>(method: string, body?: Record<str
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return null;
   try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
       method: body ? 'POST' : 'GET',
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -93,13 +98,14 @@ export async function telegramApi<T = unknown>(method: string, body?: Record<str
 }
 
 /** Telegram message in HTML parse mode (escape user text with escapeHtml). */
-export async function sendTelegram(chatId: string | null | undefined, html: string): Promise<ChannelResult> {
+export async function sendTelegram(chatId: string | null | undefined, html: string, keyboard?: TelegramButton[][]): Promise<ChannelResult> {
   if (!process.env.TELEGRAM_BOT_TOKEN || !chatId) return 'skipped';
   const result = await telegramApi('sendMessage', {
     chat_id: chatId,
     text: html.slice(0, 4000),
     parse_mode: 'HTML',
-    disable_web_page_preview: true,
+    link_preview_options: { is_disabled: true },
+    ...(keyboard?.length ? { reply_markup: { inline_keyboard: keyboard } } : {}),
   });
   if (!result?.ok) {
     console.error('notify: telegram responded', result?.description);
@@ -115,9 +121,11 @@ export async function sendTelegram(chatId: string | null | undefined, html: stri
 export async function notifyAdmins(alert: {
   kind: AlertKind;
   subject: string;
-  heading: string;
-  html: string;
+  /** Full e-mail document (build it with emailLayout). */
+  email: string;
   telegram: string;
+  /** Inline URL buttons under the Telegram message (rows of buttons). */
+  keyboard?: TelegramButton[][];
   replyTo?: string;
   force?: boolean;
 }): Promise<{ email: ChannelResult; telegram: ChannelResult }> {
@@ -129,38 +137,58 @@ export async function notifyAdmins(alert: {
     (alert.kind === 'summary' && settings.morning_summary);
   if (!enabled) return { email: 'skipped', telegram: 'skipped' };
   const [email, telegram] = await Promise.all([
-    sendEmail(settings.email_to, alert.subject, alert.heading, alert.html, alert.replyTo),
-    sendTelegram(settings.telegram_chat_id, alert.telegram),
+    sendEmail(settings.email_to, alert.subject, alert.email, alert.replyTo),
+    sendTelegram(settings.telegram_chat_id, alert.telegram, alert.keyboard),
   ]);
   return { email, telegram };
 }
 
-function row(label: string, value: string): string {
-  if (!value) return '';
-  return `<p style="margin:0 0 6px 0;"><strong style="color:#ffffff;">${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`;
-}
-
-function button(href: string, label: string): string {
-  return `<p style="margin:20px 0 0 0;"><a href="${href}" style="display:inline-block;background:#A2FF00;color:#000000;font-weight:bold;text-decoration:none;padding:10px 16px;border-radius:4px;">${escapeHtml(label)}</a></p>`;
-}
+const LOCALE_NAME: Record<string, string> = { tr: 'Türkçe', en: 'İngilizce', az: 'Azerbaycanca', ar: 'Arapça' };
 
 const leadLink = (type: 'contact' | 'checkup', id?: string | null) =>
   `${SITE}/admin/submissions${id ? `?id=${encodeURIComponent(id)}` : type === 'checkup' ? '?tab=checkup' : ''}`;
 
+const mailto = (email: string, subject: string) => `mailto:${email}?subject=${encodeURIComponent(subject)}`;
+
 export async function notifyContact(data: { id?: string | null; name: string; email: string; company: string; message: string; locale: string }) {
   const link = leadLink('contact', data.id);
-  const body =
-    row('İsim', data.name) +
-    row('E-posta', data.email) +
-    row('Şirket', data.company) +
-    row('Dil', data.locale) +
-    `<p style="margin:12px 0 0 0;white-space:pre-line;">${escapeHtml(data.message)}</p>` +
-    button(link, 'Kokpitte aç');
-  const snippet = data.message.length > 400 ? `${data.message.slice(0, 400)}…` : data.message;
-  const telegram =
-    `✉️ <b>Yeni proje talebi</b>\n<b>${escapeHtml(data.name)}</b>${data.company ? ` · ${escapeHtml(data.company)}` : ''}\n${escapeHtml(data.email)}\n\n` +
-    `${escapeHtml(snippet)}\n\n<a href="${link}">Kokpitte aç</a>`;
-  return notifyAdmins({ kind: 'lead', subject: `Yeni proje talebi — ${data.name}`, heading: 'Yeni proje talebi', html: body, telegram, replyTo: data.email });
+  const when = istanbulTime();
+  const replySubject = 'Yoca — talebiniz hakkında';
+  const email = emailLayout({
+    preheader: `${data.name}${data.company ? ` · ${data.company}` : ''}: ${data.message.slice(0, 120)}`,
+    label: 'Yeni proje talebi',
+    body:
+      kicker('Yeni proje talebi') +
+      title(data.name || 'İsimsiz') +
+      para(`${data.company ? `${data.company} · ` : ''}${when}`, { muted: true }) +
+      quote(data.message) +
+      facts([
+        { label: 'E-posta', value: data.email, href: `mailto:${data.email}` },
+        { label: 'Şirket', value: data.company },
+        { label: 'Dil', value: LOCALE_NAME[data.locale] ?? data.locale },
+      ]) +
+      buttons([
+        { label: 'Kokpitte aç', href: link, primary: true },
+        { label: 'E-postayla yanıtla', href: mailto(data.email, replySubject) },
+      ]),
+  });
+  const telegram = [
+    tgHead('✉️', 'Yeni proje talebi', when),
+    `<b>${esc(data.name || 'İsimsiz')}</b>${data.company ? `  ·  ${esc(data.company)}` : ''}`,
+    tgFacts([
+      { icon: '📧', value: data.email, code: true },
+      { icon: '🌐', value: LOCALE_NAME[data.locale] ?? data.locale },
+    ]),
+    tgQuote(data.message),
+  ].join('\n\n');
+  return notifyAdmins({
+    kind: 'lead',
+    subject: `Yeni proje talebi — ${data.name}${data.company ? ` (${data.company})` : ''}`,
+    email,
+    telegram,
+    keyboard: [[{ text: 'Kokpitte aç →', url: link }]],
+    replyTo: data.email,
+  });
 }
 
 export async function notifyCheckup(data: {
@@ -174,26 +202,50 @@ export async function notifyCheckup(data: {
   answers: Record<string, { i: number; v: string }>;
 }) {
   const link = leadLink('checkup', data.id);
-  let body =
-    row('İsim', data.name) +
-    row('E-posta', data.email) +
-    row('Şirket', data.company) +
-    row('Telefon', data.phone) +
-    row('Dil', data.locale) +
-    `<p style="margin:12px 0 8px 0;"><strong style="color:#A2FF00;">Dijital sağlık skoru: ${data.score}/100</strong></p>`;
-  for (const [key, answer] of Object.entries(data.answers)) {
-    body += `<p style="margin:0 0 4px 0;"><strong style="color:#F4F4F1;">${escapeHtml(key)}</strong>: ${escapeHtml(answer.v)}</p>`;
-  }
-  body += button(link, 'Kokpitte aç');
-  const telegram =
-    `🩺 <b>Yeni Digital Check-Up</b> — skor <b>${data.score}/100</b>\n<b>${escapeHtml(data.name)}</b>${data.company ? ` · ${escapeHtml(data.company)}` : ''}\n` +
-    `${escapeHtml(data.email)}${data.phone ? ` · ${escapeHtml(data.phone)}` : ''}\n\n<a href="${link}">Kokpitte aç</a>`;
+  const when = istanbulTime();
+  // Show the questions and answers in Turkish for the owner, whatever language the visitor used.
+  const questions = getDict('tr').checkup.questions;
+  const rows = Object.entries(data.answers).map(([key, answer]) => {
+    const q = questions.find((item) => item.key === key);
+    return { label: q?.title ?? key, value: q?.options[answer.i] ?? answer.v };
+  });
+  const verdict = data.score >= 70 ? 'Güçlü' : data.score >= 40 ? 'Gelişmeye açık' : 'Zayıf';
+  const email = emailLayout({
+    preheader: `${data.name}${data.company ? ` · ${data.company}` : ''} — dijital sağlık skoru ${data.score}/100`,
+    label: 'Yeni Digital Check-Up',
+    body:
+      kicker('Yeni Digital Check-Up') +
+      title(data.name || 'İsimsiz') +
+      para(`${data.company ? `${data.company} · ` : ''}${when}`, { muted: true }) +
+      scoreBlock(data.score, 'Dijital sağlık skoru') +
+      facts([
+        { label: 'E-posta', value: data.email, href: `mailto:${data.email}` },
+        { label: 'Telefon', value: data.phone, href: data.phone ? `tel:${data.phone.replace(/[^+\d]/g, '')}` : undefined },
+        { label: 'Şirket', value: data.company },
+        { label: 'Dil', value: LOCALE_NAME[data.locale] ?? data.locale },
+      ]) +
+      section('Yanıtlar', facts(rows), `${rows.length} soru`) +
+      buttons([
+        { label: 'Kokpitte aç', href: link, primary: true },
+        { label: 'E-postayla yanıtla', href: mailto(data.email, 'Yoca — Digital Check-Up sonucunuz') },
+      ]),
+  });
+  const telegram = [
+    tgHead('🩺', 'Yeni Digital Check-Up', when),
+    `<b>${esc(data.name || 'İsimsiz')}</b>${data.company ? `  ·  ${esc(data.company)}` : ''}`,
+    `<b>${data.score}</b>/100  ${tgBar(data.score)}  ${verdict}`,
+    tgFacts([
+      { icon: '📧', value: data.email, code: true },
+      { icon: '📞', value: data.phone, code: true },
+      { icon: '🌐', value: LOCALE_NAME[data.locale] ?? data.locale },
+    ]),
+  ].join('\n\n');
   return notifyAdmins({
     kind: 'lead',
     subject: `Yeni Digital Check-Up — ${data.name} (${data.score}/100)`,
-    heading: 'Yeni Digital Check-Up başvurusu',
-    html: body,
+    email,
     telegram,
+    keyboard: [[{ text: 'Kokpitte aç →', url: link }]],
     replyTo: data.email,
   });
 }

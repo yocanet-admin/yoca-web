@@ -6,6 +6,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import type { Dict } from '@/lib/i18n';
 import { EASE_YOCA } from '@/lib/motion';
 import SplitWords from '@/components/ui/SplitWords';
+import { brandText } from '@/components/ui/BrandText';
 
 /**
  * Yoca — "One methodology. Three connected systems." (soft-white break)
@@ -75,7 +76,7 @@ export default function SystemPillars({ t, base }: SystemPillarsProps) {
                       </span>
                       <div>
                         <h3 className="text-[clamp(22px,2.2vw,30px)] font-extrabold leading-tight tracking-[-0.02em]">{system.name}</h3>
-                        <p className="light-subtle mt-1.5 text-[12px] font-bold uppercase tracking-[0.14em]">{system.tagline}</p>
+                        <p className="light-subtle mt-1.5 text-[12px] font-bold uppercase tracking-[0.14em]">{brandText(system.tagline)}</p>
                         <p className="light-muted mt-4 max-w-[52ch] text-[16px] leading-relaxed">{system.body}</p>
                         <ul className="mt-5 flex flex-wrap gap-2">
                           {system.points.map((point) => (

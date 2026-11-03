@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { DUR, EASE_YOCA } from '@/lib/motion';
 import SplitWords from '@/components/ui/SplitWords';
+import { brandText } from '@/components/ui/BrandText';
 
 /**
  * Yoca — inner-page intro (shared by every non-home page).
@@ -76,7 +77,7 @@ export default function PageIntro({
         )}
         {eyebrow && (
           <motion.p {...item(0.05)} className={`eyebrow ${crumbs ? 'mt-6' : ''}`}>
-            {eyebrow}
+            {brandText(eyebrow)}
           </motion.p>
         )}
         <h1 className={`mt-6 ${titleMax} text-[clamp(36px,4.8vw,72px)] font-extrabold leading-[1.04] tracking-[-0.03em]`}>
@@ -91,7 +92,7 @@ export default function PageIntro({
                 : 'mt-6 max-w-[58ch] text-[17px] leading-relaxed text-muted lg:text-[18px]'
             }
           >
-            {sub}
+            {brandText(sub)}
           </motion.p>
         )}
         {children && <motion.div {...item(0.28)}>{children}</motion.div>}

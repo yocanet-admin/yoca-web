@@ -8,7 +8,9 @@ import type { Locale, SiteContentRow } from '@/types';
 
 /**
  * Yoca Admin — site metinleri (4 dil).
- * Boş bırakılan alan koddaki varsayılan metne geri döner.
+ * Each key shows which text the site uses: the saved override ("Özel metin")
+ * or the code default from lib/i18n.ts ("Varsayılan"). The default is always
+ * visible under the field; "Varsayılana dön" deletes the override.
  */
 
 const LOCALES: Array<{ code: Locale; label: string }> = [
@@ -22,6 +24,8 @@ export default function AdminContent() {
   const supabase = getAdminClient();
   const [activeLocale, setActiveLocale] = useState<Locale>('tr');
   const [values, setValues] = useState<Record<string, string>>({});
+  // What is stored in site_content right now (= what the site uses), separate from the unsaved field values.
+  const [saved, setSaved] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -40,6 +44,7 @@ export default function AdminContent() {
         map[storageKey(row.key, row.locale)] = row.value;
       }
       setValues(map);
+      setSaved(map);
       setLoading(false);
     })();
   }, [supabase]);
@@ -66,6 +71,7 @@ export default function AdminContent() {
     if (!supabase || dirty.size === 0) return;
     setSaving(true);
     const failed = new Set<string>();
+    const stored: Record<string, string | null> = {};
     let lastError = '';
     for (const sk of Array.from(dirty)) {
       const [locale, key] = sk.split('::');
@@ -78,6 +84,8 @@ export default function AdminContent() {
         if (error) {
           failed.add(sk);
           lastError = error.message;
+        } else {
+          stored[sk] = value.length === 0 ? null : value;
         }
       } catch (error) {
         failed.add(sk);
@@ -86,6 +94,14 @@ export default function AdminContent() {
     }
     // Only the keys that failed stay marked as unsaved, so a retry sends just those.
     setDirty(failed);
+    setSaved((prev) => {
+      const next = { ...prev };
+      for (const [sk, value] of Object.entries(stored)) {
+        if (value === null) delete next[sk];
+        else next[sk] = value;
+      }
+      return next;
+    });
     setSaving(false);
     if (failed.size === 0) {
       setMessage({ tone: 'ok', text: 'Kaydedildi — site anında güncellendi.' });
@@ -98,14 +114,56 @@ export default function AdminContent() {
     }
   };
 
+  /** Drop the override of one key in the active language, so the code default is used again. */
+  const resetToDefault = async (key: string, label: string) => {
+    const sk = storageKey(key, activeLocale);
+    const hasSaved = (saved[sk] ?? '').trim().length > 0;
+    const question = hasSaved
+      ? `“${label}” için özel metin silinsin ve koddaki varsayılan metin kullanılsın mı? Site anında güncellenir; bu geri alınamaz.`
+      : `“${label}” alanındaki kaydedilmemiş metin temizlensin mi?`;
+    if (!window.confirm(question)) return;
+    if (hasSaved) {
+      if (!supabase) return;
+      let errorText = '';
+      try {
+        const { error } = await supabase.from('site_content').delete().eq('key', key).eq('locale', activeLocale);
+        if (error) errorText = error.message;
+      } catch (error) {
+        errorText = (error as Error)?.message || 'bilinmeyen hata';
+      }
+      if (errorText) {
+        setMessage({ tone: 'error', text: `Varsayılana dönülemedi (${errorText}). Oturumunuzu kontrol edip tekrar deneyin.` });
+        return;
+      }
+      setSaved((prev) => {
+        const next = { ...prev };
+        delete next[sk];
+        return next;
+      });
+      setMessage({ tone: 'ok', text: 'Varsayılan metne dönüldü.' });
+      setTimeout(() => setMessage(null), 2500);
+    }
+    setValues((prev) => {
+      const next = { ...prev };
+      delete next[sk];
+      return next;
+    });
+    setDirty((prev) => {
+      const next = new Set(prev);
+      next.delete(sk);
+      return next;
+    });
+  };
+
   return (
     <div className="grid gap-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Metinler</h1>
           <p className="mt-1.5 text-[14px] text-muted">
-            Alanı boş bırakırsanız koddaki varsayılan metin kullanılır. Gri metinler mevcut
-            varsayılanı gösterir.
+            Her alanda sitede hangi metnin kullanıldığı yazar: “Özel metin” (buradan girilen) veya
+            “Varsayılan” (koddaki metin). Varsayılan metin her alanın altında görünür; “Varsayılana dön”
+            özel metni siler.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -156,13 +214,26 @@ export default function AdminContent() {
             const sk = storageKey(entry.key, activeLocale);
             const current = values[sk] ?? '';
             const placeholder = getDictValue(dict, entry.key);
+            const isOverride = (saved[sk] ?? '').trim().length > 0;
+            const isDirty = dirty.has(sk);
             return (
               <div key={entry.key} className="admin-card grid gap-2 !p-4">
                 <label
                   htmlFor={`content-${entry.key}`}
                   className="flex flex-wrap items-baseline justify-between gap-2"
                 >
-                  <span className="text-[13px] font-extrabold">{entry.label}</span>
+                  <span className="flex flex-wrap items-center gap-2 text-[13px] font-extrabold">
+                    {entry.label}
+                    <span
+                      className={`rounded-sm border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                        isOverride ? 'border-yoca-lime/50 text-yoca-lime' : 'border-line text-subtle'
+                      }`}
+                      title="Sitede şu an kullanılan metnin kaynağı"
+                    >
+                      Sitede: {isOverride ? 'Özel metin' : 'Varsayılan'}
+                    </span>
+                    {isDirty && <span className="text-[11px] font-bold text-amber-300">kaydedilmemiş değişiklik</span>}
+                  </span>
                   <code className="text-[11px] text-subtle">{entry.key}</code>
                 </label>
                 {entry.multiline ? (
@@ -183,6 +254,25 @@ export default function AdminContent() {
                     className="admin-input"
                   />
                 )}
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 text-[12px]">
+                    <p className="font-bold text-subtle">
+                      Varsayılan metin (kod){isOverride ? ' — şu an kullanılmıyor' : ' — şu an sitede bu kullanılıyor'}:
+                    </p>
+                    <p className={`mt-0.5 whitespace-pre-wrap ${isOverride ? 'text-subtle' : 'text-muted'}`}>
+                      {placeholder || '(varsayılan metin boş)'}
+                    </p>
+                  </div>
+                  {(isOverride || current.trim().length > 0) && (
+                    <button
+                      type="button"
+                      className="admin-btn flex-none !px-3 !py-1"
+                      onClick={() => resetToDefault(entry.key, entry.label)}
+                    >
+                      Varsayılana dön
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}

@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/cockpit/auth';
 import { getCronState, getNotifySettings, integrations, saveNotifySettings, type NotifySettings } from '@/lib/cockpit/settings';
 import { buildMorningSummary } from '@/lib/cockpit/summary';
 import { escapeHtml, notifyAdmins, sendTelegram, telegramApi } from '@/lib/notify';
+import { SITE, buttons, emailLayout, kicker, para, tgHead, title } from '@/lib/notifyTemplates';
 
 /**
  * Yoca cockpit — notification settings API (admin only).
@@ -45,6 +46,8 @@ export async function POST(request: NextRequest) {
   const admin = await requireAdmin(request);
   if (!admin) return unauthorized();
   const body = (await request.json().catch(() => ({}))) as { action?: string; settings?: Partial<NotifySettings> };
+  // The admin's verified access token: settings changes are written as them (audit actor).
+  const token = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
 
   switch (body.action) {
     case 'save': {
@@ -58,7 +61,7 @@ export async function POST(request: NextRequest) {
       for (const key of ['lead_alerts', 'site_alerts', 'morning_summary'] as const) {
         if (typeof input[key] === 'boolean') patch[key] = input[key];
       }
-      const ok = await saveNotifySettings(patch);
+      const ok = await saveNotifySettings(patch, token);
       return NextResponse.json({ ok, error: ok ? undefined : saveError() });
     }
 
@@ -73,14 +76,14 @@ export async function POST(request: NextRequest) {
       const chat = chats[0]?.chat as (TelegramUpdate['message'] & object)['chat'] | undefined;
       if (!chat) return NextResponse.json({ ok: false, error: 'Bota henüz mesaj gelmemiş. Telegram’da botu açıp /start yazın, sonra tekrar deneyin.' });
       const name = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || chat.username || String(chat.id);
-      const saved = await saveNotifySettings({ telegram_chat_id: String(chat.id), telegram_chat_name: name });
+      const saved = await saveNotifySettings({ telegram_chat_id: String(chat.id), telegram_chat_name: name }, token);
       if (!saved) return NextResponse.json({ ok: false, error: saveError() });
-      await sendTelegram(String(chat.id), `✅ <b>Yoca kokpit bağlandı.</b>\nYeni lead, site uyarıları ve sabah özeti buraya gelecek.\n\nBağlayan: ${escapeHtml(admin.email ?? 'admin')}`);
+      await sendTelegram(String(chat.id), `${tgHead('✅', 'Yoca kokpit bağlandı')}\n\nYeni lead, site uyarıları ve sabah özeti buraya gelecek.\n<i>Bağlayan: ${escapeHtml(admin.email ?? 'admin')}</i>`, [[{ text: 'Kokpiti aç →', url: `${SITE}/admin` }]]);
       return NextResponse.json({ ok: true, chat: { id: String(chat.id), name } });
     }
 
     case 'telegram-unlink': {
-      const ok = await saveNotifySettings({ telegram_chat_id: null, telegram_chat_name: null });
+      const ok = await saveNotifySettings({ telegram_chat_id: null, telegram_chat_name: null }, token);
       return NextResponse.json({ ok });
     }
 
@@ -89,16 +92,25 @@ export async function POST(request: NextRequest) {
         kind: 'test',
         force: true,
         subject: 'Yoca kokpit — test bildirimi',
-        heading: 'Test bildirimi',
-        html: `<p style="margin:0;">Bu bir test. Bildirimler bu adrese ulaşıyor.</p><p style="margin:8px 0 0 0;">Gönderen: ${escapeHtml(admin.email ?? 'admin')}</p>`,
-        telegram: `🔔 <b>Test bildirimi</b>\nBildirimler bu sohbete ulaşıyor.\nGönderen: ${escapeHtml(admin.email ?? 'admin')}`,
+        email: emailLayout({
+          preheader: 'Bildirimler bu adrese ulaşıyor.',
+          label: 'Test bildirimi',
+          body:
+            kicker('Test bildirimi') +
+            title('Her şey yolunda') +
+            para('Bildirimler bu adrese ulaşıyor. Yeni lead, site uyarıları ve sabah özeti bu tasarımla gelecek.') +
+            para(`Gönderen: ${admin.email ?? 'admin'}`, { muted: true }) +
+            buttons([{ label: 'Ayarları aç', href: `${SITE}/admin/settings`, primary: true }]),
+        }),
+        telegram: `${tgHead('🔔', 'Test bildirimi')}\n\nBildirimler bu sohbete ulaşıyor.\n<i>Gönderen: ${escapeHtml(admin.email ?? 'admin')}</i>`,
+        keyboard: [[{ text: 'Ayarları aç →', url: `${SITE}/admin/settings` }]],
       });
       return NextResponse.json({ ok: true, sent });
     }
 
     case 'morning': {
       const summary = await buildMorningSummary();
-      const sent = await notifyAdmins({ kind: 'summary', force: true, subject: summary.subject, heading: summary.heading, html: summary.html, telegram: summary.telegram });
+      const sent = await notifyAdmins({ kind: 'summary', force: true, subject: summary.subject, email: summary.email, telegram: summary.telegram, keyboard: summary.keyboard });
       return NextResponse.json({ ok: true, sent, counts: summary.counts });
     }
 

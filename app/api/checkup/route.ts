@@ -3,8 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { CHECKUP_WEIGHTS, getDict } from '@/lib/i18n';
 import { notifyCheckup } from '@/lib/notify';
+import { checkupFingerprint, clientIp, rateLimited, storedCheckupFingerprint } from '@/lib/formGuard';
 import { logSpam, screenSubmission } from '@/lib/spam';
 import type { CheckupAnswer, CheckupPayload, Locale } from '@/types';
+
+/** A re-send with IDENTICAL content inside this window is treated as one submission. */
+const DUPLICATE_WINDOW_MS = 30 * 60 * 1000;
+
+const TOO_MANY: Record<string, string> = {"tr": "Kısa sürede çok fazla gönderim yapıldı. Lütfen biraz sonra tekrar deneyin.", "en": "Too many submissions. Please try again later.", "az": "Qısa müddətdə çox göndəriş edildi. Bir az sonra yenidən cəhd edin.", "ar": "عدد كبير من الإرسالات. يرجى المحاولة لاحقًا."};
 
 /**
  * Yoca — Digital Check-Up submission endpoint.
@@ -16,19 +22,7 @@ import type { CheckupAnswer, CheckupPayload, Locale } from '@/types';
 
 export const runtime = 'nodejs';
 
-// Best-effort in-memory rate limit (per serverless instance).
-const hits = new Map<string, number[]>();
-const RATE_LIMIT = 5;
-const WINDOW_MS = 60 * 60 * 1000;
-
-function rateLimited(ip: string): boolean {
-  const now = Date.now();
-  const list = (hits.get(ip) ?? []).filter((ts) => ts > now - WINDOW_MS);
-  if (list.length >= RATE_LIMIT) return true;
-  list.push(now);
-  hits.set(ip, list);
-  return false;
-}
+// Rate limit: lib/formGuard.ts (shared across instances once v13 is installed).
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LOCALES: Locale[] = ['en', 'tr', 'az', 'ar'];
@@ -41,13 +35,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const ip =
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip') ||
-    'unknown';
-  if (rateLimited(ip)) {
+  if (await rateLimited('checkup', clientIp(request.headers))) {
     return NextResponse.json(
-      { ok: false, error: 'Too many submissions. Please try again later.' },
+      { ok: false, error: TOO_MANY[String((payload as { locale?: string }).locale)] ?? TOO_MANY.en },
       { status: 429 },
     );
   }
@@ -112,6 +102,24 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json({ ok: false, error: dict.checkup.errorGeneric }, { status: 503 });
+  }
+
+  // Technical re-send (double click, retry): same e-mail AND identical answers and
+  // contact fields within the window → one row, one notification, logged as
+  // "duplicate". Changed answers or details from the same person are a new,
+  // real submission and are stored.
+  const since = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+  const fingerprint = checkupFingerprint({ name, company, email, phone, locale, answers });
+  const recent = await supabase
+    .from('checkup_submissions')
+    .select('data_json, contact_info_json')
+    .eq('contact_info_json->>email', email)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(10);
+  if (!recent.error && (recent.data ?? []).some((row) => storedCheckupFingerprint(row) === fingerprint)) {
+    await logSpam('checkup', ['duplicate']);
+    return NextResponse.json({ ok: true, score: finalScore });
   }
 
   const id = randomUUID();

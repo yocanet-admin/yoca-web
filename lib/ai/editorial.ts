@@ -11,6 +11,11 @@ import {
   SeoPackSchema,
   TopicIdeasSchema,
   TranslationSchema,
+  PolishSchema,
+  CoverConceptSchema,
+  validatePolish,
+  type Polish,
+  type CoverConcept,
   validateDirection,
   validateDraft,
   validateReview,
@@ -100,7 +105,7 @@ export async function generateDraft(brief: Brief): Promise<OpenAIResult<ArticleD
 
 export type InlineAction =
   | 'rewrite' | 'shorter' | 'natural' | 'clearer' | 'technical' | 'editorial' | 'yoca-tone'
-  | 'improve-title' | 'strengthen-intro' | 'add-example' | 'remove-repetition' | 'section-rewrite' | 'expand' | 'condense';
+  | 'improve-title' | 'strengthen-intro' | 'add-example' | 'remove-repetition' | 'section-rewrite' | 'expand' | 'condense' | 'house-style';
 
 const INLINE_INSTRUCTIONS: Record<InlineAction, string> = {
   rewrite: 'Rewrite the selection so it reads better while preserving meaning, facts and links.',
@@ -117,7 +122,36 @@ const INLINE_INSTRUCTIONS: Record<InlineAction, string> = {
   'section-rewrite': 'Rewrite ONLY this section (keep its ## heading line first, unchanged unless clearly weak) so it advances the article; keep it consistent with the surrounding context. Preserve links.',
   expand: 'Deepen the selection with reasoning and one concrete example; do not pad; no invented numbers.',
   condense: 'Condense the whole text substantially while keeping structure, headings, links and every factual claim.',
+  'house-style': 'Edit the selection against the house style in the system instructions with the minimum effective changes: remove every listed pattern, banned word and stock phrase, keep the meaning, voice, facts, links and Markdown. Leave strong sentences alone.',
 };
+
+/**
+ * Second pass over a fresh draft: apply the house style with minimal edits.
+ * Facts, structure, headings and links stay; only the prose is cleaned.
+ */
+export async function polishDraft(draft: { title: string; excerpt: string; body: string }, locale: string): Promise<OpenAIResult<Polish>> {
+  const res = await callOpenAI<Polish>({
+    model: MODELS.editorial,
+    system: YOCA_EDITORIAL_SYSTEM,
+    user: `You are doing the final line edit of this ${LOCALE_NAMES[locale] ?? locale} article before it goes to the editor.\n\nCheck every sentence against the house style. Fix what breaks it with the smallest change that works. Keep: the argument, every factual claim, headings (you may tighten their wording), links, Markdown subset and overall length (±10%). Do not add new facts, numbers, examples or sources. Then reread the result and fix anything that still matches a listed pattern.\n\nReturn the edited title, excerpt and body, plus a short list of the kinds of changes you made (in Turkish, max 8 items, e.g. "Sonuç olarak ile başlayan kapanış kaldırıldı").\n\nTitle: ${draft.title}\nExcerpt: ${draft.excerpt}\n\nBody:\n${draft.body.slice(0, 60_000)}`,
+    schema: PolishSchema,
+    maxOutputTokens: 9000,
+    timeoutMs: 180_000,
+  });
+  if (!validatePolish(res.data)) throw new OpenAIError('Polish failed validation', 502, res.requestId);
+  return res;
+}
+
+/** One concrete studio still-life idea for the article's cover (no text, people or screens). */
+export async function coverConcept(title: string, excerpt: string): Promise<OpenAIResult<CoverConcept>> {
+  return callOpenAI<CoverConcept>({
+    model: MODELS.editorial,
+    system: 'You are the art director of Yoca. Covers are photorealistic abstract studio still lifes: matte stone, concrete, frosted glass and brushed metal objects on a dark graphite set, lit by one thin lime-green light line. You turn an article into ONE physical object metaphor for that set.',
+    user: `Article title: ${title}\nLead: ${excerpt}\n\nDescribe in one English sentence (max 40 words) the objects and their arrangement that express the article's core idea as a physical metaphor, and where the lime light line sits. Absolutely no text, letters, numbers, logos, screens, devices, people, hands or faces. Avoid famous imagery (album covers, logos, film posters). Also return a short Turkish alt text (max 120 characters) describing what is visible.`,
+    schema: CoverConceptSchema,
+    maxOutputTokens: 300,
+  });
+}
 
 export async function rewriteText(action: InlineAction, selection: string, context: string, locale: string, instruction?: string): Promise<OpenAIResult<string>> {
   const res = await callOpenAI<{ text: string }>({
@@ -134,7 +168,7 @@ export async function reviewArticle(title: string, body: string, locale: string)
   const res = await callOpenAI<EditorialReview>({
     model: MODELS.editorial,
     system: YOCA_EDITORIAL_SYSTEM,
-    user: `Act as Yoca's editor-in-chief and run an editorial quality check on this draft (${LOCALE_NAMES[locale] ?? locale}). This is heuristic editorial guidance, not a scientific score.\n\nScore 0–100: brandVoice, clarity, specificity, structure, seo. Rate clicheRisk low|medium|high. List every factual/numeric claim that lacks a supporting source (unverifiedClaims). List concrete issues (e.g. "Introduction is generic", "Section 3 repeats section 2", "Meta description too long") and actionable suggestions.\n\nTitle: ${title}\n\n${body.slice(0, 40_000)}`,
+    user: `Act as Yoca's editor-in-chief and run an editorial quality check on this draft (${LOCALE_NAMES[locale] ?? locale}). This is heuristic editorial guidance, not a scientific score.\n\nScore 0–100: brandVoice, clarity, specificity, structure, seo. Rate clicheRisk low|medium|high. List every factual/numeric claim that lacks a supporting source (unverifiedClaims). List concrete issues (e.g. "Introduction is generic", "Section 3 repeats section 2", "Meta description too long") and actionable suggestions. Also check the text against the house style: add every violation to issues as "[Yazım] <pattern> — \"<short quote>\"" (at most 10), and lower clicheRisk accordingly.\n\nTitle: ${title}\n\n${body.slice(0, 40_000)}`,
     schema: EditorialReviewSchema,
     maxOutputTokens: 1500,
   });

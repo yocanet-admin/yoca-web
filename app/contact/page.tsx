@@ -20,9 +20,12 @@ export function generateMetadata(): Metadata {
   });
 }
 
-export default async function ContactPage() {
+export default async function ContactPage({ searchParams }: { searchParams?: { product?: string } }) {
   const ctx = getRequestContext();
   const t = await getContent(ctx.locale);
+  // Coming from a product card: start the message with the product's name (only known keys).
+  const product = t.products.items.find((item) => item.key === searchParams?.product);
+  const prefill = product ? t.products.enquirePrefill.replace('{product}', product.name) : '';
   const base = ctx.base;
   const calendlyUrl = t.contact.calendlyUrl.trim();
 
@@ -62,6 +65,7 @@ export default async function ContactPage() {
               errorRequired={t.checkup.errorRequired}
               errorEmail={t.checkup.errorEmail}
               errorGeneric={t.checkup.errorGeneric}
+              prefillMessage={prefill}
             />
             <aside className="glass grid justify-items-start gap-3 rounded-md p-7 lg:sticky lg:top-28">
               <h2 className="text-[17px] font-extrabold">{t.contact.direct}</h2>
