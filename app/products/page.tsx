@@ -11,6 +11,7 @@ import { getProductMedia } from '@/lib/productMedia';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { buildMetadata, breadcrumbSchema, getRequestContext, jsonLdString } from '@/lib/seo';
+import { brandText } from '@/components/ui/BrandText';
 
 export function generateMetadata(): Metadata {
   const ctx = getRequestContext();
@@ -64,7 +65,7 @@ export default async function ProductsPage() {
               className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.12em] text-subtle transition-colors hover:text-yoca-lime"
             >
               <span aria-hidden="true" className="slant block h-2 w-2.5 bg-yoca-green" />
-              {product.name}
+              <span lang="en">{product.name}</span>
             </a>
           ))}
         />
@@ -92,7 +93,7 @@ export default async function ProductsPage() {
                     {/* Identity + copy */}
                     <div>
                       <h2 className="text-[clamp(26px,2.8vw,40px)] font-extrabold leading-tight tracking-[-0.03em]">{product.name}</h2>
-                      <p className="light-subtle mt-3 text-[12px] font-bold uppercase tracking-[0.14em]">{product.category}</p>
+                      <p className="light-subtle mt-3 text-[12px] font-bold uppercase tracking-[0.14em]">{brandText(product.category)}</p>
                       <p className="light-muted mt-5 max-w-[50ch] text-[16px] leading-relaxed">{product.desc}</p>
                       <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2">
                         {product.capabilities.map((capability) => (
@@ -123,9 +124,13 @@ export default async function ProductsPage() {
                           {product.cta} ↗
                         </a>
                       ) : (
-                        <span className="inline-flex min-h-12 w-fit items-center gap-2 border border-[rgba(5,5,5,0.3)] px-6 py-2.5 text-[14px] font-bold text-[#050505]">
-                          {p.overviewCta}
-                        </span>
+                        // No public product URL yet: a real link to the contact form about this product.
+                        <Link
+                          href={`${base}/contact?product=${encodeURIComponent(product.key)}#contact-form`}
+                          className="inline-flex min-h-12 w-fit items-center gap-2 border border-[rgba(5,5,5,0.3)] px-6 py-2.5 text-[14px] font-bold text-[#050505] transition-colors hover:border-[#050505] hover:bg-[#050505] hover:text-white"
+                        >
+                          {p.enquireCta} <span aria-hidden="true">→</span>
+                        </Link>
                       )}
                     </div>
                   </li>
