@@ -127,6 +127,10 @@ begin
       from pg_policies
      where schemaname = 'public'
        and 'authenticated' = any (roles)
+       -- public policies (anon + authenticated, e.g. "public read case studies",
+       -- public form inserts) must stay open to visitors: skip them
+       and not ('anon' = any (roles))
+       and not ('public' = any (roles))
        and tablename in (
          'sections', 'menus', 'team_members', 'site_content', 'case_studies',
          'checkup_submissions', 'contact_submissions',
