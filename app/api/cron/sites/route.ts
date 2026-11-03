@@ -3,6 +3,7 @@ import { cronAuthorized } from '@/lib/cockpit/cron';
 import { checkSites, type MonitoredSite, type SiteCheck } from '@/lib/cockpit/monitor';
 import { getCronState, saveCronState } from '@/lib/cockpit/settings';
 import { escapeHtml, notifyAdmins } from '@/lib/notify';
+import { SITE, buttons, emailLayout, istanbulTime, kicker, section, statusList, tgHead, title, type Tone } from '@/lib/notifyTemplates';
 import { getSupabaseAdmin } from '@/lib/supabase';
 
 /**
@@ -83,10 +84,10 @@ export async function GET(request: NextRequest) {
 
   const rows = data as SiteRow[];
   const checks = await checkSites(rows, { domain: false });
-  const down: string[] = [];
-  const downNames: string[] = [];
-  const recovered: string[] = [];
-  const unsigned: string[] = [];
+  type Item = { name: string; url: string; detail: string };
+  const down: Item[] = [];
+  const recovered: Item[] = [];
+  const unsigned: Item[] = [];
 
   await Promise.all(
     rows.map(async (row, i) => {
@@ -99,17 +100,16 @@ export async function GET(request: NextRequest) {
       };
       if (bad && patch.fail_count! >= 2 && !row.alerted) {
         patch.alerted = true;
-        downNames.push(row.name);
-        down.push(`<b>${escapeHtml(row.name)}</b> — ${escapeHtml(problem(check))}\n${escapeHtml(row.url)}`);
+        down.push({ name: row.name, url: row.url, detail: problem(check) });
       }
       if (!bad && row.alerted) {
         patch.alerted = false;
-        recovered.push(`<b>${escapeHtml(row.name)}</b> tekrar çalışıyor${check.ms !== null ? ` (${(check.ms / 1000).toFixed(1)} sn)` : ''}`);
+        recovered.push({ name: row.name, url: row.url, detail: `tekrar çalışıyor${check.ms !== null ? ` · ${(check.ms / 1000).toFixed(1)} sn` : ''}` });
       }
       const missing = row.expects_signature && check.signature === false && !bad;
       if (missing && !row.signature_alerted) {
         patch.signature_alerted = true;
-        unsigned.push(`<b>${escapeHtml(row.name)}</b> — “Built by YOCA” imzası sitede görünmüyor`);
+        unsigned.push({ name: row.name, url: row.url, detail: '“Built by YOCA” imzası sitede görünmüyor' });
       }
       if (check.signature === true && row.signature_alerted) patch.signature_alerted = false;
       await supabase.from('monitored_sites').update(patch).eq('id', row.id);
@@ -118,19 +118,36 @@ export async function GET(request: NextRequest) {
 
   let sent = null;
   if (down.length || recovered.length || unsigned.length) {
-    const blocks = [
-      down.length ? `🔴 <b>Site sorunu</b>\n${down.join('\n\n')}` : '',
-      recovered.length ? `🟢 <b>Düzeldi</b>\n${recovered.join('\n')}` : '',
-      unsigned.length ? `⚠️ <b>İmza</b>\n${unsigned.join('\n')}` : '',
-    ].filter(Boolean);
-    const telegram = `${blocks.join('\n\n')}\n\n<a href="https://yoca.net/admin/sites">Siteler</a>`;
-    const html = blocks.map((b) => `<p style="margin:0 0 14px 0;white-space:pre-line;">${b.replace(/<b>/g, '<strong style="color:#ffffff;">').replace(/<\/b>/g, '</strong>')}</p>`).join('');
+    const when = istanbulTime();
+    const groups: Array<{ items: Item[]; tone: Tone; heading: string; icon: string }> = [
+      { items: down, tone: 'red', heading: 'Erişilemiyor', icon: '🔴' },
+      { items: recovered, tone: 'green', heading: 'Düzeldi', icon: '🟢' },
+      { items: unsigned, tone: 'amber', heading: 'İmza eksik', icon: '🟠' },
+    ].filter((g) => g.items.length) as Array<{ items: Item[]; tone: Tone; heading: string; icon: string }>;
     const subject = down.length
-      ? `Site sorunu: ${downNames.join(', ')}`
+      ? `Site sorunu: ${down.map((d) => d.name).join(', ')}`
       : recovered.length
-        ? 'Site tekrar çalışıyor'
-        : 'İmza uyarısı';
-    sent = await notifyAdmins({ kind: 'site', subject, heading: subject, html, telegram });
+        ? `Tekrar çalışıyor: ${recovered.map((d) => d.name).join(', ')}`
+        : `İmza uyarısı: ${unsigned.map((d) => d.name).join(', ')}`;
+    const lead = down.length ? 'Site sorunu' : recovered.length ? 'Site tekrar çalışıyor' : 'İmza uyarısı';
+    const email = emailLayout({
+      preheader: subject,
+      label: lead,
+      body:
+        kicker(lead, down.length ? 'red' : recovered.length ? 'green' : 'amber') +
+        title(down.length ? `${down.length} site erişilemiyor` : recovered.length ? `${recovered.length} site tekrar ayakta` : 'İmza bulunamadı') +
+        groups
+          .map((g) => section(g.heading, statusList(g.items.map((it) => ({ tone: g.tone, title: it.name, detail: `${it.detail} · ${it.url.replace(/^https?:\/\//, '')}`, href: it.url })))))
+          .join('') +
+        `<p style="margin:14px 0 18px 0;font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#6E6E6E;">Kontrol: ${escapeHtml(when)} · iki kontrol üst üste başarısız olunca haber verilir.</p>` +
+        buttons([{ label: 'Siteleri aç', href: `${SITE}/admin/sites`, primary: true }]),
+    });
+    const telegram =
+      `${tgHead(down.length ? '🔴' : recovered.length ? '🟢' : '🟠', lead, when)}\n\n` +
+      groups
+        .map((g) => g.items.map((it) => `${g.icon} <b>${escapeHtml(it.name)}</b>\n     ${escapeHtml(it.detail)}\n     <a href="${escapeHtml(it.url)}">${escapeHtml(it.url.replace(/^https?:\/\//, ''))}</a>`).join('\n\n'))
+        .join('\n\n');
+    sent = await notifyAdmins({ kind: 'site', subject, email, telegram, keyboard: [[{ text: 'Siteleri aç →', url: `${SITE}/admin/sites` }]] });
   }
 
   return NextResponse.json({ ok: true, published, checked: rows.length, down: down.length, recovered: recovered.length, unsigned: unsigned.length, sent });
