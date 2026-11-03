@@ -1,5 +1,5 @@
 import { cache } from 'react';
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase, getSupabaseAdmin } from '@/lib/supabase';
 import type { CaseStudyRow, Locale } from '@/types';
 import { mergeWorkSources, staticCaseStudies, type CaseStudy, localizeMarket, localizeServices } from '@/lib/workData';
 
@@ -32,6 +32,17 @@ const fetchCaseStudyRows = cache(async (): Promise<CaseStudyRow[] | null> => {
       .order('id', { ascending: true })
       .returns<CaseStudyRow[]>();
     if (error || !data) return null;
+    // With supabase/upgrade-v11 visitors (anon key) only see ACTIVE rows, so the
+    // slugs of hidden rows are read server-side with the service role — only the
+    // slug and the flag, never their content — to keep their code project hidden.
+    const seen = new Set(data.map((row) => row.slug));
+    const admin = getSupabaseAdmin();
+    if (admin) {
+      const hidden = await admin.from('case_studies').select('id, slug, is_active, order_index').eq('is_active', false);
+      for (const row of (hidden.data ?? []) as Array<Pick<CaseStudyRow, 'id' | 'slug' | 'is_active' | 'order_index'>>) {
+        if (!seen.has(row.slug)) data.push({ ...(row as CaseStudyRow), content: {} as CaseStudyRow['content'] });
+      }
+    }
     return data;
   } catch {
     return null;

@@ -35,6 +35,9 @@ import {
  */
 
 const NOTIFY_FROM = process.env.NOTIFY_EMAIL_FROM ?? 'Yoca <noreply@yoca.net>';
+// Test environments point these at a capture server; production leaves them unset.
+const RESEND_ENDPOINT = process.env.NOTIFY_RESEND_ENDPOINT || 'https://api.resend.com/emails';
+const TELEGRAM_API = (process.env.NOTIFY_TELEGRAM_API || 'https://api.telegram.org').replace(/\/$/, '');
 
 export type ChannelResult = 'sent' | 'skipped' | 'error';
 export type AlertKind = 'lead' | 'site' | 'summary' | 'test';
@@ -52,7 +55,7 @@ export async function sendEmail(to: string, subject: string, html: string, reply
   const key = process.env.RESEND_API_KEY;
   if (!key || !to) return 'skipped';
   try {
-    const response = await fetch('https://api.resend.com/emails', {
+    const response = await fetch(RESEND_ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -79,7 +82,7 @@ export async function telegramApi<T = unknown>(method: string, body?: Record<str
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return null;
   try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
       method: body ? 'POST' : 'GET',
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
