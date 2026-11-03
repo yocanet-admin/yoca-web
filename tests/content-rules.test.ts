@@ -13,7 +13,7 @@ import { countSourceMarkers, fence, isPrivateAddress, safeSourceUrl, suspiciousL
 import { applyInsightsVisibility, isPublishableOnSite } from '@/lib/publicRules';
 import { DEFAULT_COMPANY, DEFAULT_KVKK_PUBLISH, missingForNotice, noticeIsFinal, sanitizeCompany } from '@/lib/companyInfo';
 import { checkModel } from '@/lib/ai/settings';
-import { budgetBlock, estimateCost } from '@/lib/ai/cost';
+import { budgetBlock, estimateCost, priceBlock } from '@/lib/ai/cost';
 import { markFindings } from '@/lib/ai/editorial';
 import { validateStyleReview } from '@/lib/ai/schemas';
 import { NO_AI_SLOP_RULES, NO_AI_SLOP_SOURCE, SLOP_PATTERN_IDS } from '@/lib/ai/prompts/no-ai-slop';
@@ -213,4 +213,25 @@ test('image prompt: varied by topic, no text/logo/robots, no forced house motif'
   assert.match(p, /A service counter with appointment cards/);
   assert.notEqual(buildImagePrompt('x', 'photo', 0), buildImagePrompt('x', 'photo', 1));
   assert.match(buildImagePrompt('x', 'diagram'), /absolutely no text/);
+});
+
+test('unpriced model: paid call blocked, never counted as 0 USD', () => {
+  const prices = { 'priced-model': { input: 1, output: 5 } };
+  assert.equal(priceBlock('priced-model', prices), null);
+  assert.match(String(priceBlock('unpriced-model', prices)), /fiyat tablosunda yok/);
+  assert.ok(priceBlock('', prices));
+  assert.ok(priceBlock('x', undefined));
+  const verified = { at: '2026-11-03T00:00:00Z', available: ['priced-model', 'unpriced-model'] };
+  const blocked = checkModel({ verified, prices }, 'unpriced-model', 'text');
+  assert.equal(blocked.ok, false);
+  assert.equal(!blocked.ok && blocked.code, 'no_price');
+  assert.ok(checkModel({ verified, prices }, 'priced-model', 'text').ok);
+  assert.ok(checkModel({ verified: null, prices }, 'mock-text', 'text', true).ok); // mock: no paid call
+  assert.equal(estimateCost({ input_tokens: 10 }, undefined, 'text'), null); // stays "unknown", not 0
+});
+
+test('monthly threshold wording is an estimate threshold, not a hard limit', () => {
+  assert.match(String(budgetBlock(5, 5)), /tahmini/);
+  assert.match(String(budgetBlock(5, 5)), /eşi/);
+  assert.doesNotMatch(String(budgetBlock(5, 5)), /bütçeyi artırın/i);
 });

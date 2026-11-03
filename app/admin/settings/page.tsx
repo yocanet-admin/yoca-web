@@ -289,7 +289,7 @@ export default function AdminSettings() {
             <li>
               Vercel’e {code('OPENAI_API_KEY')} adıyla ekleyin, sonra Redeploy. Aynı anahtar İçerik / Insights editöründeki yapay zekâyı da açar.
             </li>
-            <li>Bu sayfadaki “Yapay zekâ” kartında “Modelleri doğrula”ya basın, listeden metin ve görsel modellerini seçin, aylık bütçe girin (0 iken yapay zekâ kapalıdır).</li>
+            <li>Bu sayfadaki “Yapay zekâ” kartında “Modelleri doğrula”ya basın, listeden metin ve görsel modellerini seçin, aylık tahmini kullanım eşiği girin (0 iken yapay zekâ kapalıdır; kesin harcama sınırı değildir).</li>
             <li>Leadler sayfasında bir lead’i açıp “Özetle” veya “Yanıt taslağı”na basın; e-posta ve telefon OpenAI’ye gönderilmez.</li>
           </Steps>
           <p className="mt-3 text-[12px] text-subtle">Kullanım ücreti OpenAI hesabınıza yansır. Yapay zekâ hiçbir şeyi kendiliğinden göndermez; taslakları siz gönderirsiniz.</p>

@@ -47,9 +47,24 @@ export function monthStartIso(now = new Date()): string {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
 }
 
-/** Budget decision: null = allowed; otherwise a Turkish reason. */
+/**
+ * Monthly usage THRESHOLD decision (not a hard spend limit): null = allowed;
+ * otherwise a Turkish reason. It compares the ESTIMATED spend recorded so far
+ * this month; jobs still running and jobs started at the same time are not in
+ * that sum yet, so the real total can end up above the threshold.
+ */
 export function budgetBlock(spentUsd: number, budgetUsd: number): string | null {
-  if (!(budgetUsd > 0)) return 'Aylık yapay zekâ bütçesi girilmemiş. Ayarlar → Yapay zekâ → Aylık bütçe.';
-  if (spentUsd >= budgetUsd) return `Bu ayın tahmini yapay zekâ harcaması bütçeye ulaştı (${spentUsd.toFixed(2)} / ${budgetUsd.toFixed(2)} USD, tahmini). Bütçeyi artırın ya da gelecek ayı bekleyin.`;
+  if (!(budgetUsd > 0)) return 'Aylık tahmini kullanım eşiği girilmemiş (0 = yapay zekâ kapalı). Ayarlar → Yapay zekâ → Aylık tahmini kullanım eşiği.';
+  if (spentUsd >= budgetUsd) return `Bu ayın tahmini yapay zekâ kullanımı eşiğe ulaştı (${spentUsd.toFixed(2)} / ${budgetUsd.toFixed(2)} USD, tahmini). Eşik her ay (UTC) sıfırlanır; eşiği değiştirmek Ayarlar → Yapay zekâ bölümündedir.`;
   return null;
+}
+
+/**
+ * A paid call is allowed only when the model has a row in the price table:
+ * without a price its cost cannot be estimated, and counting it as 0 USD would
+ * hide it from the monthly threshold. null = allowed.
+ */
+export function priceBlock(model: string, prices: Record<string, ModelPrice> | undefined | null): string | null {
+  if (model && prices && prices[model]) return null;
+  return `“${model || '—'}” modelinin fiyatı fiyat tablosunda yok. Maliyeti hesaplanamadığı için bu modelle ücretli üretim kapalı. Ayarlar → Yapay zekâ → Gelişmiş → Fiyat tablosuna bu model için bir satır ekleyip kaydedin.`;
 }

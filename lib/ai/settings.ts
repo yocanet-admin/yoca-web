@@ -1,6 +1,6 @@
 import { getSupabaseServiceRole } from '@/lib/supabase';
 import { mockRequested } from '@/lib/ai/mock';
-import type { ModelPrice } from '@/lib/ai/cost';
+import { priceBlock, type ModelPrice } from '@/lib/ai/cost';
 
 /**
  * Yoca — AI settings (server only), stored in cockpit_settings key "ai".
@@ -116,9 +116,9 @@ export async function getAiSettings(): Promise<AiSettings & { ready: boolean }> 
  * A preset maps to a model ONLY after "Modelleri doğrula" (GET /v1/models with
  * the server key) listed that id for this key: no guessing, no silent default.
  */
-export type ModelCheck = { ok: true; model: string } | { ok: false; code: 'no_model' | 'unverified' | 'model_access'; message: string };
+export type ModelCheck = { ok: true; model: string } | { ok: false; code: 'no_model' | 'unverified' | 'model_access' | 'no_price'; message: string };
 
-export function checkModel(settings: Pick<AiSettings, 'verified'>, model: string, kind: 'text' | 'image', mock = false): ModelCheck {
+export function checkModel(settings: Pick<AiSettings, 'verified'> & Partial<Pick<AiSettings, 'prices'>>, model: string, kind: 'text' | 'image', mock = false): ModelCheck {
   const what = kind === 'text' ? 'Metin' : 'Görsel';
   if (!model) return { ok: false, code: 'no_model', message: `${what} modeli seçilmemiş. Ayarlar → Yapay zekâ → “Modelleri doğrula”, sonra listeden bir model seçin.` };
   if (mock) return { ok: true, model };
@@ -127,6 +127,10 @@ export function checkModel(settings: Pick<AiSettings, 'verified'>, model: string
   }
   if (!settings.verified.available.includes(model)) {
     return { ok: false, code: 'model_access', message: `${what} modeli “${model}” bu anahtarın model listesinde yok (son doğrulama: ${settings.verified.at.slice(0, 10)}). Listeden başka bir model seçin ya da yeniden doğrulayın.` };
+  }
+  if (settings.prices !== undefined) {
+    const blocked = priceBlock(model, settings.prices);
+    if (blocked) return { ok: false, code: 'no_price', message: blocked };
   }
   return { ok: true, model };
 }
