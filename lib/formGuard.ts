@@ -44,7 +44,10 @@ export async function rateLimited(form: 'contact' | 'checkup', ip: string): Prom
       p_window_seconds: RATE_WINDOW_SECONDS,
       p_max: RATE_LIMIT,
     });
-    if (!error && typeof data === 'boolean') return !data;
+    if (!error && typeof data === 'boolean') {
+      warned = false; // a later failure is logged again (not only the first one per instance)
+      return !data;
+    }
     if (!warned) {
       warned = true;
       console.error('[rate-limit] hit_rate_limit() unavailable, using per-instance memory:', error?.message ?? 'unexpected result');
