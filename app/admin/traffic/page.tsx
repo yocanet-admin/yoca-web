@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Card, DailyBars, Notice, RankList, StatTile } from '@/components/admin/cockpit/Widgets';
 import { adminApi, delta, fmtNumber } from '@/lib/cockpit/client';
+import { loadLeads, type Lead } from '@/lib/cockpit/leads';
 import type { TrafficReport } from '@/lib/cockpit/vercel';
 import { TokenHelp } from '@/components/admin/cockpit/TokenHelp';
 
@@ -34,6 +35,10 @@ const DEVICE: Record<string, string> = { desktop: 'Masaüstü', mobile: 'Mobil',
 
 export default function AdminTraffic() {
   const [days, setDays] = useState(30);
+  const [crm, setCrm] = useState<Lead[] | null>(null);
+  useEffect(() => {
+    loadLeads().then((r) => setCrm(r.error ? null : r.leads)).catch(() => setCrm(null));
+  }, []);
   const [metric, setMetric] = useState<'visitors' | 'pageviews'>('visitors');
   const [result, setResult] = useState<Response | null>(null);
   const [busy, setBusy] = useState(true);
@@ -57,7 +62,18 @@ export default function AdminTraffic() {
   const report = result?.report;
   const events = report?.events ?? [];
   const eventCount = (name: string) => events.find((e) => e.name === name)?.count ?? 0;
+  // Analytics events = successful form responses seen by the browser (silently dropped spam
+  // also gets a success response, and deleted leads stay counted). CRM rows = what is stored now.
   const leads = eventCount('contact_submit') + eventCount('checkup_submit');
+  const sinceUtc = (() => {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCDate(d.getUTCDate() - (days - 1));
+    return d.toISOString();
+  })();
+  const stored = crm ? crm.filter((l) => l.createdAt >= sinceUtc && l.status !== 'spam').length : null;
+  // A rate over a tiny sample reads as a trend; only show it with enough data.
+  const enough = !!report && report.totals.visitors >= 100 && leads >= 3;
   const conversion = report && report.totals.visitors ? ((leads / report.totals.visitors) * 100).toFixed(1) : null;
 
   return (
@@ -100,9 +116,18 @@ export default function AdminTraffic() {
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatTile label="Ziyaretçi" value={report ? fmtNumber(report.totals.visitors) : null} deltaPct={report ? delta(report.totals.visitors, report.previous.visitors) : null} deltaLabel={`önceki ${days} güne göre`} />
             <StatTile label="Sayfa görüntüleme" value={report ? fmtNumber(report.totals.pageviews) : null} deltaPct={report ? delta(report.totals.pageviews, report.previous.pageviews) : null} deltaLabel={`önceki ${days} güne göre`} />
-            <StatTile label="Lead (form gönderimi)" value={report ? fmtNumber(leads) : null} hint="İletişim + Check-Up" />
-            <StatTile label="Dönüşüm oranı" value={report ? (conversion === null ? '–' : `%${conversion}`) : null} hint="lead / ziyaretçi" />
+            <StatTile label="Başarılı form gönderimi" value={report ? fmtNumber(leads) : null} hint={`Analitik olayı · CRM'de şu an ${stored === null ? '–' : fmtNumber(stored)} kayıt`} />
+            <StatTile
+              label="Dönüşüm oranı"
+              value={report ? (conversion === null ? '–' : enough ? `%${conversion}` : `${fmtNumber(leads)} / ${fmtNumber(report.totals.visitors)}`) : null}
+              hint={enough ? 'gönderim / ziyaretçi' : 'Örneklem küçük: oran yerine sayılar gösteriliyor'}
+            />
           </div>
+
+          <p className="-mt-2 text-[12px] leading-relaxed text-subtle">
+            <strong className="text-muted">Başarılı form gönderimi</strong>: sunucu “tamam” dediği anda tarayıcıda sayılan analitik olayı. Sessizce elenen spam da bu yanıtı alır; sonradan silinen veya spam işaretlenen kayıtlar sayımdan düşmez.{' '}
+            <strong className="text-muted">CRM kaydı</strong>: Leadler’de şu an duran, spam olmayan kayıtlar. Gün aralığı UTC’ye göredir (İstanbul’da 03:00’te başlar).
+          </p>
 
           <Card
             title={metric === 'visitors' ? 'Günlük ziyaretçi' : 'Günlük sayfa görüntüleme'}
