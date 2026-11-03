@@ -6,6 +6,9 @@ import { notifyContact } from '@/lib/notify';
 import { freeText, logSpam, screenSubmission } from '@/lib/spam';
 import type { Locale } from '@/types';
 
+/** Identical re-sends inside this window are treated as one submission. */
+const DUPLICATE_WINDOW_MS = 30 * 60 * 1000;
+
 const TOO_MANY: Record<string, string> = {"tr": "Kısa sürede çok fazla gönderim yapıldı. Lütfen biraz sonra tekrar deneyin.", "en": "Too many submissions. Please try again later.", "az": "Qısa müddətdə çox göndəriş edildi. Bir az sonra yenidən cəhd edin.", "ar": "عدد كبير من الإرسالات. يرجى المحاولة لاحقًا."};
 
 /** Yoca — contact form endpoint: validate, screen for spam, persist to Supabase, notify. */
@@ -92,6 +95,15 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json({ ok: false, error: dict.checkup.errorGeneric }, { status: 503 });
+  }
+
+  // Re-send of the same message (double click, retry after a slow response): answer like a
+  // success, but keep one row and one notification. Logged as "duplicate" in spam_log.
+  const since = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+  const dup = await supabase.from('contact_submissions').select('id').eq('email', email).eq('message', message).gte('created_at', since).limit(1);
+  if (!dup.error && (dup.data?.length ?? 0) > 0) {
+    await logSpam('contact', ['duplicate']);
+    return NextResponse.json({ ok: true, message: dict.contact.success });
   }
 
   const id = randomUUID();
