@@ -6,6 +6,8 @@ import { notifyContact } from '@/lib/notify';
 import { freeText, logSpam, screenSubmission } from '@/lib/spam';
 import type { Locale } from '@/types';
 
+const TOO_MANY: Record<string, string> = {"tr": "Kısa sürede çok fazla gönderim yapıldı. Lütfen biraz sonra tekrar deneyin.", "en": "Too many submissions. Please try again later.", "az": "Qısa müddətdə çox göndəriş edildi. Bir az sonra yenidən cəhd edin.", "ar": "عدد كبير من الإرسالات. يرجى المحاولة لاحقًا."};
+
 /** Yoca — contact form endpoint: validate, screen for spam, persist to Supabase, notify. */
 
 export const runtime = 'nodejs';
@@ -50,7 +52,7 @@ export async function POST(request: NextRequest) {
     'unknown';
   if (rateLimited(ip)) {
     return NextResponse.json(
-      { ok: false, error: 'Too many submissions. Please try again later.' },
+      { ok: false, error: TOO_MANY[String((payload as { locale?: string }).locale)] ?? TOO_MANY.en },
       { status: 429 },
     );
   }
