@@ -128,6 +128,20 @@ rows as (
   select 15, 'webhook', 'supabase_functions.hooks',
          'info', case when to_regclass('supabase_functions.hooks') is null then 'yok' else 'tablo var (Database Webhooks açık olabilir)' end
   union all
+  -- summary lines to compare before/after v11 and v12 (no writes)
+  select 13, 'state', 'v12 kapsamı: yalnız authenticated rolüne açık ve is_admin() olmayan politika',
+         case when count(*) = 0 then 'ok' else 'warn' end, count(*)::text || ' adet (v12 sonrası 0 olmalı)'
+    from pg_policies p
+   where (p.schemaname = 'public' or (p.schemaname = 'storage' and p.tablename = 'objects'))
+     and p.roles = array['authenticated']::name[] and p.tablename <> 'policy_backup_v12'
+     and coalesce(p.qual, '') || coalesce(p.with_check, '') not like '%is_admin()%'
+  union all
+  select 13, 'state', 'v11 kapsamı: ziyaretçiye tüm satırları açan case_studies/team_members okuma politikası',
+         case when count(*) = 0 then 'ok' else 'warn' end, count(*)::text || ' adet (v11 sonrası 0 olmalı)'
+    from pg_policies p
+   where p.schemaname = 'public' and p.tablename in ('case_studies', 'team_members') and p.cmd = 'SELECT'
+     and ('anon' = any (p.roles) or 'public' = any (p.roles)) and coalesce(p.qual, '') = 'true'
+  union all
   -- 11. objects that must NOT exist yet (or exist after a previous run)
   select 13, 'state', 'public.policy_backup_v12',
          case when to_regclass('public.policy_backup_v12') is null then 'info' else 'warn' end,
