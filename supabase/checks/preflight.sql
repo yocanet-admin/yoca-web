@@ -1,8 +1,11 @@
 -- ═══════════════════════════════════════════════════════════════
--- Yoca — preflight inspection (READ-ONLY: only SELECTs, changes nothing)
--- Run in the Supabase SQL editor BEFORE v11 / v12 and paste or screenshot
--- the result table. It contains no keys or secrets; it does list the admin
--- e-mails in admin_users (column "detail") — blur them if you prefer.
+-- Yoca — preflight inspection (READ-ONLY)
+-- One SELECT statement. It calls only catalog lookups (to_regclass,
+-- has_*_privilege) and query_to_xml() on SELECT text; nothing writes.
+-- Tested locally with default_transaction_read_only = on (a write would fail).
+-- Run in the Supabase SQL editor BEFORE v11 / v12 / v13 and share the table.
+-- Output: policy definitions, object/grant checks, counts, the first audit
+-- date, trigger names, and admin e-mails MASKED (m***@domain). No keys.
 --
 -- One result table: section | item | status | detail
 --   status: ok · missing · warn · info
@@ -32,7 +35,7 @@ rows as (
   union all
   select 2, 'policy-count', 'toplam', 'info',
          (select count(*) from pg_policies where schemaname in ('public', 'storage'))::text
-           || ' (yerel referans: 31 public + 4 storage — farklıysa satırları tek tek karşılaştırın)'
+           || ' (yerel referans: v10 Part A sonrası 35 = 31 public + 4 storage; Part A öncesi 36 — farklıysa satırları tek tek karşılaştırın)'
   union all
   -- 2. required tables + RLS flag
   select 3, 'table', 'public.' || r.t,
@@ -86,11 +89,11 @@ rows as (
          case when to_regclass('public.admin_users') is null then 'tablo yok'
               else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.admin_users', false, true, '')))[1]::text end
   union all
-  select 10, 'admin_users', 'e-postalar',
+  select 10, 'admin_users', 'e-postalar (maskeli)',
          case when to_regclass('public.admin_users') is null then 'missing' else 'info' end,
          case when to_regclass('public.admin_users') is null then 'tablo yok'
               else coalesce((xpath('/row/e/text()', query_to_xml(
-                'select string_agg(email || case when email <> lower(email) then '' (BÜYÜK HARF!)'' else '''' end, '', '' order by email) as e from public.admin_users',
+                'select string_agg(left(email, 1) || ''***@'' || split_part(email, ''@'', 2) || case when email <> lower(email) then '' (BÜYÜK HARF!)'' else '''' end, '', '' order by email) as e from public.admin_users',
                 false, true, '')))[1]::text, '—') end
   union all
   -- 9. data that the policies protect (counts only, no content)
@@ -104,7 +107,28 @@ rows as (
          case when to_regclass('public.audit_log') is null then 'tablo yok'
               else coalesce((xpath('/row/m/text()', query_to_xml('select min(at) as m from public.audit_log', false, true, '')))[1]::text, 'boş') end
   union all
-  -- 10. objects that must NOT exist yet (or exist after a previous run)
+  -- 10. triggers on the tables verify-access.sql writes to, and whether their
+  --     function could cause an outside effect (webhook, http, notify)
+  select 14, 'trigger', c.relnamespace::regnamespace || '.' || c.relname || ' · ' || t.tgname,
+         case when p.prosrc ~* '(net\.http|http_(get|post|request)|dblink|pg_notify|notify )' or p.proname ~* 'http_request'
+              then 'warn' else 'info' end,
+         p.pronamespace::regnamespace || '.' || p.proname
+           || case when p.prosrc ~* '(net\.http|http_(get|post|request)|dblink|pg_notify|notify )' or p.proname ~* 'http_request'
+                   then ' — DIŞ ETKİ: verify-access bu durumda yazmadan durur' else '' end
+    from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid
+    join pg_proc p on p.oid = t.tgfoid
+   where not t.tgisinternal
+     and c.oid in (select to_regclass(x) from unnest(array['public.sections', 'public.case_studies', 'public.cockpit_settings',
+                                                            'public.clients', 'storage.objects', 'public.audit_log']) x)
+  union all
+  select 15, 'extension', e.extname, 'info', 'kurulu (' || e.extversion || ')'
+    from pg_extension e where e.extname in ('pg_net', 'http', 'dblink')
+  union all
+  select 15, 'webhook', 'supabase_functions.hooks',
+         'info', case when to_regclass('supabase_functions.hooks') is null then 'yok' else 'tablo var (Database Webhooks açık olabilir)' end
+  union all
+  -- 11. objects that must NOT exist yet (or exist after a previous run)
   select 13, 'state', 'public.policy_backup_v12',
          case when to_regclass('public.policy_backup_v12') is null then 'info' else 'warn' end,
          case when to_regclass('public.policy_backup_v12') is null then 'yok (v12 çalışmamış)' else 'VAR — v12 daha önce çalışmış' end
