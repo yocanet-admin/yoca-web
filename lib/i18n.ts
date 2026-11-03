@@ -117,6 +117,10 @@ export interface Dict {
     statusExp: string;
     liveDemo: string;
     overviewCta: string;
+    /** Real CTA on cards without a public URL: opens the contact form about this product. */
+    enquireCta: string;
+    /** Contact message prefill; {product} is replaced with the product name. */
+    enquirePrefill: string;
     items: Array<{
       key: string;
       name: string;
@@ -457,6 +461,8 @@ const en: Dict = {
     statusExp: 'Experimental',
     liveDemo: 'Live Demo',
     overviewCta: 'View Product Overview',
+    enquireCta: 'Ask about this product',
+    enquirePrefill: 'I would like to learn more about {product}.',
     items: [
       {
         key: 'yocaserve',
@@ -686,14 +692,14 @@ const en: Dict = {
     title: 'How healthy is your digital presence?',
     description:
       'Answer a few short questions about your brand, channels and goals. We will review your answers and prepare a personal digital analysis with clear next steps.',
-    introTitle: 'Get a clear view of your digital health in about three minutes.',
+    introTitle: 'Answer 16 questions in about three minutes; we review your digital health and send it back to you.',
     sampleTitle: 'Digital health',
     sampleLabel: 'Sample result',
     sampleNote: 'Example values for illustration — your real report is prepared from your own answers.',
     introSub:
       'Answer 16 focused questions about your brand, website, channels, measurement and growth readiness. We review your answers and send you a prioritised assessment with clear next steps.',
     introStart: 'Start My Check-Up',
-    introPoints: ['About 3 minutes', '16 focused questions', '0–100 digital health score', 'Personal review', 'Clear next steps'],
+    introPoints: ['About 3 minutes to answer', '16 focused questions', '0–100 digital health score in the review', 'Reviewed by a person, not sent automatically', 'Clear next steps'],
     sectionWord: 'Section',
     sections: [
       { key: 'business', label: 'Business' },
@@ -893,6 +899,8 @@ const tr: Dict = {
     statusExp: 'Deneysel',
     liveDemo: 'Canlı Demo',
     overviewCta: 'Ürün Özetini Gör',
+    enquireCta: 'Bu ürün hakkında bilgi al',
+    enquirePrefill: '{product} hakkında bilgi almak istiyorum.',
     items: [
       {
         key: 'yocaserve',
@@ -1122,14 +1130,14 @@ const tr: Dict = {
     title: 'Dijital varlığınız ne kadar sağlıklı?',
     description:
       'Markanız, kanallarınız ve hedefleriniz hakkında birkaç kısa soruyu yanıtlayın. Yanıtlarınızı inceleyip net adımlar içeren kişisel bir dijital analiz hazırlayalım.',
-    introTitle: 'Yaklaşık üç dakikada dijital sağlığınızın net bir görüntüsünü alın.',
+    introTitle: '16 soruyu yaklaşık üç dakikada yanıtlayın; dijital sağlığınızı inceleyip size geri dönelim.',
     sampleTitle: 'Dijital sağlık',
     sampleLabel: 'Örnek sonuç',
     sampleNote: 'Gösterim amaçlı örnek değerler — gerçek raporunuz kendi yanıtlarınızdan hazırlanır.',
     introSub:
       'Markanız, web siteniz, kanallarınız, ölçümleme yapınız ve büyüme hazırlığınız hakkında 16 odaklı soruyu yanıtlayın. Yanıtlarınızı inceliyor, önceliklendirilmiş bir değerlendirme ve net sonraki adımlar gönderiyoruz.',
     introStart: 'Check-Up’ımı Başlat',
-    introPoints: ['Yaklaşık 3 dakika', '16 odaklı soru', '0–100 dijital sağlık skoru', 'Kişisel inceleme', 'Net sonraki adımlar'],
+    introPoints: ['Yanıtlamak yaklaşık 3 dakika', '16 odaklı soru', 'Değerlendirmede 0–100 dijital sağlık skoru', 'Otomatik değil, bir kişi inceler', 'Net sonraki adımlar'],
     sectionWord: 'Bölüm',
     sections: [
       { key: 'business', label: 'İşletme' },
@@ -1329,6 +1337,8 @@ const az: Dict = {
     statusExp: 'Eksperimental',
     liveDemo: 'Canlı Demo',
     overviewCta: 'Məhsul Xülasəsinə Bax',
+    enquireCta: 'Bu məhsul haqqında məlumat al',
+    enquirePrefill: '{product} haqqında məlumat almaq istəyirəm.',
     items: [
       {
         key: 'yocaserve',
@@ -1558,14 +1568,14 @@ const az: Dict = {
     title: 'Rəqəmsal varlığınız nə qədər sağlamdır?',
     description:
       'Brendiniz, kanallarınız və hədəfləriniz haqqında bir neçə qısa suala cavab verin. Cavablarınızı nəzərdən keçirib aydın addımlar içərən fərdi rəqəmsal analiz hazırlayaq.',
-    introTitle: 'Təxminən üç dəqiqəyə rəqəmsal sağlamlığınızın aydın görüntüsünü əldə edin.',
+    introTitle: '16 suala təxminən üç dəqiqəyə cavab verin; rəqəmsal sağlamlığınızı nəzərdən keçirib sizə geri dönək.',
     sampleTitle: 'Rəqəmsal sağlamlıq',
     sampleLabel: 'Nümunə nəticə',
     sampleNote: 'Nümayiş üçün nümunə dəyərlər — real hesabatınız öz cavablarınız əsasında hazırlanır.',
     introSub:
       'Brendiniz, saytınız, kanallarınız, ölçmə quruluşunuz və inkişaf hazırlığınız haqqında 16 fokuslu suala cavab verin. Cavablarınızı nəzərdən keçirir, prioritetləşdirilmiş qiymətləndirmə və aydın növbəti addımlar göndəririk.',
     introStart: 'Check-Up-ımı Başlat',
-    introPoints: ['Təxminən 3 dəqiqə', '16 fokuslu sual', '0–100 rəqəmsal sağlamlıq skoru', 'Fərdi baxış', 'Aydın növbəti addımlar'],
+    introPoints: ['Cavablamaq təxminən 3 dəqiqə', '16 fokuslu sual', 'Qiymətləndirmədə 0–100 rəqəmsal sağlamlıq skoru', 'Avtomatik deyil, bir insan baxır', 'Aydın növbəti addımlar'],
     sectionWord: 'Bölmə',
     sections: [
       { key: 'business', label: 'Biznes' },
@@ -1765,6 +1775,8 @@ const ar: Dict = {
     statusExp: 'تجريبي',
     liveDemo: 'عرض مباشر',
     overviewCta: 'عرض لمحة المنتج',
+    enquireCta: 'اسأل عن هذا المنتج',
+    enquirePrefill: 'أرغب في معرفة المزيد عن {product}.',
     items: [
       {
         key: 'yocaserve',
@@ -1994,14 +2006,14 @@ const ar: Dict = {
     title: 'ما مدى صحة حضورك الرقمي؟',
     description:
       'أجب عن بضعة أسئلة قصيرة حول علامتك وقنواتك وأهدافك. سنراجع إجاباتك ونعد تحليلًا رقميًا شخصيًا بخطوات واضحة.',
-    introTitle: 'احصل على صورة واضحة لصحتك الرقمية خلال نحو ثلاث دقائق.',
+    introTitle: 'أجب عن 16 سؤالًا في نحو ثلاث دقائق، ونراجع صحتك الرقمية ونعود إليك.',
     sampleTitle: 'الصحة الرقمية',
     sampleLabel: 'نتيجة نموذجية',
     sampleNote: 'قيم توضيحية للعرض فقط — يُعدّ تقريرك الحقيقي من إجاباتك الخاصة.',
     introSub:
       'أجب عن 16 سؤالًا مركزًا حول علامتك وموقعك وقنواتك وقياسك وجاهزيتك للنمو. نراجع إجاباتك ونرسل لك تقييمًا مرتّبًا بالأولوية مع خطوات تالية واضحة.',
     introStart: 'ابدأ فحصي',
-    introPoints: ['نحو 3 دقائق', '16 سؤالًا مركزًا', 'درجة صحة رقمية 0–100', 'مراجعة شخصية', 'خطوات تالية واضحة'],
+    introPoints: ['نحو 3 دقائق للإجابة', '16 سؤالًا مركزًا', 'درجة صحة رقمية 0–100 في التقييم', 'يراجعها شخص، لا تُرسل آليًا', 'خطوات تالية واضحة'],
     sectionWord: 'القسم',
     sections: [
       { key: 'business', label: 'العمل' },

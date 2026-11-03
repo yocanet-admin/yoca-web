@@ -4,8 +4,9 @@ import type { CaseStudyRow, Locale } from '@/types';
  * Yoca — selected work / case studies (client-safe data module).
  *
  * Content is managed from the admin panel (Supabase `case_studies` table).
- * The fully localized defaults below (EN/TR/AZ/AR) act as the fallback when
- * the table is empty — and as the "import defaults" source for the admin panel.
+ * The fully localized defaults below (EN/TR/AZ/AR) are merged per slug with
+ * that table (see mergeWorkSources): a code project shows while its slug has
+ * no database row, and is the source the admin "Düzenlemeye al" action copies.
  *
  * REAL WORK ONLY: Prime Wash Car, SP Medya, Cleova, SunSoft and Mehmet Altıoklar
  * (all shown as client work). Facts come from the owner's briefs and the live
@@ -293,7 +294,7 @@ export function staticCaseStudies(locale: Locale): CaseStudy[] {
   }));
 }
 
-/** Default rows for the admin panel's "import defaults" action. */
+/** Default rows: every code project as a ready-to-insert `case_studies` row (order_index = its code position). */
 export function getDefaultCaseStudyRows(): Array<Omit<CaseStudyRow, 'id'>> {
   return BASE.map((base, index) => ({
     slug: base.slug,
@@ -313,4 +314,50 @@ export function getDefaultCaseStudyRows(): Array<Omit<CaseStudyRow, 'id'>> {
       ar: CONTENT.ar[base.slug],
     },
   }));
+}
+
+/** Slugs of the code-defined projects in their code order (index = their default order_index). */
+export const DEFAULT_CASE_STUDY_SLUGS: string[] = BASE.map((base) => base.slug);
+
+/** The default row of ONE code project (admin "Düzenlemeye al"), or null when the slug is not a code project. */
+export function getDefaultCaseStudyRow(slug: string): Omit<CaseStudyRow, 'id'> | null {
+  return getDefaultCaseStudyRows().find((row) => row.slug === slug) ?? null;
+}
+
+/** One entry of the merged work list: a database row, or a code project that has no database row. */
+export type WorkSourceEntry<R> =
+  | { source: 'db'; slug: string; order: number; row: R }
+  | { source: 'code'; slug: string; order: number };
+
+/**
+ * THE merge rule for case studies, shared by the public site and the admin panel.
+ *
+ * Per slug: a database row (active or hidden) always wins over the code
+ * project with the same slug; a code project shows only while its slug has
+ * no database row at all. So a hidden row hides that project on the site —
+ * it does NOT bring the code version back. Entries are sorted by
+ * order_index (code projects use their code position); on equal order a
+ * database row comes first, then rows by id.
+ *
+ * `includeHidden: false` (public site) drops hidden rows; the admin list keeps them.
+ */
+export function mergeWorkSources<R extends { slug: string; is_active: boolean; order_index: number; id?: number }>(
+  rows: R[],
+  options: { includeHidden: boolean },
+): Array<WorkSourceEntry<R>> {
+  const dbSlugs = new Set(rows.map((row) => row.slug));
+  const entries: Array<WorkSourceEntry<R>> = [
+    ...rows
+      .filter((row) => options.includeHidden || row.is_active)
+      .map((row) => ({ source: 'db' as const, slug: row.slug, order: row.order_index, row })),
+    ...BASE.map((base, index) => ({ source: 'code' as const, slug: base.slug, order: index })).filter(
+      (entry) => !dbSlugs.has(entry.slug),
+    ),
+  ];
+  return entries.sort((a, b) => {
+    if (a.order !== b.order) return a.order - b.order;
+    if (a.source !== b.source) return a.source === 'db' ? -1 : 1;
+    if (a.source === 'db' && b.source === 'db') return (a.row.id ?? 0) - (b.row.id ?? 0);
+    return 0;
+  });
 }
