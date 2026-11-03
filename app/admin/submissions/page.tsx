@@ -8,6 +8,8 @@ import { LEAD_LABEL, LEAD_PILL, LEAD_STATUSES, OPEN_STATUSES, fmtDate, istanbulT
 import { LEAD_LIMIT, deleteLead, deleteLeads, loadLeads, replyHref, updateLead, updateLeads, weeklyCounts, type Lead } from '@/lib/cockpit/leads';
 import { clientFromLead } from '@/lib/cockpit/crm';
 import { LeadAI } from '@/components/admin/cockpit/LeadAI';
+import { adminApi } from '@/lib/cockpit/client';
+import { DEFAULT_RESPONSE_TIMES, dueBusinessDay, sanitizeResponseTimes, type ResponseTimes } from '@/lib/responseCopy';
 
 /**
  * Yoca Admin — Lead merkezi.
@@ -15,6 +17,9 @@ import { LeadAI } from '@/components/admin/cockpit/LeadAI';
  * Yeni → Görüşülüyor → Teklif → Kazanıldı / Kaybedildi (+ Spam).
  * Note, follow-up date, ready-made reply and "make client" (CRM) per lead.
  * Bulk: tick rows (or "select all" in the current filter) → change status or delete.
+ * New leads show an internal "hedef" date: the reply target from Ayarlar →
+ * Yanıt süreleri, counted in Istanbul business days (Mon–Fri, no holiday data
+ * except the admin's own list). It is never shown to visitors.
  */
 
 type TypeFilter = 'all' | 'contact' | 'checkup';
@@ -45,6 +50,7 @@ function LeadsInner() {
   const [capped, setCapped] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [targets, setTargets] = useState<ResponseTimes>(DEFAULT_RESPONSE_TIMES);
   const lastLoad = useRef(0);
   const scrolledTo = useRef<string | null>(null);
 
@@ -68,6 +74,13 @@ function LeadsInner() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reply targets for the internal due date (falls back to 1 / 3 business days).
+  useEffect(() => {
+    adminApi<{ ok: boolean; responseTimes?: ResponseTimes }>('/api/admin/site-settings')
+      .then((r) => { if (r.ok && r.responseTimes) setTargets(sanitizeResponseTimes(r.responseTimes)); })
+      .catch(() => undefined);
+  }, []);
 
   // New leads arrive while the tab is open: refetch when the window regains focus.
   useEffect(() => {
@@ -390,6 +403,15 @@ function LeadsInner() {
                     {timeAgo(lead.createdAt)}
                   </span>
                   {overdue && <span className="text-[11px] font-bold text-amber-300">▲ takip gecikti</span>}
+                  {lead.status === 'new' && (() => {
+                    const due = dueBusinessDay(new Date(lead.createdAt), lead.type === 'checkup' ? targets.checkupDays : targets.contactDays, targets.holidays);
+                    const late = due < istanbulToday();
+                    return (
+                      <span className={`text-[11px] font-bold ${late ? 'text-amber-300' : 'text-subtle'}`} title="İç yanıt hedefi (İstanbul iş günü, hafta sonu hariç). Ziyaretçiye gösterilmez.">
+                        hedef {due.slice(8, 10)}.{due.slice(5, 7)}{late ? ' · geçti' : ''}
+                      </span>
+                    );
+                  })()}
                   {lead.aiSummary && (
                     <span className="text-[11px] font-bold text-subtle" title={lead.aiSummary.ozet}>
                       AI {lead.aiSummary.uygunluk}/5

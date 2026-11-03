@@ -175,6 +175,9 @@ export interface Dict {
     filterProducts: string;
     metricNote: string;
     quoteLabel: string;
+    resultPeriod: string;
+    resultBaseline: string;
+    resultBasis: string;
     empty: string;
     statusClient: string;
     statusConcept: string;
@@ -198,8 +201,8 @@ export interface Dict {
     email: string;
     company: string;
     message: string;
-    consent: string;
     submit: string;
+    /** Neutral fallback; the live text comes from lib/responseCopy.ts. */
     success: string;
     based: string;
     addressLabel: string;
@@ -217,6 +220,13 @@ export interface Dict {
     scheduleTitle: string;
     scheduleSub: string;
     calendlyUrl: string;
+  };
+  /** Privacy notice (Aydınlatma Metni) links next to the forms and in the footer. */
+  legal: {
+    formNoticeBefore: string;
+    formNoticeLink: string;
+    formNoticeAfter: string;
+    noticeTitle: string;
   };
   cookies: {
     text: string;
@@ -300,7 +310,7 @@ export interface Dict {
     company: string;
     email: string;
     phone: string;
-    consent: string;
+    /** Neutral fallback; the live text comes from lib/responseCopy.ts. */
     success: string;
     errorRequired: string;
     errorEmail: string;
@@ -545,9 +555,9 @@ const en: Dict = {
     market: 'Market',
     year: 'Year',
     servicesLabel: 'Services',
-    problem: 'Context',
-    approach: 'What YOCA Did',
-    solution: 'The Experience',
+    problem: 'The need',
+    approach: 'Yoca’s scope',
+    solution: 'What was delivered',
     result: 'Verified Results',
     viewCase: 'View Project',
     backToWork: 'Back to Work',
@@ -558,6 +568,9 @@ const en: Dict = {
     filterProducts: 'Yoca Ventures & Products',
     metricNote: '* Metrics reflect verified, client-approved outcomes only.',
     quoteLabel: 'Client Quote',
+    resultPeriod: 'Period',
+    resultBaseline: 'Compared with',
+    resultBasis: 'Source',
     empty: 'No projects in this category yet.',
     statusClient: 'Client Case Study',
     statusConcept: 'Concept Project',
@@ -579,9 +592,8 @@ const en: Dict = {
     email: 'Email Address',
     company: 'Company or Brand',
     message: 'Tell us about the project',
-    consent: 'I agree to the processing of my information.',
     submit: 'Send Project Brief',
-    success: 'Thank you. Your project details have been received. We will review them and contact you through the information provided.',
+    success: 'Your message has arrived. We will review what you shared and get back to you by e-mail.',
     based: 'Based in Türkiye. Working across markets.',
     addressLabel: 'Address',
     direct: 'Prefer email?',
@@ -598,6 +610,12 @@ const en: Dict = {
     scheduleTitle: 'Prefer to talk it through?',
     scheduleSub: 'Book a free 30-minute intro call and let’s map the right next move together.',
     calendlyUrl: '',
+  },
+  legal: {
+    formNoticeBefore: 'Information on how we process the personal data you share in this form is in our ',
+    formNoticeLink: 'Privacy Notice',
+    formNoticeAfter: '.',
+    noticeTitle: 'Privacy Notice',
   },
   cookies: {
     text: 'We use essential cookies to keep the website working and optional analytics cookies to understand how it is used.',
@@ -692,14 +710,14 @@ const en: Dict = {
     title: 'How healthy is your digital presence?',
     description:
       'Answer a few short questions about your brand, channels and goals. We will review your answers and prepare a personal digital analysis with clear next steps.',
-    introTitle: 'Answer 16 questions in about three minutes; we review your digital health and send it back to you.',
+    introTitle: 'Let’s review where your brand stands online.',
     sampleTitle: 'Digital health',
     sampleLabel: 'Sample result',
     sampleNote: 'Example values for illustration — your real report is prepared from your own answers.',
     introSub:
       'Answer 16 focused questions about your brand, website, channels, measurement and growth readiness. We review your answers and send you a prioritised assessment with clear next steps.',
     introStart: 'Start My Check-Up',
-    introPoints: ['About 3 minutes to answer', '16 focused questions', '0–100 digital health score in the review', 'Reviewed by a person, not sent automatically', 'Clear next steps'],
+    introPoints: ['About 3 minutes to answer', '16 focused questions', 'Reviewed by a person, not sent automatically', 'Clear next steps'],
     sectionWord: 'Section',
     sections: [
       { key: 'business', label: 'Business' },
@@ -720,9 +738,7 @@ const en: Dict = {
     company: 'Company or Brand',
     email: 'Email Address',
     phone: 'Phone Number',
-    consent: 'I agree to the processing of my information.',
-    success:
-      'Your application has been received. We are preparing your digital analysis and will contact you shortly.',
+    success: 'Your answers have arrived. We will prepare your assessment and send it to your e-mail address.',
     errorRequired: 'Please fill in the required fields.',
     errorEmail: 'Please enter a valid email address.',
     errorGeneric: 'Something went wrong. Please try again or email us directly.',
@@ -983,9 +999,9 @@ const tr: Dict = {
     market: 'Pazar',
     year: 'Yıl',
     servicesLabel: 'Hizmetler',
-    problem: 'Bağlam',
-    approach: 'YOCA Ne Yaptı',
-    solution: 'Deneyim',
+    problem: 'İhtiyaç',
+    approach: 'Yoca’nın kapsamı',
+    solution: 'Teslim edilen özellikler',
     result: 'Doğrulanmış Sonuçlar',
     viewCase: 'Projeyi Görüntüle',
     backToWork: 'Projelere Dön',
@@ -996,6 +1012,9 @@ const tr: Dict = {
     filterProducts: 'Yoca Girişimleri ve Ürünleri',
     metricNote: '* Metrikler yalnızca doğrulanmış ve müşteri onaylı sonuçları yansıtır.',
     quoteLabel: 'Müşteri Yorumu',
+    resultPeriod: 'Dönem',
+    resultBaseline: 'Karşılaştırma',
+    resultBasis: 'Kaynak',
     empty: 'Bu kategoride henüz proje yok.',
     statusClient: 'Müşteri Projesi',
     statusConcept: 'Konsept Proje',
@@ -1017,9 +1036,8 @@ const tr: Dict = {
     email: 'E-posta Adresi',
     company: 'Şirket veya Marka',
     message: 'Projenizi Anlatın',
-    consent: 'Bilgilerimin işlenmesini kabul ediyorum.',
     submit: 'Proje Brief’ini Gönder',
-    success: 'Teşekkürler. Proje bilgileriniz bize ulaştı. Bilgileri inceleyerek bıraktığınız iletişim kanalı üzerinden sizinle iletişime geçeceğiz.',
+    success: 'Mesajınız ulaştı. Paylaştığınız bilgileri inceleyip e-postayla size dönüş yapacağız.',
     based: 'Türkiye merkezli. Farklı pazarlarda çalışıyoruz.',
     addressLabel: 'Adres',
     direct: 'E-posta mı tercih edersiniz?',
@@ -1036,6 +1054,12 @@ const tr: Dict = {
     scheduleTitle: 'Konuşarak ilerlemek mi istersiniz?',
     scheduleSub: 'Ücretsiz 30 dakikalık tanışma görüşmesi planlayın; doğru sonraki adımı birlikte belirleyelim.',
     calendlyUrl: '',
+  },
+  legal: {
+    formNoticeBefore: 'Bu formda paylaştığınız kişisel verilerin işlenmesine ilişkin bilgileri ',
+    formNoticeLink: 'Aydınlatma Metni',
+    formNoticeAfter: '’nde bulabilirsiniz.',
+    noticeTitle: 'Aydınlatma Metni',
   },
   cookies: {
     text: 'İnternet sitesinin çalışması için zorunlu çerezleri, kullanımını anlayabilmek için isteğe bağlı analiz çerezlerini kullanıyoruz.',
@@ -1130,14 +1154,14 @@ const tr: Dict = {
     title: 'Dijital varlığınız ne kadar sağlıklı?',
     description:
       'Markanız, kanallarınız ve hedefleriniz hakkında birkaç kısa soruyu yanıtlayın. Yanıtlarınızı inceleyip net adımlar içeren kişisel bir dijital analiz hazırlayalım.',
-    introTitle: '16 soruyu yaklaşık üç dakikada yanıtlayın; dijital sağlığınızı inceleyip size geri dönelim.',
+    introTitle: 'Markanızın dijital durumunu birlikte değerlendirelim.',
     sampleTitle: 'Dijital sağlık',
     sampleLabel: 'Örnek sonuç',
     sampleNote: 'Gösterim amaçlı örnek değerler — gerçek raporunuz kendi yanıtlarınızdan hazırlanır.',
     introSub:
       'Markanız, web siteniz, kanallarınız, ölçümleme yapınız ve büyüme hazırlığınız hakkında 16 odaklı soruyu yanıtlayın. Yanıtlarınızı inceliyor, önceliklendirilmiş bir değerlendirme ve net sonraki adımlar gönderiyoruz.',
     introStart: 'Check-Up’ımı Başlat',
-    introPoints: ['Yanıtlamak yaklaşık 3 dakika', '16 odaklı soru', 'Değerlendirmede 0–100 dijital sağlık skoru', 'Otomatik değil, bir kişi inceler', 'Net sonraki adımlar'],
+    introPoints: ['Yanıtlamak yaklaşık 3 dakika', '16 odaklı soru', 'Otomatik değil, bir kişi inceler', 'Net sonraki adımlar'],
     sectionWord: 'Bölüm',
     sections: [
       { key: 'business', label: 'İşletme' },
@@ -1158,9 +1182,7 @@ const tr: Dict = {
     company: 'Şirket veya Marka',
     email: 'E-posta Adresi',
     phone: 'Telefon Numarası',
-    consent: 'Bilgilerimin işlenmesini kabul ediyorum.',
-    success:
-      'Başvurunuz alındı. Dijital analiz raporunuz hazırlanıyor; kısa süre içinde sizinle iletişime geçeceğiz.',
+    success: 'Yanıtlarınız ulaştı. Değerlendirmenizi hazırlayıp e-posta adresinize göndereceğiz.',
     errorRequired: 'Lütfen zorunlu alanları doldurun.',
     errorEmail: 'Lütfen geçerli bir e-posta adresi girin.',
     errorGeneric: 'Bir sorun oluştu. Lütfen tekrar deneyin veya doğrudan e-posta gönderin.',
@@ -1421,9 +1443,9 @@ const az: Dict = {
     market: 'Bazar',
     year: 'İl',
     servicesLabel: 'Xidmətlər',
-    problem: 'Kontekst',
-    approach: 'YOCA Nə Etdi',
-    solution: 'Təcrübə',
+    problem: 'Ehtiyac',
+    approach: 'Yoca-nın işi',
+    solution: 'Təhvil verilənlər',
     result: 'Təsdiqlənmiş Nəticələr',
     viewCase: 'Layihəyə Bax',
     backToWork: 'Layihələrə Qayıt',
@@ -1434,6 +1456,9 @@ const az: Dict = {
     filterProducts: 'Yoca Təşəbbüsləri və Məhsulları',
     metricNote: '* Göstəricilər yalnız təsdiqlənmiş və müştəri tərəfindən razılaşdırılmış nəticələri əks etdirir.',
     quoteLabel: 'Müştəri Rəyi',
+    resultPeriod: 'Dövr',
+    resultBaseline: 'Müqayisə',
+    resultBasis: 'Mənbə',
     empty: 'Bu kateqoriyada hələ layihə yoxdur.',
     statusClient: 'Müştəri Layihəsi',
     statusConcept: 'Konsept Layihə',
@@ -1455,9 +1480,8 @@ const az: Dict = {
     email: 'E-poçt Ünvanı',
     company: 'Şirkət və ya Brend',
     message: 'Layihəniz Haqqında Danışın',
-    consent: 'Məlumatlarımın emalına razıyam.',
     submit: 'Layihə Brifini Göndər',
-    success: 'Təşəkkür edirik. Layihə məlumatlarınız bizə çatdı. Məlumatları nəzərdən keçirərək qeyd etdiyiniz əlaqə vasitəsi ilə sizinlə əlaqə saxlayacağıq.',
+    success: 'Mesajınız çatdı. Paylaşdığınız məlumatları nəzərdən keçirib sizə e-poçtla cavab verəcəyik.',
     based: 'Türkiyə mərkəzli. Müxtəlif bazarlarda işləyirik.',
     addressLabel: 'Ünvan',
     direct: 'E-poçtu üstün tutursunuz?',
@@ -1474,6 +1498,12 @@ const az: Dict = {
     scheduleTitle: 'Danışaraq irəliləmək istəyirsiniz?',
     scheduleSub: 'Pulsuz 30 dəqiqəlik tanışlıq zəngi planlaşdırın; doğru növbəti addımı birlikdə müəyyən edək.',
     calendlyUrl: '',
+  },
+  legal: {
+    formNoticeBefore: 'Bu formda paylaşdığınız şəxsi məlumatların emalı ilə bağlı məlumatı ',
+    formNoticeLink: 'Məlumatlandırma bildirişində',
+    formNoticeAfter: ' tapa bilərsiniz.',
+    noticeTitle: 'Məlumatlandırma bildirişi',
   },
   cookies: {
     text: 'Saytın işləməsi üçün zəruri kukilərdən, istifadəsini anlamaq üçün isə seçimli analitika kukilərindən istifadə edirik.',
@@ -1568,14 +1598,14 @@ const az: Dict = {
     title: 'Rəqəmsal varlığınız nə qədər sağlamdır?',
     description:
       'Brendiniz, kanallarınız və hədəfləriniz haqqında bir neçə qısa suala cavab verin. Cavablarınızı nəzərdən keçirib aydın addımlar içərən fərdi rəqəmsal analiz hazırlayaq.',
-    introTitle: '16 suala təxminən üç dəqiqəyə cavab verin; rəqəmsal sağlamlığınızı nəzərdən keçirib sizə geri dönək.',
+    introTitle: 'Brendinizin rəqəmsal vəziyyətini birlikdə qiymətləndirək.',
     sampleTitle: 'Rəqəmsal sağlamlıq',
     sampleLabel: 'Nümunə nəticə',
     sampleNote: 'Nümayiş üçün nümunə dəyərlər — real hesabatınız öz cavablarınız əsasında hazırlanır.',
     introSub:
       'Brendiniz, saytınız, kanallarınız, ölçmə quruluşunuz və inkişaf hazırlığınız haqqında 16 fokuslu suala cavab verin. Cavablarınızı nəzərdən keçirir, prioritetləşdirilmiş qiymətləndirmə və aydın növbəti addımlar göndəririk.',
     introStart: 'Check-Up-ımı Başlat',
-    introPoints: ['Cavablamaq təxminən 3 dəqiqə', '16 fokuslu sual', 'Qiymətləndirmədə 0–100 rəqəmsal sağlamlıq skoru', 'Avtomatik deyil, bir insan baxır', 'Aydın növbəti addımlar'],
+    introPoints: ['Cavablamaq təxminən 3 dəqiqə', '16 fokuslu sual', 'Avtomatik deyil, bir insan baxır', 'Aydın növbəti addımlar'],
     sectionWord: 'Bölmə',
     sections: [
       { key: 'business', label: 'Biznes' },
@@ -1596,9 +1626,7 @@ const az: Dict = {
     company: 'Şirkət və ya Brend',
     email: 'E-poçt Ünvanı',
     phone: 'Telefon Nömrəsi',
-    consent: 'Məlumatlarımın emalına razıyam.',
-    success:
-      'Müraciətiniz qəbul edildi. Rəqəmsal analiz hesabatınız hazırlanır; tezliklə sizinlə əlaqə saxlayacağıq.',
+    success: 'Cavablarınız çatdı. Qiymətləndirmənizi hazırlayıb e-poçt ünvanınıza göndərəcəyik.',
     errorRequired: 'Zəhmət olmasa, vacib xanaları doldurun.',
     errorEmail: 'Zəhmət olmasa, düzgün e-poçt ünvanı daxil edin.',
     errorGeneric: 'Xəta baş verdi. Yenidən cəhd edin və ya birbaşa e-poçt göndərin.',
@@ -1835,9 +1863,9 @@ const ar: Dict = {
     market: 'السوق',
     year: 'السنة',
     servicesLabel: 'الخدمات',
-    problem: 'السياق',
-    approach: 'ما قامت به YOCA',
-    solution: 'التجربة',
+    problem: 'الحاجة',
+    approach: 'نطاق عمل Yoca',
+    solution: 'ما تم تسليمه',
     result: 'نتائج موثقة',
     viewCase: 'عرض المشروع',
     backToWork: 'العودة إلى الأعمال',
@@ -1848,6 +1876,9 @@ const ar: Dict = {
     filterProducts: 'مشاريع ومنتجات Yoca',
     metricNote: '* لا تُعرض إلا النتائج الموثقة والمعتمدة من العملاء.',
     quoteLabel: 'رأي العميل',
+    resultPeriod: 'الفترة',
+    resultBaseline: 'مقارنةً بـ',
+    resultBasis: 'المصدر',
     empty: 'لا توجد مشاريع في هذه الفئة حتى الآن.',
     statusClient: 'دراسة حالة لعميل',
     statusConcept: 'مشروع مفاهيمي',
@@ -1869,9 +1900,8 @@ const ar: Dict = {
     email: 'البريد الإلكتروني',
     company: 'الشركة أو العلامة',
     message: 'أخبرنا عن المشروع',
-    consent: 'أوافق على معالجة معلوماتي.',
     submit: 'أرسل موجز المشروع',
-    success: 'شكرًا لك. تم استلام تفاصيل مشروعك. سنراجع المعلومات ونتواصل معك عبر بيانات الاتصال التي قدمتها.',
+    success: 'وصلت رسالتك. سنراجع المعلومات التي شاركتها ونرد عليك عبر البريد الإلكتروني.',
     based: 'مقرنا في تركيا، ونعمل عبر أسواق متعددة.',
     addressLabel: 'العنوان',
     direct: 'تفضل البريد الإلكتروني؟',
@@ -1888,6 +1918,12 @@ const ar: Dict = {
     scheduleTitle: 'تفضل أن نتحدث مباشرة؟',
     scheduleSub: 'احجز مكالمة تعارف مجانية لمدة 30 دقيقة ولنرسم الخطوة التالية الصحيحة معًا.',
     calendlyUrl: '',
+  },
+  legal: {
+    formNoticeBefore: 'تجد المعلومات المتعلقة بمعالجة البيانات الشخصية التي تشاركها في هذا النموذج في ',
+    formNoticeLink: 'إشعار الخصوصية',
+    formNoticeAfter: '.',
+    noticeTitle: 'إشعار الخصوصية',
   },
   cookies: {
     text: 'نستخدم ملفات تعريف الارتباط الأساسية لتشغيل الموقع، وملفات تحليل اختيارية لفهم كيفية استخدامه.',
@@ -2006,14 +2042,14 @@ const ar: Dict = {
     title: 'ما مدى صحة حضورك الرقمي؟',
     description:
       'أجب عن بضعة أسئلة قصيرة حول علامتك وقنواتك وأهدافك. سنراجع إجاباتك ونعد تحليلًا رقميًا شخصيًا بخطوات واضحة.',
-    introTitle: 'أجب عن 16 سؤالًا في نحو ثلاث دقائق، ونراجع صحتك الرقمية ونعود إليك.',
+    introTitle: 'لنقيّم معًا وضع علامتك التجارية رقميًا.',
     sampleTitle: 'الصحة الرقمية',
     sampleLabel: 'نتيجة نموذجية',
     sampleNote: 'قيم توضيحية للعرض فقط — يُعدّ تقريرك الحقيقي من إجاباتك الخاصة.',
     introSub:
       'أجب عن 16 سؤالًا مركزًا حول علامتك وموقعك وقنواتك وقياسك وجاهزيتك للنمو. نراجع إجاباتك ونرسل لك تقييمًا مرتّبًا بالأولوية مع خطوات تالية واضحة.',
     introStart: 'ابدأ فحصي',
-    introPoints: ['نحو 3 دقائق للإجابة', '16 سؤالًا مركزًا', 'درجة صحة رقمية 0–100 في التقييم', 'يراجعها شخص، لا تُرسل آليًا', 'خطوات تالية واضحة'],
+    introPoints: ['نحو 3 دقائق للإجابة', '16 سؤالًا مركزًا', 'يراجعها شخص، لا تُرسل آليًا', 'خطوات تالية واضحة'],
     sectionWord: 'القسم',
     sections: [
       { key: 'business', label: 'العمل' },
@@ -2034,8 +2070,7 @@ const ar: Dict = {
     company: 'الشركة أو العلامة',
     email: 'البريد الإلكتروني',
     phone: 'رقم الهاتف',
-    consent: 'أوافق على معالجة معلوماتي.',
-    success: 'تم استلام طلبك. نُعد الآن تقرير تحليلك الرقمي وسنتواصل معك قريبًا.',
+    success: 'وصلت إجاباتك. سنُعدّ تقييمك ونرسله إلى بريدك الإلكتروني.',
     errorRequired: 'يرجى تعبئة الحقول المطلوبة.',
     errorEmail: 'يرجى إدخال بريد إلكتروني صحيح.',
     errorGeneric: 'حدث خطأ ما. حاول مرة أخرى أو راسلنا مباشرة عبر البريد الإلكتروني.',

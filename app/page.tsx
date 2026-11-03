@@ -8,13 +8,13 @@ import SystemPillars from '@/components/sections/SystemPillars';
 import BrandBand from '@/components/sections/BrandBand';
 import WorkShowcase from '@/components/sections/WorkShowcase';
 import ToolsStrip from '@/components/sections/ToolsStrip';
-import CheckupSample from '@/components/checkup/CheckupSample';
 import TeamSection from '@/components/sections/TeamSection';
 import ServicesGrid from '@/components/sections/ServicesGrid';
 import CtaSection from '@/components/sections/CtaSection';
 import LiveStatus from '@/components/ui/LiveStatus';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
+import { getFormCopy } from '@/lib/siteSettings';
 import { buildMetadata, getRequestContext, jsonLdString, breadcrumbSchema } from '@/lib/seo';
 
 export function generateMetadata(): Metadata {
@@ -31,6 +31,7 @@ export function generateMetadata(): Metadata {
 export default async function HomePage() {
   const ctx = getRequestContext();
   const t = await getContent(ctx.locale);
+  const copy = await getFormCopy(ctx.locale);
   const base = ctx.base;
 
   return (
@@ -83,22 +84,19 @@ export default async function HomePage() {
                   {t.checkup.introTitle}
                 </h2>
                 <p className="mt-5 max-w-[50ch] text-[16px] leading-relaxed text-black/75 lg:text-[17px]">
-                  {t.checkup.description}
+                  {copy.checkupDescription}
                 </p>
               </div>
               <div className="grid justify-items-start gap-8 lg:justify-items-end">
-                <CheckupSample
-                  title={t.checkup.sampleTitle}
-                  sampleLabel={t.checkup.sampleLabel}
-                  note={t.checkup.sampleNote}
-                  total={72}
-                  categories={[
-                    { label: t.checkup.sections[3]?.label ?? 'Brand', value: 84 },
-                    { label: t.checkup.sections[1]?.label ?? 'Website', value: 61 },
-                    { label: t.checkup.sections[2]?.label ?? 'Marketing', value: 58 },
-                    { label: t.checkup.sections[4]?.label ?? 'Measurement', value: 73 },
-                  ]}
-                />
+                {/* What the Check-Up looks at — no score is promised (the visitor does not see one). */}
+                <ul className="grid w-full max-w-sm gap-1.5" aria-label={t.checkup.sectionWord}>
+                  {t.checkup.sections.map((section, index) => (
+                    <li key={section.key} className="flex items-center gap-3 border-b border-black/15 py-2 text-[15px] font-bold">
+                      <span className="text-[12px] font-extrabold tracking-[0.08em] text-black/60">{String(index + 1).padStart(2, '0')}</span>
+                      {section.label}
+                    </li>
+                  ))}
+                </ul>
                 <Link
                   href={`${base}/checkup`}
                   className="inline-flex min-h-12 items-center gap-2 bg-black px-8 py-4 text-[15px] font-bold text-white transition-colors hover:bg-[#1a1a1a]"

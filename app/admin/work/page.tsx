@@ -40,14 +40,13 @@ const LOCALIZED_FIELDS: Array<{ key: TextField; label: string; multiline: boolea
   { key: 'name', label: 'Proje adı', multiline: false },
   { key: 'sector', label: 'Sektör', multiline: false },
   { key: 'summary', label: 'Özet', multiline: true },
-  { key: 'problem', label: '1 · Meydan Okuma (Challenge)', multiline: true },
-  { key: 'approach', label: '2 · Uygulanan Sistem', multiline: true },
-  { key: 'solution', label: '3 · Uygulama ve Teknoloji', multiline: true },
-  { key: 'results', label: '4 · Sonuç anlatısı (müşteri: Doğrulanmış Sonuçlar / konsept: Tasarlanan Sonuç)', multiline: true },
-  { key: 'metricBadge', label: 'Metrik rozeti — YALNIZCA doğrulanmış, müşteri onaylı veri girin', multiline: false },
-  { key: 'quote', label: '5 · Müşteri Yorumu (boşsa bölüm gizlenir — gerçek yorum girin)', multiline: true },
-  { key: 'quoteAuthor', label: 'Yorum sahibi (ad — unvan)', multiline: false },
+  { key: 'problem', label: '1 · İhtiyaç (müşterinin durumu ve ihtiyacı)', multiline: true },
+  { key: 'approach', label: '2 · Yoca’nın kapsamı (ne tasarlandı / geliştirildi)', multiline: true },
+  { key: 'solution', label: '3 · Teslim edilen özellikler', multiline: true },
 ];
+// Results, metric badge, stats and quotes are no longer edited here and never shown on the
+// site from these fields: verified results live in “Sonuçlar ve referanslar” (case_study_results),
+// shown only when approved by the client for the site. Old values stay in the data, untouched.
 
 /** stats textarea satır formatı: Etiket | Değer | 0-100 (çubuk yüzdesi) */
 function statsToText(stats?: Array<{ label: string; value: string; bar?: number }>): string {
@@ -565,16 +564,10 @@ export default function AdminWork() {
               )}
             </label>
           ))}
-          <label className="admin-card grid gap-2 !p-4 text-[13px] font-extrabold">
-            Sonuç istatistikleri — her satır: Etiket | Değer | 0-100 çubuk yüzdesi
-            <textarea
-              rows={4}
-              value={statsText[editLocale] ?? statsToText(localized.stats)}
-              onChange={(event) => setLocalizedStats(event.target.value)}
-              placeholder={'Online randevu | +87% | 87\nOrganik trafik | +120% | 95'}
-              className="admin-input resize-y font-medium"
-            />
-          </label>
+          <p className="admin-card !p-4 text-[13px] text-muted">
+            4 · Görseller ve canlı bağlantı yukarıdaki genel alanlardan gelir. 5 · Doğrulanmış sonuç ve müşteri yorumu yalnızca{' '}
+            <a href="/admin/work/results" className="font-bold text-yoca-lime underline">Sonuçlar ve referanslar</a> sayfasından, müşteri onayı ve “site” yayın kapsamıyla gösterilir.
+          </p>
         </div>
       </div>
     );
@@ -597,6 +590,7 @@ export default function AdminWork() {
         </div>
         <div className="flex items-center gap-3">
           {message && <p className="text-[13px] font-bold text-yoca-lime">{message}</p>}
+          <a href="/admin/work/results" className="admin-btn">Sonuçlar ve referanslar</a>
           <button type="button" className="admin-btn-primary" disabled={loading} onClick={() => open(newRow(maxOrder + 1))}>
             Yeni Proje
           </button>

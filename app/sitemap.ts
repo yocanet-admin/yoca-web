@@ -9,6 +9,8 @@ import {
 } from '@/lib/domains';
 import { getAllSlugs } from '@/lib/work';
 import { getAllPublishedInsights } from '@/lib/insights';
+import { getCompanyInfo, getKvkkPublish } from '@/lib/siteSettings';
+import { noticeIsFinal } from '@/lib/companyInfo';
 
 /**
  * Yoca — sitemap for path-based i18n.
@@ -33,7 +35,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: 'monthly' as const,
     })),
     { path: '/products', priority: 0.8, changeFrequency: 'monthly' },
-    { path: '/insights', priority: 0.8, changeFrequency: 'weekly' },
     { path: '/checkup', priority: 0.8, changeFrequency: 'monthly' },
     { path: '/contact', priority: 0.8, changeFrequency: 'monthly' },
   ];
@@ -71,6 +72,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.6,
       alternates: { languages },
     });
+  }
+
+  // Insights index only for locales that have at least one published post.
+  const liveLocales = Array.from(new Set(insights.map((row) => row.locale)));
+  for (const locale of liveLocales) {
+    entries.push({ url: absoluteLocalizedUrl(host, locale, '/insights'), lastModified, changeFrequency: 'weekly', priority: locale === DEFAULT_LOCALE ? 0.8 : 0.7 });
+  }
+
+  // Privacy notice only once the owner published it as final (the draft is noindex).
+  const [company, kvkk] = await Promise.all([getCompanyInfo(), getKvkkPublish()]);
+  if (noticeIsFinal(company, kvkk)) {
+    for (const locale of LOCALES) entries.push({ url: absoluteLocalizedUrl(host, locale, '/privacy'), lastModified, changeFrequency: 'monthly', priority: 0.3 });
   }
   return entries;
 }

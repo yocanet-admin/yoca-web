@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getDict } from '@/lib/i18n';
 import { notifyContact } from '@/lib/notify';
+import { getFormCopy } from '@/lib/siteSettings';
 import { clientIp, contactFingerprint, rateLimited } from '@/lib/formGuard';
 import { freeText, logSpam, screenSubmission } from '@/lib/spam';
 import type { Locale } from '@/types';
@@ -50,6 +51,8 @@ export async function POST(request: NextRequest) {
     ? (payload.locale as Locale)
     : 'en';
   const dict = getDict(locale);
+  // Success text: neutral until response times are approved (Ayarlar → Yanıt süreleri).
+  const success = (await getFormCopy(locale).catch(() => null))?.contactSuccess ?? dict.contact.success;
 
   const name = String(payload.name ?? '').trim().slice(0, 190);
   const email = String(payload.email ?? '').trim().slice(0, 190);
@@ -75,7 +78,7 @@ export async function POST(request: NextRequest) {
   if (verdict.spam) {
     console.warn('contact spam dropped:', verdict.reasons.join(','));
     await logSpam('contact', verdict.reasons);
-    return NextResponse.json({ ok: true, message: dict.contact.success });
+    return NextResponse.json({ ok: true, message: success });
   }
 
   const supabase = getSupabaseAdmin();
@@ -97,7 +100,7 @@ export async function POST(request: NextRequest) {
     .limit(10);
   if (!recent.error && (recent.data ?? []).some((row) => contactFingerprint(row) === fingerprint)) {
     await logSpam('contact', ['duplicate']);
-    return NextResponse.json({ ok: true, message: dict.contact.success });
+    return NextResponse.json({ ok: true, message: success });
   }
 
   const id = randomUUID();
@@ -110,5 +113,5 @@ export async function POST(request: NextRequest) {
 
   await notifyContact({ id, name, email, company, message, locale });
 
-  return NextResponse.json({ ok: true, message: dict.contact.success });
+  return NextResponse.json({ ok: true, message: success });
 }

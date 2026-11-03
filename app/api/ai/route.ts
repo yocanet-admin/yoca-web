@@ -1,47 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/lib/supabase';
-import { OpenAIError, MODELS } from '@/lib/ai/openai';
+import { requireAdmin } from '@/lib/cockpit/auth';
+import { getSupabaseServiceRole } from '@/lib/supabase';
+import { editImage, generateImage, hasOpenAIKey, OpenAIError, type OpenAIResult, type OpenAIUsage } from '@/lib/ai/openai';
+import { mockEnabled } from '@/lib/ai/mock';
+import { checkModel, getAiSettings, resolveModel, type AiSettings, type Preset } from '@/lib/ai/settings';
+import { finishRun, startRun } from '@/lib/ai/runs';
+import { fetchSources, type FetchedSource } from '@/lib/ai/sources';
 import {
-  contentBrief,
-  coverConcept,
+  coverBrief,
   faqPack,
-  polishDraft,
-  generateDirection,
   generateDraft,
   repurpose,
-  reviewArticle,
-  rewriteText,
+  rewriteSelection,
   seoPack,
+  sourceCheck,
+  styleEdit,
+  styleReview,
+  titleOptions,
   topicIdeas,
   translateArticle,
-  type Brief,
-  type InlineAction,
+  webResearch,
+  type StudioBrief,
 } from '@/lib/ai/editorial';
-import { researchTopic } from '@/lib/ai/research';
-import { generateCoverImage, storeCover } from '@/lib/ai/images';
-import { requireAdmin } from '@/lib/cockpit/auth';
+import { buildEditPrompt, buildImagePrompt, imageSize, readDraftImage, storeDraftImage } from '@/lib/ai/images';
 
 /**
  * Yoca — admin AI endpoint (server only).
- * - Requires a valid Supabase Auth session (Bearer access token) → only
- *   authenticated admins/editors can spend tokens.
- * - Rate-limited per user, input length capped, output length capped.
- * - Never publishes, never writes article content — returns structured
- *   results for the editor to review and save as DRAFT.
- * - Logs operational metadata to ai_runs (no secrets, no reasoning).
+ * - Every request: valid session + ADMIN_EMAILS (optional) + database is_admin()
+ *   (requireAdmin). The OpenAI key never leaves the server.
+ * - Per-user rate limit, request size cap, per-request token caps, monthly
+ *   budget, idempotency key per click (double clicks never start a second job),
+ *   limited retries inside the client (no fix loops).
+ * - Never publishes and never overwrites article text: text results come back
+ *   as proposals and full-text proposals are also stored as an "ai_proposal"
+ *   revision; images go to the private draft bucket. On any error nothing in
+ *   the article changes.
  */
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 const hits = new Map<string, number[]>();
-const RATE_LIMIT = 40; // requests per user per hour
-const WINDOW_MS = 60 * 60 * 1000;
-const MAX_INPUT = 120_000; // characters per request body
+const RATE_LIMIT = 60; // requests per user per hour
+const MAX_RAW = 250_000; // bytes of JSON per request
 
 function rateLimited(userId: string): boolean {
   const now = Date.now();
-  const list = (hits.get(userId) ?? []).filter((ts) => ts > now - WINDOW_MS);
+  const list = (hits.get(userId) ?? []).filter((ts) => ts > now - 3_600_000);
   if (list.length >= RATE_LIMIT) return true;
   list.push(now);
   hits.set(userId, list);
@@ -49,179 +55,216 @@ function rateLimited(userId: string): boolean {
 }
 
 const LOCALES = new Set(['en', 'tr', 'az', 'ar']);
-const INLINE_ACTIONS: InlineAction[] = ['rewrite', 'shorter', 'natural', 'clearer', 'technical', 'editorial', 'yoca-tone', 'improve-title', 'strengthen-intro', 'add-example', 'remove-repetition', 'section-rewrite', 'expand', 'condense', 'house-style'];
+const TEXT_ACTIONS = new Set(['ideas', 'research', 'draft', 'rewrite', 'titles', 'source_check', 'style_review', 'style_edit', 'seo', 'translate', 'faq', 'repurpose', 'cover_brief']);
+const IMAGE_ACTIONS = new Set(['image_generate', 'image_edit']);
 
-interface Payload {
-  action: string;
-  insightId?: string;
-  locale?: string;
-  [key: string]: unknown;
-}
+type Payload = Record<string, unknown>;
 
-/**
- * Same admin rule as every /api/admin/* route: valid session + optional ADMIN_EMAILS
- * + database is_admin() (lib/cockpit/auth.ts). A signed-in non-admin gets 401 before
- * anything else is looked at (no OpenAI configuration details, no model call).
- */
-async function authenticate(request: NextRequest): Promise<{ id: string; email?: string } | null> {
-  return requireAdmin(request);
-}
+const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '');
+const urls = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map((x) => x.slice(0, 2000)).slice(0, 10) : []);
 
-async function logRun(entry: { insightId?: string; action: string; model: string; locale?: string; status: string; createdBy?: string; tokensIn?: number; tokensOut?: number; error?: string }) {
-  const admin = getSupabaseAdmin();
-  if (!admin) return;
-  await admin.from('ai_runs').insert({
-    insight_id: entry.insightId ?? null,
-    action: entry.action,
-    model: entry.model,
-    locale: entry.locale ?? null,
-    status: entry.status,
-    created_by: entry.createdBy ?? null,
-    tokens_in: entry.tokensIn ?? null,
-    tokens_out: entry.tokensOut ?? null,
-    error: entry.error ? entry.error.slice(0, 500) : null,
-  }).then(() => undefined, () => undefined);
+async function saveProposal(insightId: string, runId: string, createdBy: string, reason: string, data: { title: string; excerpt: string; body_md: string; extra?: Record<string, unknown> }): Promise<string | null> {
+  const supabase = getSupabaseServiceRole();
+  if (!supabase || !/^[0-9a-f-]{36}$/.test(insightId)) return null;
+  const { data: row } = await supabase
+    .from('insight_revisions')
+    .insert({ insight_id: insightId, title: data.title.slice(0, 300), excerpt: data.excerpt.slice(0, 1000), body_md: data.body_md, reason, kind: 'ai_proposal', data: data.extra ?? {}, created_by: createdBy, ai_run_id: runId })
+    .select('id')
+    .single();
+  return (row as { id: string } | null)?.id ?? null;
 }
 
 export async function POST(request: NextRequest) {
-  const user = await authenticate(request);
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  if (rateLimited(user.id)) return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  const user = await requireAdmin(request);
+  if (!user) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  if (rateLimited(user.id)) return NextResponse.json({ ok: false, error: 'Saatlik yapay zekâ sınırı doldu; biraz sonra tekrar deneyin.' }, { status: 429 });
 
   const raw = await request.text();
-  if (raw.length > MAX_INPUT) return NextResponse.json({ error: 'payload_too_large' }, { status: 413 });
+  if (raw.length > MAX_RAW) return NextResponse.json({ ok: false, error: 'İstek çok büyük. Metni kısaltın.' }, { status: 413 });
   let payload: Payload;
   try {
     payload = JSON.parse(raw) as Payload;
   } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
+    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
   const action = String(payload.action ?? '');
   const locale = LOCALES.has(String(payload.locale)) ? String(payload.locale) : 'tr';
-  const str = (v: unknown, max = 20_000) => (typeof v === 'string' ? v.slice(0, max) : '');
-  const arr = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 20) as string[] : []);
-  const model = action === 'research' ? MODELS.research : action === 'cover' ? process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1' : MODELS.editorial;
+  const insightId = /^[0-9a-f-]{36}$/.test(String(payload.insightId ?? '')) ? String(payload.insightId) : null;
+  const createdBy = user.email ?? user.id;
+
+  let mock = false;
+  try {
+    mock = mockEnabled();
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: (error as Error).message, code: 'mock_refused' }, { status: 503 });
+  }
+
+  // Source fetching does not call OpenAI (no budget, no run).
+  if (action === 'fetch_sources') {
+    const fetched = await fetchSources(urls(payload.urls));
+    return NextResponse.json({ ok: true, result: { sources: fetched.map(({ text, ...rest }) => ({ ...rest, preview: text?.slice(0, 600) ?? '' })) } });
+  }
+
+  const kind: 'text' | 'image' | null = TEXT_ACTIONS.has(action) ? 'text' : IMAGE_ACTIONS.has(action) ? 'image' : null;
+  if (!kind) return NextResponse.json({ ok: false, error: 'unknown_action' }, { status: 400 });
+  if (!hasOpenAIKey() && !mock) return NextResponse.json({ ok: false, code: 'no_key', error: 'Yapay zekâ kurulu değil: OPENAI_API_KEY sunucuda tanımlı değil (Vercel → Environment Variables, sonra Redeploy). Ayarlar → Yapay zekâ bölümünde durum görünür.' }, { status: 503 });
+
+  const settings: AiSettings = await getAiSettings();
+  const preset = payload.preset === 'quality' || payload.preset === 'economy' ? (payload.preset as Preset) : undefined;
+  const check = checkModel(settings, resolveModel(settings, kind, preset), kind, mock);
+  if (!check.ok) return NextResponse.json({ ok: false, code: check.code, error: check.message }, { status: 503 });
+  const model = check.model;
+  const cap = settings.maxInputChars;
+
+  const startedAt = Date.now();
+  let runId: string;
+  try {
+    const start = await startRun({ action, kind, model, insightId, locale, createdBy, idempotencyKey: String(payload.requestKey ?? '') }, settings, mock);
+    if (start.kind === 'replay') {
+      if (start.status === 'error') return NextResponse.json({ ok: false, error: start.error ?? 'Bu istek daha önce başarısız oldu; yeniden deneyin.', replay: true }, { status: 409 });
+      return NextResponse.json({ ok: true, result: start.result, replay: true });
+    }
+    runId = start.runId;
+  } catch (error) {
+    const e = error instanceof OpenAIError ? error : new OpenAIError('Yapay zekâ isteği başlatılamadı.', 500);
+    return NextResponse.json({ ok: false, code: e.code, error: e.message }, { status: e.status });
+  }
+
+  let usage: OpenAIUsage = {};
+  let requestId: string | undefined;
+  let wasMock = mock;
+  const take = <T,>(r: OpenAIResult<T>): T => {
+    usage = r.usage;
+    requestId = r.requestId;
+    wasMock = wasMock || Boolean(r.mock);
+    return r.data;
+  };
 
   try {
     let result: unknown;
-    let usage: { input_tokens?: number; output_tokens?: number } = {};
-
+    let proposalId: string | null = null;
     switch (action) {
-      case 'direction':
-      case 'draft': {
-        const brief: Brief = {
-          topic: str(payload.topic, 2000),
-          objective: str(payload.objective, 200) || 'Thought Leadership',
-          audience: str(payload.audience, 300) || 'business decision-makers',
-          mainKeyword: str(payload.mainKeyword, 200) || undefined,
-          supportingKeywords: arr(payload.supportingKeywords),
-          relatedService: str(payload.relatedService, 100) || undefined,
-          relatedProduct: str(payload.relatedProduct, 100) || undefined,
-          locale,
-          depth: (['short', 'standard', 'deep'] as const).includes(payload.depth as 'short') ? (payload.depth as Brief['depth']) : 'standard',
-          tone: str(payload.tone, 40) || 'default',
-          direction: (payload.direction as Brief['direction']) || undefined,
-          research: str(payload.research, 40_000) || undefined,
-        };
-        if (!brief.topic) return NextResponse.json({ error: 'topic_required' }, { status: 400 });
-        if (action === 'direction') {
-          const r = await generateDirection(brief);
-          result = r.data; usage = r.usage;
-          break;
-        }
-        const r = await generateDraft(brief);
-        usage = r.usage;
-        // House-style line edit on every new draft (skip with polish:false). A failed
-        // polish never loses the draft: the unpolished version is returned instead.
-        if (payload.polish !== false) {
-          try {
-            const p = await polishDraft({ title: r.data.title, excerpt: r.data.excerpt, body: r.data.body }, locale);
-            result = { ...r.data, title: p.data.title || r.data.title, excerpt: p.data.excerpt || r.data.excerpt, body: p.data.body || r.data.body, polishChanges: p.data.changes };
-            usage = { input_tokens: (usage.input_tokens ?? 0) + (p.usage.input_tokens ?? 0), output_tokens: (usage.output_tokens ?? 0) + (p.usage.output_tokens ?? 0) };
-          } catch (polishError) {
-            console.error('[ai] polish skipped:', (polishError as Error).message);
-            result = { ...r.data, polishChanges: [] };
-          }
-        } else result = r.data;
+      case 'ideas':
+        result = { ideas: take(await topicIdeas(model, { topic: str(payload.topic, 2000), reader: str(payload.reader, 300), goal: str(payload.goal, 300), service: str(payload.service, 100), locale })) };
+        break;
+      case 'research': {
+        // Optional web search. Citations come back as "not read by the server";
+        // nothing here is fed into a draft automatically.
+        const topic = str(payload.topic, 500);
+        if (!topic.trim()) throw new OpenAIError('Konu gerekli.', 400, 'bad_request');
+        result = take(await webResearch(model, topic, locale));
         break;
       }
-      case 'research': {
-        const topic = str(payload.topic, 2000);
-        if (!topic) return NextResponse.json({ error: 'topic_required' }, { status: 400 });
-        const r = await researchTopic(topic, locale, arr(payload.keywords));
-        result = r.data; usage = r.usage;
+      case 'draft': {
+        const brief: StudioBrief = {
+          topic: str(payload.topic, 2000),
+          reader: str(payload.reader, 300),
+          locale,
+          length: (['short', 'standard', 'deep'] as const).includes(payload.length as 'short') ? (payload.length as StudioBrief['length']) : 'standard',
+          notes: str(payload.notes, cap / 2),
+          existingText: str(payload.existingText, cap / 2),
+          goal: str(payload.goal, 300) || undefined,
+          service: str(payload.service, 100) || undefined,
+          keyword: str(payload.keyword, 200) || undefined,
+          tone: str(payload.tone, 40) || undefined,
+          cta: str(payload.cta, 300) || undefined,
+        };
+        if (!brief.topic.trim()) throw new OpenAIError('Konu gerekli.', 400, 'bad_request');
+        const fetched: FetchedSource[] = await fetchSources(urls(payload.sourceUrls));
+        brief.sources = fetched;
+        const draft = take(await generateDraft(model, brief, settings.maxOutputTokens));
+        result = { draft, sources: fetched.map(({ text: _t, ...rest }) => (void _t, rest)) };
+        if (insightId) proposalId = await saveProposal(insightId, runId, createdBy, 'AI taslak önerisi', { title: draft.title, excerpt: draft.excerpt, body_md: draft.body, extra: { seo_title: draft.seoTitle, meta_description: draft.metaDescription, tags: draft.suggestedTags, faq: draft.faq } });
         break;
       }
       case 'rewrite': {
-        const inline = String(payload.inlineAction ?? '') as InlineAction;
-        if (!INLINE_ACTIONS.includes(inline)) return NextResponse.json({ error: 'invalid_action' }, { status: 400 });
-        const selection = str(payload.selection, 60_000);
-        if (!selection.trim()) return NextResponse.json({ error: 'selection_required' }, { status: 400 });
-        const r = await rewriteText(inline, selection, str(payload.context, 60_000), locale, str(payload.instruction, 500) || undefined);
-        result = { text: r.data }; usage = r.usage;
+        const selection = str(payload.selection, cap);
+        if (!selection.trim()) throw new OpenAIError('Önce editörde bir bölüm seçin.', 400, 'bad_request');
+        const mode = payload.mode === 'simplify' ? 'simplify' : 'rewrite';
+        result = { text: take(await rewriteSelection(model, mode, selection, str(payload.context, cap), locale, str(payload.instruction, 500) || undefined)) };
         break;
       }
-      case 'cover': {
-        const title = str(payload.title, 300);
-        if (!title) return NextResponse.json({ error: 'title_required' }, { status: 400 });
-        const concept = await coverConcept(title, str(payload.excerpt, 1000));
-        const image = await generateCoverImage(concept.data.subject);
-        const url = await storeCover(image, str(payload.groupId, 64) || 'ai');
-        result = { url, alt: concept.data.alt, subject: concept.data.subject };
-        usage = concept.usage;
+      case 'titles':
+        result = { titles: take(await titleOptions(model, str(payload.title, 300), str(payload.excerpt, 1000), str(payload.body, cap), locale)) };
+        break;
+      case 'style_review': {
+        const text = str(payload.text, cap);
+        if (!text.trim()) throw new OpenAIError('İncelenecek metin yok.', 400, 'bad_request');
+        result = { findings: take(await styleReview(model, text, locale)) };
         break;
       }
-      case 'review': {
-        const r = await reviewArticle(str(payload.title, 300), str(payload.body, 80_000), locale);
-        result = r.data; usage = r.usage;
+      case 'style_edit': {
+        const text = str(payload.text, cap);
+        if (!text.trim()) throw new OpenAIError('Düzenlenecek metin yok.', 400, 'bad_request');
+        const edited = take(await styleEdit(model, text, locale, settings.maxOutputTokens));
+        result = edited;
+        if (insightId && payload.scope === 'body') proposalId = await saveProposal(insightId, runId, createdBy, 'AI düzenleme önerisi (yazım kalıpları)', { title: str(payload.title, 300), excerpt: str(payload.excerpt, 1000), body_md: edited.text });
         break;
       }
-      case 'seo': {
-        const r = await seoPack(str(payload.title, 300), str(payload.excerpt, 1000), str(payload.body, 80_000), locale, str(payload.mainKeyword, 200) || undefined);
-        result = r.data; usage = r.usage;
+      case 'source_check': {
+        const body = str(payload.body, cap);
+        if (!body.trim()) throw new OpenAIError('Kontrol edilecek metin yok.', 400, 'bad_request');
+        const fetched = await fetchSources(urls(payload.sourceUrls));
+        result = take(await sourceCheck(model, body, locale, fetched, str(payload.notes, cap / 2)));
         break;
       }
-      case 'faq': {
-        const r = await faqPack(str(payload.title, 300), str(payload.body, 80_000), locale);
-        result = { faq: r.data }; usage = r.usage;
+      case 'seo':
+        result = take(await seoPack(model, str(payload.title, 300), str(payload.excerpt, 1000), str(payload.body, cap), locale, str(payload.keyword, 200) || undefined));
         break;
-      }
       case 'translate': {
         const to = String(payload.to ?? '');
-        if (!LOCALES.has(to)) return NextResponse.json({ error: 'invalid_locale' }, { status: 400 });
-        const r = await translateArticle({ title: str(payload.title, 300), excerpt: str(payload.excerpt, 1000), body: str(payload.body, 80_000), seoTitle: str(payload.seoTitle, 200), metaDescription: str(payload.metaDescription, 400) }, locale, to);
-        result = r.data; usage = r.usage;
+        if (!LOCALES.has(to) || to === locale) throw new OpenAIError('Geçersiz hedef dil.', 400, 'bad_request');
+        result = take(await translateArticle(model, { title: str(payload.title, 300), excerpt: str(payload.excerpt, 1000), body: str(payload.body, cap), seoTitle: str(payload.seoTitle, 200), metaDescription: str(payload.metaDescription, 400) }, locale, to));
         break;
       }
+      case 'faq':
+        result = { faq: take(await faqPack(model, str(payload.title, 300), str(payload.body, cap), locale)) };
+        break;
       case 'repurpose': {
         const platform = String(payload.platform ?? '') as 'linkedin' | 'instagram' | 'newsletter' | 'x';
-        if (!['linkedin', 'instagram', 'newsletter', 'x'].includes(platform)) return NextResponse.json({ error: 'invalid_platform' }, { status: 400 });
-        const r = await repurpose(platform, str(payload.title, 300), str(payload.body, 80_000), locale);
-        result = { platform, output: r.data }; usage = r.usage;
+        if (!['linkedin', 'instagram', 'newsletter', 'x'].includes(platform)) throw new OpenAIError('Geçersiz platform.', 400, 'bad_request');
+        result = { platform, output: take(await repurpose(model, platform, str(payload.title, 300), str(payload.body, cap), locale)) };
         break;
       }
-      case 'topics': {
-        const r = await topicIdeas({ category: str(payload.category, 100) || undefined, audience: str(payload.audience, 200) || undefined, goal: str(payload.goal, 200) || undefined, locale });
-        result = { ideas: r.data }; usage = r.usage;
+      case 'cover_brief':
+        result = take(await coverBrief(model, str(payload.title, 300), str(payload.excerpt, 1000), str(payload.body, 20_000)));
+        break;
+      case 'image_generate': {
+        const brief = str(payload.brief, 1500);
+        if (!brief.trim()) throw new OpenAIError('Görsel özeti (brief) gerekli.', 400, 'bad_request');
+        const approach = ['photo', 'illustration', 'diagram'].includes(String(payload.approach)) ? String(payload.approach) : 'photo';
+        const variant = Math.max(0, Math.min(5, Number(payload.variant) || 0));
+        const prompt = buildImagePrompt(brief, approach, variant);
+        const quality = (preset ?? settings.imagePreset) === 'quality' ? 'high' : 'medium';
+        const bytes = take(await generateImage({ model, prompt, size: '1536x1024', quality }));
+        const dims = imageSize(bytes);
+        const saved = await storeDraftImage(bytes, { insightId, groupId: str(payload.groupId, 64) || null, kind: variant > 0 ? 'alternative' : 'generated', origin: 'ai', prompt, brief, model, size: '1536x1024', width: dims?.width, height: dims?.height, altText: str(payload.alt, 300), aiRunId: runId, createdBy, mime: dims?.mime ?? 'image/png' });
+        result = { imageId: saved.id };
         break;
       }
-      case 'brief': {
-        const topic = str(payload.topic, 2000);
-        if (!topic) return NextResponse.json({ error: 'topic_required' }, { status: 400 });
-        const r = await contentBrief(topic, locale, str(payload.audience, 200) || undefined, str(payload.goal, 200) || undefined);
-        result = r.data; usage = r.usage;
+      case 'image_edit': {
+        const imageId = str(payload.imageId, 64);
+        const instruction = str(payload.instruction, 1500);
+        if (!/^[0-9a-f-]{36}$/.test(imageId) || !instruction.trim()) throw new OpenAIError('Görsel ve talimat gerekli.', 400, 'bad_request');
+        const source = await readDraftImage(imageId);
+        const prompt = buildEditPrompt(instruction);
+        const bytes = take(await editImage({ model, prompt, image: source.bytes, mime: source.mime, size: 'auto' }));
+        const dims = imageSize(bytes);
+        const saved = await storeDraftImage(bytes, { insightId, groupId: (source.row.group_id as string) ?? null, kind: 'edited', origin: 'ai', prompt, brief: (source.row.brief as string) ?? null, model, size: dims ? `${dims.width}x${dims.height}` : null, width: dims?.width, height: dims?.height, parentId: imageId, altText: String(source.row.alt_text ?? ''), aiRunId: runId, createdBy, mime: dims?.mime ?? 'image/png' });
+        result = { imageId: saved.id };
         break;
       }
       default:
-        return NextResponse.json({ error: 'unknown_action' }, { status: 400 });
+        throw new OpenAIError('unknown_action', 400, 'bad_request');
     }
 
-    await logRun({ insightId: str(payload.insightId, 64) || undefined, action, model, locale, status: 'ok', createdBy: user.email ?? user.id, tokensIn: usage.input_tokens, tokensOut: usage.output_tokens });
-    return NextResponse.json({ ok: true, result });
+    const { estCostUsd } = await finishRun(runId, { status: wasMock ? 'mock' : 'ok', usage, model, kind, settings, result: { ...(result as object), proposalId }, requestId, startedAt });
+    return NextResponse.json({ ok: true, result: { ...(result as object), proposalId }, run: { id: runId, model, usage, estCostUsd, mock: wasMock } });
   } catch (error) {
-    const err = error instanceof OpenAIError ? error : new OpenAIError('AI request failed', 500);
-    console.error('[ai]', action, err.status, err.requestId ?? '-', err.message);
-    await logRun({ insightId: str(payload.insightId, 64) || undefined, action, model, locale, status: 'error', createdBy: user.email ?? user.id, error: err.message });
-    return NextResponse.json({ error: err.message, status: err.status }, { status: err.status >= 400 && err.status < 600 ? err.status : 500 });
+    const e = error instanceof OpenAIError ? error : new OpenAIError('Yapay zekâ isteği başarısız oldu.', 500);
+    const errUsage = (error as { usage?: OpenAIUsage }).usage ?? usage;
+    console.error('[ai]', action, e.status, e.code, e.requestId ?? '-', e.message.slice(0, 200));
+    await finishRun(runId, { status: 'error', usage: errUsage, model, kind, settings, error: e.message, requestId: e.requestId, startedAt });
+    return NextResponse.json({ ok: false, code: e.code, error: e.message }, { status: e.status >= 400 && e.status < 600 ? e.status : 500 });
   }
 }

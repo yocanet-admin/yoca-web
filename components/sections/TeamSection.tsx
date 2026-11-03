@@ -7,8 +7,10 @@ import type { Dict } from '@/lib/i18n';
  *
  * Glassmorphic member cards driven by the Supabase `team_members` table.
  * Photos render grayscale and transition to colour on hover; each card shows
- * the role badge, specialist tags and a LinkedIn link. When the table is
- * empty the whole section renders nothing (no fake people, ever).
+ * the role badge, short bio, links, specialist tags and a LinkedIn link.
+ * Only ACTIVE and VERIFIED members are fetched (name, role and photo confirmed
+ * in the admin); with none the whole section renders nothing — no fake
+ * people, no AI portraits, ever.
  */
 
 interface TeamSectionProps {
@@ -54,6 +56,16 @@ export default async function TeamSection({ t }: TeamSectionProps) {
                 <h3 className="text-lg font-extrabold">{member.name}</h3>
                 {member.role && (
                   <p className="mt-1 text-[13px] font-semibold text-muted">{member.role}</p>
+                )}
+                {member.bio && <p className="mt-3 text-[14px] leading-relaxed text-muted">{member.bio}</p>}
+                {member.links && member.links.length > 0 && (
+                  <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+                    {member.links.slice(0, 4).map((link) => (
+                      <li key={link.url}>
+                        <a href={link.url} target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-soft underline-offset-2 hover:text-yoca-lime hover:underline">{link.label}</a>
+                      </li>
+                    ))}
+                  </ul>
                 )}
                 {member.tags && member.tags.length > 0 && (
                   <ul className="mt-3.5 flex flex-wrap gap-1.5">

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { getAdminClient } from '@/lib/adminClient';
-import { INSIGHT_LOCALES, STATUS_LABELS, slugify } from '@/lib/insightsAdmin';
+import { adminFetch, INSIGHT_LOCALES, STATUS_LABELS, slugify } from '@/lib/insightsAdmin';
 import type { InsightRow, Locale } from '@/types';
 
 /**
@@ -53,12 +53,13 @@ export default function AdminInsights() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Publishing goes through the same explicit server route as the editor (image
+  // promotion, [KAYNAK GEREKLİ] check, snapshot) — never a direct status write.
   const setStatus = async (row: Row, status: InsightRow['status']) => {
-    if (!supabase) return;
-    const patch: Record<string, unknown> = { status };
-    if (status === 'PUBLISHED' && !row.publish_at) patch.publish_at = new Date().toISOString();
-    await supabase.from('insights').update(patch).eq('id', row.id);
-    flash(status === 'PUBLISHED' ? 'Yayınlandı.' : 'Yayından kaldırıldı.');
+    const action = status === 'PUBLISHED' ? 'publish' : 'unpublish';
+    if (!window.confirm(action === 'publish' ? `“${row.title}” şimdi yayınlansın mı?` : `“${row.title}” yayından kaldırılsın mı?`)) return;
+    const r = await adminFetch('/api/admin/insights/publish', { json: { insightId: row.id, action } });
+    flash(r.ok ? (action === 'publish' ? 'Yayınlandı.' : 'Yayından kaldırıldı.') : r.error ?? 'İşlem başarısız.');
     load();
   };
 
@@ -155,7 +156,7 @@ export default function AdminInsights() {
                       <div className="flex flex-wrap justify-end gap-1.5">
                         <Link href={`/admin/insights/${row.id}`} className="admin-btn !px-2.5 !py-1">Düzenle</Link>
                         <button type="button" onClick={() => duplicate(row)} className="admin-btn !px-2.5 !py-1">Çoğalt</button>
-                        {row.status === 'PUBLISHED' ? (
+                        {row.status === 'PUBLISHED' || row.status === 'SCHEDULED' ? (
                           <button type="button" onClick={() => setStatus(row, 'DRAFT')} className="admin-btn !px-2.5 !py-1">Yayından kaldır</button>
                         ) : (
                           <button type="button" onClick={() => setStatus(row, 'PUBLISHED')} className="admin-btn-primary !px-2.5 !py-1">Yayınla</button>

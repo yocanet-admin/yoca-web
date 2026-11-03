@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getAdminClient } from '@/lib/adminClient';
 import {
+  adminFetch,
   emptyInsight,
   INSIGHT_LOCALES,
   isoToLocalInput,
@@ -18,15 +19,26 @@ import {
 import { readingMinutes } from '@/lib/markdown';
 import type { ArticleDraft, Translation } from '@/lib/ai/schemas';
 import type { InsightCategoryRow, InsightRow, InsightSource, Locale } from '@/types';
-import AiPanel from '@/components/admin/insights/AiPanel';
+import StudioPanel from '@/components/admin/insights/StudioPanel';
+import PreviewModal from '@/components/admin/insights/PreviewModal';
+import type { StudioImage } from '@/components/admin/insights/ImageStudio';
 
 /**
  * Yoca Admin — Insight editor.
  * Left: the article (Markdown body, meta, publishing, relations, SEO,
- * sources, FAQ, translations, revisions). Right: AI Assistant panel.
+ * sources, FAQ, translations, revisions). Right: İçerik stüdyosu.
  * Manual authoring is the default; AI proposals are previews the editor
- * applies. Before an AI rewrite/apply we snapshot a revision.
+ * applies. Before any apply/restore the current text is stored as a revision
+ * AND pushed on an in-page undo stack ("Geri al" restores it in one click).
+ * Saving checks updated_at so a stale tab cannot silently overwrite newer
+ * text; unsaved edits are also kept in this browser until saved.
+ * Publishing and scheduling are separate explicit buttons (publish route).
  */
+
+type RevisionRow = { id: string; created_at: string; reason: string | null; title: string; excerpt: string; body_md: string; kind?: string | null; created_by?: string | null };
+const REVISION_KIND: Record<string, string> = { snapshot: 'Anlık görüntü', ai_proposal: 'AI önerisi', restore: 'Geri yükleme öncesi', autosave: 'Otomatik', publish: 'Yayın öncesi' };
+const EDITABLE_STATUSES: Array<EditableInsight['status']> = ['DRAFT', 'IN_REVIEW', 'ARCHIVED'];
+const localKey = (id: string) => `yoca-insight-unsaved:${id}`;
 
 const SERVICES = ['brand-strategy-identity', 'web-digital-experiences', 'growth-performance', 'creative-production', 'ai-automation', 'digital-product-development'];
 const PRODUCTS = ['yocaserve', 'wonkick', 'yocastudio', 'demo-hub', 'labs'];
@@ -41,7 +53,13 @@ export default function InsightEditor({ id }: Props) {
   const [row, setRow] = useState<EditableInsight | null>(null);
   const [categories, setCategories] = useState<InsightCategoryRow[]>([]);
   const [siblings, setSiblings] = useState<Array<Pick<InsightRow, 'id' | 'locale' | 'title' | 'status'>>>([]);
-  const [revisions, setRevisions] = useState<Array<{ id: string; created_at: string; reason: string | null; title: string; excerpt: string; body_md: string }>>([]);
+  const [revisions, setRevisions] = useState<RevisionRow[]>([]);
+  const [loadedUpdatedAt, setLoadedUpdatedAt] = useState<string | null>(null);
+  const [images, setImages] = useState<StudioImage[]>([]);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [scheduleAt, setScheduleAt] = useState('');
+  const [publishing, setPublishing] = useState(false);
+  const [restorable, setRestorable] = useState<EditableInsight | null>(null);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -50,6 +68,16 @@ export default function InsightEditor({ id }: Props) {
   const [aiOpen, setAiOpen] = useState(true);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const [slugTouched, setSlugTouched] = useState(false);
+  type UndoEntry = { label: string; title: string; excerpt: string; body_md: string };
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
+  const pushUndo = (label: string) => { if (row) setUndoStack((st) => [...st.slice(-19), { label, title: row.title, excerpt: row.excerpt, body_md: row.body_md }]); };
+  const undo = () => {
+    const last = undoStack[undoStack.length - 1];
+    if (!last) return;
+    setUndoStack((st) => st.slice(0, -1));
+    update({ title: last.title, excerpt: last.excerpt, body_md: last.body_md });
+    flash(`Geri alındı: ${last.label} — kaydetmeyi unutmayın.`);
+  };
 
   const flash = (text: string) => { setMessage(text); setTimeout(() => setMessage(null), 3000); };
   const update = (patch: Partial<EditableInsight>) => { setRow((r) => (r ? { ...r, ...patch } : r)); setDirty(true); };
@@ -64,16 +92,45 @@ export default function InsightEditor({ id }: Props) {
       if (!data) { setRow(emptyInsight('tr')); return; }
       const r = data as InsightRow;
       setRow(r);
+      setLoadedUpdatedAt(r.updated_at);
       setSlugTouched(true);
-      const [{ data: sib }, { data: rev }] = await Promise.all([
-        supabase.from('insights').select('id,locale,title,status').eq('group_id', r.group_id),
-        supabase.from('insight_revisions').select('id,created_at,reason,title,excerpt,body_md').eq('insight_id', r.id).order('created_at', { ascending: false }).limit(10),
-      ]);
+      try {
+        const stored = window.localStorage.getItem(localKey(r.id));
+        if (stored) {
+          const parsed = JSON.parse(stored) as { at: string; row: EditableInsight; base: string };
+          if (parsed.base === r.updated_at && (parsed.row.body_md !== r.body_md || parsed.row.title !== r.title)) setRestorable(parsed.row);
+          else window.localStorage.removeItem(localKey(r.id));
+        }
+      } catch { /* storage unavailable */ }
+      const { data: sib } = await supabase.from('insights').select('id,locale,title,status').eq('group_id', r.group_id);
       setSiblings((sib as typeof siblings) ?? []);
-      setRevisions((rev as typeof revisions) ?? []);
+      await loadRevisions(r.id);
+      await loadImages(r.group_id);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  const loadRevisions = async (insightId: string) => {
+    if (!supabase) return;
+    const withKind = await supabase.from('insight_revisions').select('id,created_at,reason,title,excerpt,body_md,kind,created_by').eq('insight_id', insightId).order('created_at', { ascending: false }).limit(30);
+    if (!withKind.error) { setRevisions((withKind.data as RevisionRow[]) ?? []); return; }
+    const legacy = await supabase.from('insight_revisions').select('id,created_at,reason,title,excerpt,body_md').eq('insight_id', insightId).order('created_at', { ascending: false }).limit(30);
+    setRevisions((legacy.data as RevisionRow[]) ?? []);
+  };
+
+  const loadImages = async (groupId: string) => {
+    const r = await adminFetch<{ images?: StudioImage[] }>(`/api/admin/insights/images?groupId=${groupId}`);
+    if (r.ok) setImages(r.images ?? []);
+  };
+
+  // Keep unsaved edits in this browser (cleared on save) so a crash or a closed tab loses nothing.
+  useEffect(() => {
+    if (!dirty || !row?.id || !loadedUpdatedAt) return;
+    const t = setTimeout(() => {
+      try { window.localStorage.setItem(localKey(row.id as string), JSON.stringify({ at: new Date().toISOString(), row, base: loadedUpdatedAt })); } catch { /* quota / private mode */ }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [dirty, row, loadedUpdatedAt]);
 
   // Warn before leaving with unsaved edits (incl. unsaved AI output).
   useEffect(() => {
@@ -82,15 +139,28 @@ export default function InsightEditor({ id }: Props) {
     return () => window.removeEventListener('beforeunload', handler);
   }, [dirty]);
 
-  const save = async (): Promise<string | null> => {
+  const save = async (force = false): Promise<string | null> => {
     if (!supabase || !row) return null;
     if (!row.title.trim()) { flash('Başlık gerekli.'); return null; }
+    if ((row.status === 'PUBLISHED' || row.status === 'SCHEDULED') && !force && !window.confirm('Bu içerik yayında ya da zamanlanmış. Kaydettiğiniz değişiklikler sitede de görünür. Devam edilsin mi?')) return null;
     setSaving(true);
     const payload = toPayload(row);
     let savedId = row.id ?? null;
     if (row.id) {
-      const { error } = await supabase.from('insights').update(payload).eq('id', row.id);
-      if (error) { flash(`Kaydedilemedi: ${error.message}`); setSaving(false); return null; }
+      let query = supabase.from('insights').update(payload).eq('id', row.id);
+      if (loadedUpdatedAt && !force) query = query.eq('updated_at', loadedUpdatedAt);
+      const { data: saved, error } = await query.select('updated_at');
+      if (error) { flash(`Kaydedilemedi: ${error.message} — metniniz editörde duruyor.`); setSaving(false); return null; }
+      if (!saved || saved.length === 0) {
+        setSaving(false);
+        if (window.confirm('Bu içerik siz açtıktan sonra başka bir yerde kaydedilmiş. Sizin metniniz üzerine yazılsın mı? (İptal: hiçbir şey kaydedilmez; sayfayı yenileyip karşılaştırın.)')) {
+          await saveRevision(row.id, row, 'Çakışma: üzerine yazmadan önce sizin metniniz');
+          return save(true);
+        }
+        return null;
+      }
+      setLoadedUpdatedAt((saved[0] as { updated_at: string }).updated_at);
+      try { window.localStorage.removeItem(localKey(row.id)); } catch { /* ignore */ }
     } else {
       const { data, error } = await supabase.from('insights').insert(payload).select('id').single();
       if (error || !data) { flash(`Kaydedilemedi: ${error?.message ?? ''}`); setSaving(false); return null; }
@@ -102,9 +172,15 @@ export default function InsightEditor({ id }: Props) {
     return savedId;
   };
 
-  const snapshot = async (reason: string) => { if (row?.id) await saveRevision(row.id, row, reason); };
+  const snapshot = async (reason: string, kind: 'snapshot' | 'restore' = 'snapshot') => {
+    if (row?.id) {
+      await saveRevision(row.id, row, reason, kind);
+      await loadRevisions(row.id);
+    }
+  };
 
   const applyDraft = async (draft: ArticleDraft, sources?: InsightSource[]) => {
+    pushUndo('AI taslağı');
     await snapshot('AI taslak uygulanmadan önce');
     update({
       title: draft.title,
@@ -119,16 +195,69 @@ export default function InsightEditor({ id }: Props) {
       related_service: row?.related_service ?? (draft.suggestedService || null),
       cta_type: row?.cta_type === 'none' && draft.suggestedService ? 'service' : row?.cta_type ?? 'none',
       sources: sources && sources.length ? sources : row?.sources ?? [],
-      status: 'DRAFT',
     });
-    flash('AI taslağı editöre aktarıldı — kaydetmeyi unutmayın. Durum: Taslak.');
+    flash('AI taslağı editöre aktarıldı — önceki metin sürüm geçmişinde. Kaydetmeyi unutmayın.');
+  };
+
+  const replaceBody = async (text: string, reason: string) => {
+    pushUndo('metin düzenlemesi');
+    await snapshot(reason);
+    update({ body_md: text });
+    flash('Değişiklikler editöre uygulandı — kaydetmeyi unutmayın.');
+  };
+
+  const insertAtCursor = (markdown: string) => {
+    if (!row) return;
+    const el = bodyRef.current;
+    const pos = el ? el.selectionEnd : row.body_md.length;
+    const before = row.body_md.slice(0, pos);
+    const after = row.body_md.slice(pos);
+    update({ body_md: `${before}${before && !before.endsWith('\n\n') ? '\n\n' : ''}${markdown}\n\n${after.replace(/^\n+/, '')}` });
+    setTab('content');
+    flash('Görsel metne eklendi (taslak referansı; yayında herkese açık adrese çevrilir).');
+  };
+
+  const locate = (excerpt: string) => {
+    const el = bodyRef.current;
+    if (!el || !row) return;
+    setTab('content');
+    const idx = row.body_md.indexOf(excerpt.trim());
+    if (idx < 0) { flash('Alıntı metinde bulunamadı.'); return; }
+    setTimeout(() => { el.focus(); el.setSelectionRange(idx, idx + excerpt.trim().length); }, 50);
+  };
+
+  const publishAction = async (action: 'publish' | 'schedule' | 'unpublish') => {
+    if (!row?.id) return;
+    if (dirty) { flash('Önce kaydedin; yayın kaydedilmiş sürümle yapılır.'); return; }
+    const verb = action === 'publish' ? 'şimdi yayınlansın' : action === 'schedule' ? `${scheduleAt.replace('T', ' ')} için zamanlansın` : 'yayından kaldırılsın (taslağa dönsün)';
+    if (!window.confirm(`Bu içerik ${verb} mı?`)) return;
+    setPublishing(true);
+    const r = await adminFetch<{ insight?: { status: EditableInsight['status']; publish_at: string; updated_at: string }; promoted?: number }>('/api/admin/insights/publish', {
+      json: { insightId: row.id, action, publishAt: action === 'schedule' ? localInputToIso(scheduleAt) : undefined, expectedUpdatedAt: loadedUpdatedAt },
+    });
+    setPublishing(false);
+    if (!r.ok) { flash(r.error ?? 'İşlem başarısız.'); return; }
+    if (supabase) {
+      const { data } = await supabase.from('insights').select('*').eq('id', row.id).single();
+      if (data) { setRow(data as InsightRow); setLoadedUpdatedAt((data as InsightRow).updated_at); setDirty(false); }
+    }
+    await loadImages(row.group_id);
+    await loadRevisions(row.id);
+    flash(action === 'publish' ? 'Yayınlandı.' : action === 'schedule' ? 'Zamanlandı.' : 'Taslağa alındı.');
   };
 
   const replaceSelection = async (text: string) => {
     const el = bodyRef.current;
     if (!el || !row) return;
+    // The selection the AI saw must still be in place; otherwise find it, or refuse.
+    let start = el.selectionStart, end = el.selectionEnd;
+    if (!selection || row.body_md.slice(start, end) !== selection) {
+      const idx = selection ? row.body_md.indexOf(selection) : -1;
+      if (idx < 0) { flash('Seçili metin bu arada değişti; öneri uygulanmadı.'); return; }
+      start = idx; end = idx + selection.length;
+    }
+    pushUndo('bölüm yeniden yazımı');
     await snapshot('AI yeniden yazma öncesi');
-    const start = el.selectionStart, end = el.selectionEnd;
     const next = row.body_md.slice(0, start) + text + row.body_md.slice(end);
     update({ body_md: next });
     setSelection('');
@@ -152,28 +281,18 @@ export default function InsightEditor({ id }: Props) {
     router.push(`/admin/insights/${(data as { id: string }).id}`);
   };
 
-  const uploadCover = async (file: File) => {
-    if (!supabase || !row) return;
-    if (!file.type.startsWith('image/') || file.size > 6 * 1024 * 1024) { flash('Görsel 6 MB altında ve resim olmalı.'); return; }
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
-    const path = `${row.group_id}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('insights').upload(path, file, { upsert: false, contentType: file.type });
-    if (error) { flash(`Yükleme başarısız: ${error.message}`); return; }
-    const { data } = supabase.storage.from('insights').getPublicUrl(path);
-    update({ cover_url: data.publicUrl });
-  };
-
-  const restore = async (rev: (typeof revisions)[number]) => {
-    if (!window.confirm('Bu sürüm geri yüklensin mi? Mevcut metin bir revizyon olarak saklanır.')) return;
-    await snapshot('Geri yükleme öncesi');
+  const restore = async (rev: RevisionRow) => {
+    if (!window.confirm('Bu sürüm editöre geri yüklensin mi? Mevcut metin önce sürüm geçmişine kaydedilir.')) return;
+    pushUndo('sürüm geri yükleme');
+    await snapshot('Geri yükleme öncesi', 'restore');
     update({ title: rev.title, excerpt: rev.excerpt, body_md: rev.body_md });
     flash('Sürüm geri yüklendi — kaydedin.');
   };
 
-  // Preview URL: the secret is typed by the editor at click time (never bundled).
-  const previewUrl = () => (row?.id ? `/${row.locale}/insights/${slugify(row.slug || row.title)}?preview=${row.id}&token=` : null);
-
   if (!row) return <p className="text-[14px] text-muted">Yükleniyor…</p>;
+
+  const selectedCover = images.find((i) => i.selected) ?? null;
+  const imageUrls = Object.fromEntries(images.filter((i) => i.url).map((i) => [i.id, i.url as string]));
 
   const field = 'admin-input';
   const label = 'grid gap-1.5 text-[13px] font-semibold text-muted';
@@ -188,14 +307,23 @@ export default function InsightEditor({ id }: Props) {
           <p className="truncate text-[12px] text-muted">yoca.net/{row.locale}/insights/{slugify(row.slug || row.title) || '…'}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {row.id && (
-            <button type="button" onClick={() => { const url = previewUrl(); if (url) window.open(url + (window.prompt('Önizleme anahtarı (INSIGHTS_PREVIEW_SECRET)') ?? ''), '_blank'); }} className="admin-btn">Önizle</button>
-          )}
-          <button type="button" onClick={() => setAiOpen((v) => !v)} className="admin-btn lg:hidden">{aiOpen ? 'AI panelini gizle' : 'AI Asistan'}</button>
-          <button type="button" onClick={save} disabled={saving} className="admin-btn-primary">{saving ? 'Kaydediliyor…' : dirty ? 'Kaydet •' : 'Kaydet'}</button>
+          {undoStack.length > 0 && <button type="button" onClick={undo} className="admin-btn" title={`Son uygulanan değişikliği geri al (${undoStack[undoStack.length - 1].label})`}>Geri al</button>}
+          <button type="button" onClick={() => setPreviewOpen(true)} className="admin-btn">Önizle</button>
+          <button type="button" onClick={() => setAiOpen((v) => !v)} className="admin-btn lg:hidden">{aiOpen ? 'Stüdyoyu gizle' : 'İçerik stüdyosu'}</button>
+          <button type="button" onClick={() => save()} disabled={saving} className="admin-btn-primary">{saving ? 'Kaydediliyor…' : dirty ? 'Kaydet •' : 'Kaydet'}</button>
         </div>
       </div>
-      {message && <p className="rounded-sm border border-yoca-green/40 bg-yoca-green/10 px-4 py-2 text-[13px] text-yoca-green">{message}</p>}
+      {message && <p role="status" className="rounded-sm border border-yoca-green/40 bg-yoca-green/10 px-4 py-2 text-[13px] text-yoca-green">{message}</p>}
+      {restorable && (
+        <div className="flex flex-wrap items-center gap-2 rounded-sm border border-yellow-400/40 bg-yellow-400/10 px-4 py-2 text-[13px] text-yellow-200">
+          Bu tarayıcıda kaydedilmemiş bir sürüm bulundu.
+          <button type="button" className="admin-btn !px-2 !py-0.5 !text-[12px]" onClick={() => { setRow(restorable); setDirty(true); setRestorable(null); }}>Geri getir</button>
+          <button type="button" className="admin-btn !px-2 !py-0.5 !text-[12px]" onClick={() => { try { window.localStorage.removeItem(localKey(row.id as string)); } catch { /* ignore */ } setRestorable(null); }}>Sil</button>
+        </div>
+      )}
+      {previewOpen && (
+        <PreviewModal title={row.title} excerpt={row.excerpt} body={row.body_md} locale={row.locale} coverUrl={selectedCover?.url ?? row.cover_url} coverAlt={selectedCover?.alt_text ?? row.cover_alt ?? ''} imageUrls={imageUrls} onClose={() => setPreviewOpen(false)} />
+      )}
 
       <div className={`grid gap-5 ${aiOpen ? 'lg:grid-cols-[minmax(0,7fr)_minmax(0,4fr)]' : ''}`}>
         {/* ── Editor ─────────────────────────────────────────── */}
@@ -235,11 +363,15 @@ export default function InsightEditor({ id }: Props) {
               <div className="grid gap-3 border-t border-line pt-4 sm:grid-cols-[200px_minmax(0,1fr)]">
                 <div>
                   <p className="text-[13px] font-semibold text-muted">Kapak görseli (isteğe bağlı)</p>
-                  {row.cover_url ? <img src={row.cover_url} alt={row.cover_alt ?? ''} className="mt-2 aspect-[16/10] w-full object-cover" /> : <p className="mt-2 grid aspect-[16/10] place-items-center border border-dashed border-line text-[12px] text-subtle">Yok</p>}
-                  <div className="mt-2 flex gap-2">
-                    <label className="admin-btn cursor-pointer !px-2.5 !py-1 !text-[12px]">Yükle<input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadCover(e.target.files[0])} /></label>
-                    {row.cover_url && <button type="button" onClick={() => update({ cover_url: null })} className="admin-btn !px-2.5 !py-1 !text-[12px]">Kaldır</button>}
-                  </div>
+                  {selectedCover?.url ? (
+                    <img src={selectedCover.url} alt={selectedCover.alt_text} className="mt-2 aspect-[16/10] w-full object-cover" />
+                  ) : row.cover_url ? (
+                    <img src={row.cover_url} alt={row.cover_alt ?? ''} className="mt-2 aspect-[16/10] w-full object-cover" />
+                  ) : (
+                    <p className="mt-2 grid aspect-[16/10] place-items-center border border-dashed border-line text-[12px] text-subtle">Yok</p>
+                  )}
+                  <p className="mt-1 text-[11px] text-subtle">{selectedCover ? (selectedCover.public_url ? 'Seçili kapak · yayında' : 'Seçili kapak · taslak (yayında kopyalanır)') : 'Kapak yüklemek/üretmek için stüdyoda “Görsel” adımı.'}</p>
+                  {row.cover_url && <button type="button" onClick={() => update({ cover_url: null })} className="admin-btn mt-2 !px-2.5 !py-1 !text-[12px]">Yayındaki kapak adresini kaldır</button>}
                 </div>
                 <div className="grid gap-3">
                   <label className={label}>Görsel URL (alternatif)<input value={row.cover_url ?? ''} onChange={(e) => update({ cover_url: e.target.value || null })} className={field} /></label>
@@ -253,11 +385,28 @@ export default function InsightEditor({ id }: Props) {
           {tab === 'publish' && (
             <div className="admin-card grid gap-4">
               <div className="grid gap-3 sm:grid-cols-3">
-                <label className={label}>Durum<select value={row.status} onChange={(e) => update({ status: e.target.value as EditableInsight['status'] })} className={field}>{(Object.keys(STATUS_LABELS) as Array<keyof typeof STATUS_LABELS>).map((k) => <option key={k} value={k}>{STATUS_LABELS[k]}</option>)}</select></label>
-                <label className={label}>Yayın tarihi / saati (yerel)<input type="datetime-local" value={isoToLocalInput(row.publish_at)} onChange={(e) => update({ publish_at: localInputToIso(e.target.value) })} className={field} /></label>
+                <label className={label}>Çalışma durumu
+                  {EDITABLE_STATUSES.includes(row.status) ? (
+                    <select value={row.status} onChange={(e) => update({ status: e.target.value as EditableInsight['status'] })} className={field}>{EDITABLE_STATUSES.map((k) => <option key={k} value={k}>{STATUS_LABELS[k]}</option>)}</select>
+                  ) : (
+                    <span className={`${field} !text-yoca-green`}>{STATUS_LABELS[row.status]}{row.publish_at ? ` · ${new Date(row.publish_at).toLocaleString('tr-TR')}` : ''}</span>
+                  )}
+                </label>
                 <label className="flex items-center gap-2 self-end text-[13px] font-semibold text-muted"><input type="checkbox" checked={row.featured} onChange={(e) => update({ featured: e.target.checked })} /> Öne çıkan</label>
               </div>
-              <p className="text-[12px] text-subtle">Zamanlanmış içerik yayın saatinden önce herkese açık görünmez (veritabanı seviyesinde). Yapay zekâ üretimleri her zaman Taslak olarak gelir.</p>
+              <div className="grid gap-3 border-t border-line pt-4">
+                <p className="text-[13px] font-semibold text-muted">Yayın (ayrı ve açık işlemler)</p>
+                {!row.id ? <p className="text-[12px] text-yellow-300">Önce kaydedin.</p> : (
+                  <div className="flex flex-wrap items-end gap-2">
+                    <button type="button" className="admin-btn-primary" disabled={publishing || dirty || row.status === 'PUBLISHED'} onClick={() => publishAction('publish')}>Şimdi yayınla</button>
+                    <label className={label}>Zamanla (yerel saat)<input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className={field} /></label>
+                    <button type="button" className="admin-btn" disabled={publishing || dirty || !scheduleAt} onClick={() => publishAction('schedule')}>Zamanla</button>
+                    {(row.status === 'PUBLISHED' || row.status === 'SCHEDULED') && <button type="button" className="admin-btn" disabled={publishing || dirty} onClick={() => publishAction('unpublish')}>Yayından kaldır</button>}
+                  </div>
+                )}
+                <p className="text-[12px] text-subtle">Yayın kaydedilmiş sürümle yapılır; kullanılan taslak görseller o anda herkese açık depoya kopyalanır. Metinde [KAYNAK GEREKLİ] kaldıysa yayın engellenir. Zamanlanmış içerik saatinden önce görünmez. Yapay zekâ işlemleri hiçbir zaman yayınlamaz.</p>
+                {row.publish_at && <p className="text-[12px] text-subtle">Kayıtlı yayın zamanı: {new Date(row.publish_at).toLocaleString('tr-TR')} ({isoToLocalInput(row.publish_at)})</p>}
+              </div>
               <div className="grid gap-3 border-t border-line pt-4 sm:grid-cols-3">
                 <label className={label}>İlgili hizmet<select value={row.related_service ?? ''} onChange={(e) => update({ related_service: e.target.value || null })} className={field}><option value="">—</option>{SERVICES.map((s) => <option key={s}>{s}</option>)}</select></label>
                 <label className={label}>İlgili ürün<select value={row.related_product ?? ''} onChange={(e) => update({ related_product: e.target.value || null })} className={field}><option value="">—</option>{PRODUCTS.map((s) => <option key={s}>{s}</option>)}</select></label>
@@ -298,7 +447,7 @@ export default function InsightEditor({ id }: Props) {
             <div className="grid gap-4">
               <div className="admin-card grid gap-3">
                 <p className="text-[13px] font-semibold text-muted">Kaynaklar ({row.sources.length})</p>
-                {row.sources.length === 0 && <p className="text-[12px] text-subtle">Kaynak yok. Araştırmalı taslaklarda otomatik dolar; elle de ekleyebilirsiniz.</p>}
+                {row.sources.length === 0 && <p className="text-[12px] text-subtle">Kaynak yok. Taslak, sunucunun gerçekten okuduğu adreslerle oluşturulduysa bu liste kendiliğinden dolar; elle de ekleyebilirsiniz (elle eklenen adres “okundu” sayılmaz).</p>}
                 <ul className="grid gap-2">
                   {row.sources.map((s, i) => (
                     <li key={s.url + i} className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -322,12 +471,15 @@ export default function InsightEditor({ id }: Props) {
                 <button type="button" onClick={() => update({ faq: [...row.faq, { q: '', a: '' }] })} className="admin-btn w-fit">+ Soru ekle</button>
               </div>
               <div className="admin-card grid gap-2">
-                <p className="text-[13px] font-semibold text-muted">Sürümler (son 10)</p>
-                {revisions.length === 0 ? <p className="text-[12px] text-subtle">Henüz sürüm yok. AI yeniden yazma ve taslak aktarma öncesinde otomatik alınır.</p> : (
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[13px] font-semibold text-muted">Sürüm geçmişi (son 30)</p>
+                  {row.id && <button type="button" className="admin-btn !px-2 !py-0.5 !text-[11px]" onClick={() => snapshot('Elle alınan sürüm')}>Şimdiki metni sürüm olarak sakla</button>}
+                </div>
+                {revisions.length === 0 ? <p className="text-[12px] text-subtle">Henüz sürüm yok. AI önerileri, uygulama ve geri yükleme öncesinde otomatik alınır.</p> : (
                   <ul className="grid gap-1 text-[13px]">
                     {revisions.map((r) => (
                       <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-2">
-                        <span><span className="text-white">{new Date(r.created_at).toLocaleString('tr-TR')}</span> <span className="text-subtle">· {r.reason ?? '—'} · {r.title}</span></span>
+                        <span><span className="text-white">{new Date(r.created_at).toLocaleString('tr-TR')}</span> <span className="text-subtle">· {REVISION_KIND[r.kind ?? 'snapshot'] ?? r.kind} · {r.reason ?? '—'} · {r.title}{r.created_by ? ` · ${r.created_by}` : ''}</span></span>
                         <button type="button" onClick={() => restore(r)} className="admin-btn !px-2 !py-0.5 !text-[11px]">Geri yükle</button>
                       </li>
                     ))}
@@ -341,16 +493,24 @@ export default function InsightEditor({ id }: Props) {
         {/* ── AI Assistant ───────────────────────────────────── */}
         {aiOpen && (
           <div className="lg:sticky lg:top-6 lg:self-start">
-            <AiPanel
+            <StudioPanel
               article={row}
               selection={selection}
+              images={images}
+              reloadImages={() => loadImages(row.group_id)}
               onApplyDraft={applyDraft}
               onReplaceSelection={replaceSelection}
+              onReplaceBody={replaceBody}
               onApplySeo={(seo) => update(seo)}
               onApplyFaq={(faq) => update({ faq })}
               onCreateTranslation={createTranslation}
               onSetTitle={(title) => update({ title, ...(slugTouched ? {} : { slug: slugify(title) }) })}
-              onSetCover={(url, alt) => update({ cover_url: url, cover_alt: alt })}
+              onInsertImage={insertAtCursor}
+              onOpenPreview={() => setPreviewOpen(true)}
+              onSetLocale={(locale) => update({ locale })}
+              onMarkInReview={() => { if (EDITABLE_STATUSES.includes(row.status)) { update({ status: 'IN_REVIEW' }); flash('Durum: İncelemede — kaydedin.'); } }}
+              onGoPublish={() => setTab('publish')}
+              onLocate={locate}
             />
           </div>
         )}

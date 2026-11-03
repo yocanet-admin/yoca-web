@@ -114,7 +114,7 @@ export async function fetchMenu(location: 'header' | 'footer'): Promise<MenuRow[
   }
 }
 
-// ── Team ───────────────────────────────────────────────────────────
+// ── Team (verified cards only; no fake people, no AI portraits) ───────
 export async function fetchTeam(): Promise<TeamMemberRow[]> {
   const supabase = getSupabase();
   if (!supabase) return [];
@@ -123,6 +123,9 @@ export async function fetchTeam(): Promise<TeamMemberRow[]> {
       .from('team_members')
       .select('*')
       .eq('is_active', true)
+      // Only members whose name, role and photo were confirmed (v14). Before v14
+      // the column does not exist, the query fails and no card is shown.
+      .eq('verified', true)
       .order('order_index', { ascending: true })
       .returns<TeamMemberRow[]>();
     if (error || !data) return [];
