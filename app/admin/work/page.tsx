@@ -3,10 +3,19 @@
 import { useEffect, useState } from 'react';
 import type { PostgrestError } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/adminClient';
-import { getDefaultCaseStudyRows } from '@/lib/workData';
+import { Notice } from '@/components/admin/cockpit/Widgets';
+import { DEFAULT_CASE_STUDY_SLUGS, getDefaultCaseStudyRow, mergeWorkSources } from '@/lib/workData';
+import { getWorkMedia, type WorkMedia } from '@/lib/workMedia';
 import type { CaseStudyLocalized, CaseStudyRow, Locale } from '@/types';
 
-/** Yoca Admin — Work / vaka çalışmaları yönetimi (4 dilde içerik). */
+/**
+ * Yoca Admin — Work / vaka çalışmaları yönetimi (4 dilde içerik).
+ *
+ * One list, merged per slug exactly like the public site (mergeWorkSources):
+ * database rows + code projects whose slug has no database row. A code
+ * project becomes editable by copying it into ONE database row
+ * ("Düzenlemeye al"); nothing is ever bulk-imported.
+ */
 
 const LOCALES: Array<{ code: Locale; label: string }> = [
   { code: 'tr', label: 'Türkçe' },
@@ -79,6 +88,46 @@ function saveErrorText(error: PostgrestError): string {
   return `Kaydedilemedi: ${error.message}`;
 }
 
+function hasMedia(media: WorkMedia): boolean {
+  return Boolean(
+    media.hero || media.brand?.length || media.desktop?.length || media.mobile?.length || media.interaction,
+  );
+}
+
+/** Read-only summary of the media registered for a slug in lib/workMedia.ts. */
+function MediaSummary({ slug }: { slug: string }) {
+  const media = getWorkMedia(slug);
+  const items: Array<[string, string]> = [
+    ['Hero', media.hero ? 'var' : 'yok'],
+    ['Masaüstü', String(media.desktop?.length ?? 0)],
+    ['Mobil', String(media.mobile?.length ?? 0)],
+    ['Video', media.interaction ? 'var' : 'yok'],
+  ];
+  if (media.brand?.length) items.push(['Marka panosu', String(media.brand.length)]);
+  return (
+    <div className="admin-card grid gap-2 !p-4 text-[13px]">
+      <p className="font-extrabold">
+        Medya{slug ? ` — /work/${slug}/` : ''} <span className="font-medium text-subtle">(salt okunur)</span>
+      </p>
+      {slug ? (
+        <ul className="flex flex-wrap gap-x-5 gap-y-1">
+          {items.map(([label, value]) => (
+            <li key={label}>
+              <span className="text-subtle">{label}:</span> <span className="font-bold">{value}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-subtle">Slug girilmedi.</p>
+      )}
+      <p className="text-[12px] text-subtle">
+        Medya dosyaları depodaki /public/work/&lt;slug&gt;/ klasöründen gelir; slug değişirse medya bağlantısı kopar.
+        {slug && !hasMedia(media) && ' Bu slug için kayıtlı medya yok — vaka sayfası sade tipografik kapakla açılır.'}
+      </p>
+    </div>
+  );
+}
+
 function newRow(orderIndex: number): EditableRow {
   return {
     slug: '',
@@ -113,10 +162,13 @@ export default function AdminWork() {
   // Raw text of the comma / line based inputs: parsed only on save, so typing "," or a new line is never eaten.
   const [servicesText, setServicesText] = useState('');
   const [statsText, setStatsText] = useState<Partial<Record<Locale, string>>>({});
+  // Slug of the row as stored when the editor opened ('' for a new row) — media and code defaults are keyed by it.
+  const [originalSlug, setOriginalSlug] = useState('');
 
   const open = (row: EditableRow) => {
     setEditLocale('tr');
     setEditing(row);
+    setOriginalSlug(row.id !== undefined ? row.slug : '');
     setServicesText((row.services ?? []).join(', '));
     setStatsText({});
     setError(null);
@@ -148,11 +200,16 @@ export default function AdminWork() {
     setTimeout(() => setMessage(null), 2500);
   };
 
-  const load = async () => {
-    if (!supabase) return;
-    const { data } = await supabase.from('case_studies').select('*').order('order_index');
-    setRows((data as CaseStudyRow[]) ?? []);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const load = async (): Promise<CaseStudyRow[]> => {
+    if (!supabase) return [];
+    const { data, error: readError } = await supabase.from('case_studies').select('*').order('order_index').order('id');
+    const next = (data as CaseStudyRow[]) ?? [];
+    setLoadError(readError ? readError.message : null);
+    setRows(next);
     setLoading(false);
+    return next;
   };
 
   useEffect(() => {
@@ -160,14 +217,38 @@ export default function AdminWork() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const importDefaults = async () => {
-    if (!supabase) return;
+  const entries = mergeWorkSources(rows, { includeHidden: true });
+  const dbCount = rows.length;
+  const hiddenCount = rows.filter((row) => !row.is_active).length;
+  const codeCount = entries.filter((entry) => entry.source === 'code').length;
+  const visibleCount = dbCount - hiddenCount + codeCount;
+  const takenOverCount = DEFAULT_CASE_STUDY_SLUGS.length - codeCount;
+
+  /** Copy ONE code project into the database (all 4 languages, services, links, code position) and open it. */
+  const takeOver = async (slug: string) => {
+    if (!supabase || loadError) return;
+    const existing = rows.find((row) => row.slug === slug);
+    if (existing) {
+      open({ ...existing, services: existing.services ?? [] });
+      return;
+    }
+    const defaults = getDefaultCaseStudyRow(slug);
+    if (!defaults) return;
     setSaving(true);
-    const { error: importError } = await supabase.from('case_studies').insert(getDefaultCaseStudyRows());
+    const { data, error: insertError } = await supabase.from('case_studies').insert(defaults).select('*').single();
     setSaving(false);
-    if (importError) flash(saveErrorText(importError));
-    else flash('Varsayılan 4 proje içe aktarıldı.');
-    load();
+    if (insertError || !data) {
+      flash(insertError ? saveErrorText(insertError) : 'Kaydedilemedi.');
+      // Someone else may have created it meanwhile — reload and open that row instead of duplicating.
+      const fresh = await load();
+      const row = fresh.find((item) => item.slug === slug);
+      if (row) open({ ...row, services: row.services ?? [] });
+      return;
+    }
+    await load();
+    flash('Proje veritabanına alındı — artık buradan düzenlenir.');
+    const row = data as CaseStudyRow;
+    open({ ...row, services: row.services ?? [] });
   };
 
   const saveEditing = async () => {
@@ -215,15 +296,20 @@ export default function AdminWork() {
     load();
   };
 
+  /** Swap the position with the neighbouring DATABASE row (code projects keep their code position). */
   const move = async (row: CaseStudyRow, direction: -1 | 1) => {
     if (!supabase) return;
-    const sorted = [...rows].sort((a, b) => a.order_index - b.order_index);
+    const sorted = entries.flatMap((entry) => (entry.source === 'db' ? [entry.row] : []));
     const index = sorted.findIndex((item) => item.id === row.id);
     const target = sorted[index + direction];
     if (!target) return;
+    // Equal order_index: swapping would change nothing, so step past the neighbour instead.
+    const nextOrder = target.order_index === row.order_index ? row.order_index + direction : target.order_index;
     await Promise.all([
-      supabase.from('case_studies').update({ order_index: target.order_index }).eq('id', row.id),
-      supabase.from('case_studies').update({ order_index: row.order_index }).eq('id', target.id),
+      supabase.from('case_studies').update({ order_index: nextOrder }).eq('id', row.id),
+      target.order_index === row.order_index
+        ? Promise.resolve()
+        : supabase.from('case_studies').update({ order_index: row.order_index }).eq('id', target.id),
     ]);
     load();
   };
@@ -237,7 +323,10 @@ export default function AdminWork() {
   const remove = async (row: CaseStudyRow) => {
     if (!supabase) return;
     const name = row.content?.tr?.name || row.content?.en?.name || row.slug;
-    if (!window.confirm(`“${name}” kalıcı olarak silinsin mi? Bu geri alınamaz. (Sadece sitede gizlemek için “Gizle”yi kullanın.)`)) return;
+    const backToCode = DEFAULT_CASE_STUDY_SLUGS.includes(row.slug)
+      ? ' Bu slug koddaki varsayılan bir projeye ait: silerseniz sitede koddaki varsayılan sürüm yeniden görünür.'
+      : '';
+    if (!window.confirm(`“${name}” kalıcı olarak silinsin mi? Bu geri alınamaz.${backToCode} (Sadece sitede gizlemek için “Gizle”yi kullanın.)`)) return;
     const { error: deleteError } = await supabase.from('case_studies').delete().eq('id', row.id);
     flash(deleteError ? saveErrorText(deleteError) : 'Proje silindi.');
     load();
@@ -260,6 +349,7 @@ export default function AdminWork() {
   // ── Edit form ────────────────────────────────────────────────
   if (editing) {
     const localized = editing.content[editLocale] ?? EMPTY_LOCALIZED;
+    const slugChanged = editing.id !== undefined && originalSlug !== '' && editing.slug.trim() !== originalSlug;
     return (
       <div className="grid gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
@@ -285,6 +375,32 @@ export default function AdminWork() {
             {error}
           </p>
         )}
+        {slugChanged && hasMedia(getWorkMedia(originalSlug)) && (
+          <Notice tone="warning">
+            Slug “{originalSlug}” → “{editing.slug.trim() || '…'}” olarak değişiyor. /public/work/{originalSlug}/ klasöründeki
+            medya (hero, ekranlar, video) bu projeye artık bağlanmaz; vaka sayfası medyasız açılır. Medyayı korumak için slug’ı
+            eski hâline getirin.
+          </Notice>
+        )}
+        {slugChanged && DEFAULT_CASE_STUDY_SLUGS.includes(originalSlug) && (
+          <Notice tone="warning">
+            “{originalSlug}” koddaki varsayılan bir projenin slug’ı. Slug’ı değiştirirseniz bu slug’da veritabanı kaydı kalmaz ve
+            koddaki varsayılan sürüm sitede yeniden görünür (proje iki kez listelenebilir).
+          </Notice>
+        )}
+        {editing.id === undefined && DEFAULT_CASE_STUDY_SLUGS.includes(editing.slug.trim()) && (
+          <Notice tone="warning">
+            “{editing.slug.trim()}” koddaki varsayılan bir projenin slug’ı. Boş bir kayıt yerine listedeki “Düzenlemeye al”
+            düğmesini kullanın — o, koddaki tüm metinleri kopyalar.
+          </Notice>
+        )}
+        {!editing.is_active && (
+          <Notice tone="warning">
+            Bu proje gizli: sitede hiç görünmez (koddaki varsayılan sürüm de geri gelmez). Listeden “Göster” ile yayına alın.
+          </Notice>
+        )}
+
+        <MediaSummary slug={originalSlug || editing.slug.trim()} />
 
         <div className="admin-card grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
@@ -293,6 +409,15 @@ export default function AdminWork() {
               value={editing.slug}
               onChange={(event) => change({ ...editing, slug: event.target.value })}
               placeholder="orn-proje-adi"
+              className="admin-input"
+            />
+          </label>
+          <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
+            Sıra (küçük önce; kod projeleri 0–{DEFAULT_CASE_STUDY_SLUGS.length - 1})
+            <input
+              type="number"
+              value={editing.order_index}
+              onChange={(event) => change({ ...editing, order_index: parseInt(event.target.value, 10) || 0 })}
               className="admin-input"
             />
           </label>
@@ -420,50 +545,94 @@ export default function AdminWork() {
   }
 
   // ── List ─────────────────────────────────────────────────────
+  const maxOrder = Math.max(DEFAULT_CASE_STUDY_SLUGS.length - 1, ...rows.map((row) => row.order_index));
   return (
     <div className="grid gap-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Work / Projeler</h1>
           <p className="mt-1.5 text-[14px] text-muted">
-            Vaka çalışmaları 4 dilde yönetilir; tablo boşken sitede koddaki varsayılanlar gösterilir.
+            {loading
+              ? 'Vaka çalışmaları 4 dilde yönetilir.'
+              : `Sitede ${visibleCount} proje görünüyor: ${dbCount - hiddenCount} veritabanından, ${codeCount} koddan (varsayılan)${
+                  hiddenCount > 0 ? ` · ${hiddenCount} gizli` : ''
+                }.`}
           </p>
         </div>
         <div className="flex items-center gap-3">
           {message && <p className="text-[13px] font-bold text-yoca-lime">{message}</p>}
-          {rows.length === 0 && !loading && (
-            <button type="button" className="admin-btn" disabled={saving} onClick={importDefaults}>
-              Varsayılan 4 projeyi içe aktar
-            </button>
-          )}
-          <button
-            type="button"
-            className="admin-btn-primary"
-            onClick={() => open(newRow(rows.length ? Math.max(...rows.map((r) => r.order_index)) + 1 : 0))}
-          >
+          <button type="button" className="admin-btn-primary" disabled={loading} onClick={() => open(newRow(maxOrder + 1))}>
             Yeni Proje
           </button>
         </div>
       </header>
 
+      <Notice>
+        <strong>Veritabanı</strong> kayıtları buradan düzenlenir. <strong>Kod (varsayılan)</strong> projeler, aynı slug’da
+        veritabanı kaydı olmadığı sürece koddan gösterilir; düzenlemek için “Düzenlemeye al” o projeyi tüm dilleriyle tek bir
+        veritabanı kaydına kopyalar (koddaki {DEFAULT_CASE_STUDY_SLUGS.length} projeden {takenOverCount} tanesi alındı).
+        <br />
+        <strong>Gizle</strong>: proje sitede tamamen gizlenir — koddaki varsayılan sürüm geri gelmez. Koddaki sürüme dönmek için
+        kaydı silin.
+      </Notice>
+
+      {loadError && (
+        <p role="alert" className="rounded-md border border-amber-400/40 px-4 py-3 text-[13px] font-bold text-amber-300">
+          Veritabanı okunamadı ({loadError}). Liste eksik olabilir; “Düzenlemeye al” sayfa yenilenene kadar kapalı.
+        </p>
+      )}
+
       {loading ? (
         <p className="text-[14px] text-muted">Yükleniyor…</p>
-      ) : rows.length === 0 ? (
-        <p className="text-[14px] text-muted">
-          Henüz veritabanında proje yok — site koddaki 4 varsayılan projeyi gösteriyor.
-        </p>
+      ) : entries.length === 0 ? (
+        <p className="text-[14px] text-muted">Henüz proje yok.</p>
       ) : (
         <div className="grid gap-2.5">
-          {[...rows]
-            .sort((a, b) => a.order_index - b.order_index)
-            .map((row, index, list) => (
+          {entries.map((entry) => {
+            if (entry.source === 'code') {
+              const defaults = getDefaultCaseStudyRow(entry.slug);
+              const name = defaults?.content.tr?.name || defaults?.content.en?.name || entry.slug;
+              return (
+                <div key={`code-${entry.slug}`} className="admin-card flex flex-wrap items-center gap-3 !p-3.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2 text-[14px] font-extrabold">
+                      {name}
+                      <span className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-subtle">
+                        Kod (varsayılan)
+                      </span>
+                    </p>
+                    <p className="truncate text-[12px] text-subtle">
+                      /work/{entry.slug} · sıra {entry.order}
+                      {defaults?.year ? ` · ${defaults.year}` : ''}
+                      {defaults?.market ? ` · ${defaults.market}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex flex-none gap-2">
+                    <button
+                      type="button"
+                      className="admin-btn"
+                      disabled={saving || Boolean(loadError)}
+                      title="Bu projeyi tüm dilleriyle tek bir veritabanı kaydına kopyalar ve düzenleyicide açar."
+                      onClick={() => takeOver(entry.slug)}
+                    >
+                      Düzenlemeye al
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            const row = entry.row;
+            const dbRows = entries.filter((item) => item.source === 'db');
+            const dbIndex = dbRows.findIndex((item) => item.source === 'db' && item.row.id === row.id);
+            return (
               <div key={row.id} className="admin-card flex flex-wrap items-center gap-3 !p-3.5">
                 <div className="flex flex-none gap-1">
                   <button
                     type="button"
                     aria-label="Yukarı taşı"
+                    title="Bir önceki veritabanı kaydıyla yer değiştirir"
                     className="admin-btn !px-2.5 !py-1"
-                    disabled={index === 0}
+                    disabled={dbIndex === 0}
                     onClick={() => move(row, -1)}
                   >
                     ↑
@@ -471,23 +640,45 @@ export default function AdminWork() {
                   <button
                     type="button"
                     aria-label="Aşağı taşı"
+                    title="Bir sonraki veritabanı kaydıyla yer değiştirir"
                     className="admin-btn !px-2.5 !py-1"
-                    disabled={index === list.length - 1}
+                    disabled={dbIndex === dbRows.length - 1}
                     onClick={() => move(row, 1)}
                   >
                     ↓
                   </button>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className={`text-[14px] font-extrabold ${row.is_active ? '' : 'text-subtle line-through'}`}>
-                    {row.content?.tr?.name || row.content?.en?.name || row.slug}
+                  <p className="flex flex-wrap items-center gap-2 text-[14px] font-extrabold">
+                    <span className={row.is_active ? '' : 'text-subtle line-through'}>
+                      {row.content?.tr?.name || row.content?.en?.name || row.slug}
+                    </span>
+                    <span className="rounded-sm border border-yoca-lime/50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-yoca-lime">
+                      Veritabanı
+                    </span>
+                    {!row.is_active && (
+                      <span className="rounded-sm border border-amber-400/50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-300">
+                        Sitede gizli
+                      </span>
+                    )}
                   </p>
                   <p className="truncate text-[12px] text-subtle">
-                    /work/{row.slug} · {row.year} · {row.market}
+                    /work/{row.slug} · sıra {row.order_index}
+                    {row.year ? ` · ${row.year}` : ''}
+                    {row.market ? ` · ${row.market}` : ''}
                   </p>
                 </div>
                 <div className="flex flex-none gap-2">
-                  <button type="button" className="admin-btn" onClick={() => toggle(row)}>
+                  <button
+                    type="button"
+                    className="admin-btn"
+                    title={
+                      row.is_active
+                        ? 'Projeyi sitede gizler (koddaki varsayılan sürüm geri gelmez).'
+                        : 'Projeyi sitede yeniden gösterir.'
+                    }
+                    onClick={() => toggle(row)}
+                  >
                     {row.is_active ? 'Gizle' : 'Göster'}
                   </button>
                   <button
@@ -506,7 +697,8 @@ export default function AdminWork() {
                   </button>
                 </div>
               </div>
-            ))}
+            );
+          })}
         </div>
       )}
     </div>
