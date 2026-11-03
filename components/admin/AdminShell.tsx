@@ -50,6 +50,7 @@ const NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
 const isActive = (href: string, pathname: string) => (href === '/admin' ? pathname === '/admin' : pathname.startsWith(href));
 
 const NOT_ALLOWED = 'Bu hesabın yönetim paneline erişim izni yok. Yetkili bir hesapla giriş yapın.';
+const CHECK_FAILED = 'Yönetici kontrolü yapılamadı (veritabanındaki is_admin() fonksiyonu yok ya da erişilemiyor). Güvenlik için panel açılmadı.';
 
 export default function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -64,6 +65,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // Optional ADMIN_EMAILS allowlist, checked on the server (the list itself is never sent here).
   const [access, setAccess] = useState<{ userId: string; allowed: boolean } | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const userId = session?.user.id ?? null;
   const token = session?.access_token ?? null;
 
@@ -72,18 +74,25 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     if (access?.userId === userId) return;
     let cancelled = false;
     (async () => {
-      let allowed = true; // fail open: this is an extra layer; the API routes enforce the same rule
+      // A network error keeps the shell open: it is only the UI layer — the API routes
+      // and the database policies (v12) enforce the same admin rule on every request.
+      let allowed = true;
+      let reason: string | undefined;
       try {
         const response = await fetch('/api/admin/me', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
-        const body = (await response.json().catch(() => null)) as { ok?: boolean; allowed?: boolean } | null;
-        if (response.ok && body?.ok && body.allowed === false) allowed = false;
+        const body = (await response.json().catch(() => null)) as { ok?: boolean; allowed?: boolean; reason?: string; warnings?: string[] } | null;
+        if (!cancelled) setWarnings(Array.isArray(body?.warnings) ? body.warnings : []);
+        if (response.ok && body?.ok && body.allowed === false) {
+          allowed = false;
+          reason = body.reason;
+        }
       } catch {
-        /* network error: keep the panel usable */
+        /* network error: see above */
       }
       if (cancelled) return;
       setAccess({ userId, allowed });
       if (!allowed) {
-        setError(NOT_ALLOWED);
+        setError(reason === 'check_failed' ? CHECK_FAILED : NOT_ALLOWED);
         await supabase.auth.signOut();
         setAccess(null); // a later sign-in is checked again
       }
@@ -319,7 +328,17 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         {navLinks('sidebar')}
         <div className="mt-auto pt-6">{accountBlock}</div>
       </aside>
-      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-10">{children}</main>
+      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-10">
+        {warnings.length > 0 && (
+          <div role="alert" className="mb-6 grid gap-2 rounded-sm border border-red-400/60 bg-red-500/10 p-4 text-[14px] leading-relaxed text-red-200">
+            <p className="font-bold text-red-300">Yapılandırma hatası</p>
+            {warnings.map((text) => (
+              <p key={text}>{text}</p>
+            ))}
+          </div>
+        )}
+        {children}
+      </main>
     </div>
   );
 }
