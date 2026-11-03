@@ -164,6 +164,8 @@ export default function AdminWork() {
   const [statsText, setStatsText] = useState<Partial<Record<Locale, string>>>({});
   // Slug of the row as stored when the editor opened ('' for a new row) — media and code defaults are keyed by it.
   const [originalSlug, setOriginalSlug] = useState('');
+  // Saved rows whose slug is a code project's or has media files keep their slug.
+  const slugLocked = originalSlug !== '' && (DEFAULT_CASE_STUDY_SLUGS.includes(originalSlug) || hasMedia(getWorkMedia(originalSlug)));
 
   const open = (row: EditableRow) => {
     setEditLocale('tr');
@@ -263,6 +265,21 @@ export default function AdminWork() {
     }
     if (!Object.values(content).some((value) => value?.name?.trim())) {
       setError('En az bir dilde proje adı girin (tercihen English — diğer diller boşsa ona düşer).');
+      return;
+    }
+    // A slug is the project's identity: code defaults and media files are keyed by it.
+    // Changing it on such a project would show the code version again next to the renamed row.
+    const nextSlug = editing.slug.trim();
+    if (slugLocked && nextSlug !== originalSlug) {
+      setError(`Bu projenin slug’ı “${originalSlug}” sabit (kod varsayılanı ve medya dosyaları bu slug’a bağlı).`);
+      return;
+    }
+    if (editing.id === undefined && DEFAULT_CASE_STUDY_SLUGS.includes(nextSlug)) {
+      setError(`“${nextSlug}” koddaki bir projenin slug’ı. O projeyi listede “Düzenlemeye al” ile açın.`);
+      return;
+    }
+    if (rows.some((row) => row.slug === nextSlug && row.id !== editing.id)) {
+      setError(`“${nextSlug}” slug’ı başka bir projede kullanılıyor.`);
       return;
     }
     setError(null);
@@ -409,8 +426,15 @@ export default function AdminWork() {
               value={editing.slug}
               onChange={(event) => change({ ...editing, slug: event.target.value })}
               placeholder="orn-proje-adi"
-              className="admin-input"
+              readOnly={slugLocked}
+              aria-describedby={slugLocked ? 'slug-locked-note' : undefined}
+              className={`admin-input ${slugLocked ? 'cursor-not-allowed opacity-70' : ''}`}
             />
+            {slugLocked && (
+              <span id="slug-locked-note" className="text-[11px] font-semibold text-subtle">
+                Sabit: kod varsayılanı ve medya bu slug’a bağlı.
+              </span>
+            )}
           </label>
           <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
             Sıra (küçük önce; kod projeleri 0–{DEFAULT_CASE_STUDY_SLUGS.length - 1})
