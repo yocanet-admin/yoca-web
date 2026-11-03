@@ -488,7 +488,7 @@ export default function StudioPanel(props: Props) {
 
       {lastRun && (
         <p className="border-t border-line pt-2 text-[11px] text-subtle">
-          Son işlem: {lastRun.mock ? 'MOCK (OpenAI çağrılmadı)' : lastRun.model} · giriş {lastRun.usage.input_tokens ?? 0} / çıkış {lastRun.usage.output_tokens ?? 0} token{lastRun.usage.images ? ` · ${lastRun.usage.images} görsel` : ''} · tahmini maliyet {lastRun.estCostUsd === null ? 'fiyat tablosunda yok' : `$${lastRun.estCostUsd.toFixed(4)}`}
+          Son işlem: {lastRun.mock ? 'MOCK (OpenAI çağrılmadı)' : lastRun.model} · giriş {lastRun.usage.input_tokens ?? 0} / çıkış {lastRun.usage.output_tokens ?? 0} token{lastRun.usage.images ? ` · ${lastRun.usage.images} görsel` : ''} · tahmini maliyet {lastRun.estCostUsd === null ? 'bilinmiyor (fiyat tablosunda yok)' : `$${lastRun.estCostUsd.toFixed(4)}`}
         </p>
       )}
     </aside>

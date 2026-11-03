@@ -38,7 +38,7 @@ interface Data {
   settings: AiSettings & { ready: boolean };
   active: { text: string; image: string };
   activeCheck: { text: { ok: boolean; message?: string }; image: { ok: boolean; message?: string } };
-  spend: { spent: number; runs: number; text: number; images: number } | null;
+  spend: { spent: number; runs: number; text: number; images: number; unknownCost?: number } | null;
   spendError: string | null;
   runs: Run[];
   noAiSlop: { url: string; commit: string; licence: string; copyright: string };
@@ -124,7 +124,7 @@ export default function AiSettingsCard() {
           <label className="grid gap-1 text-[12px] font-bold text-subtle">Görsel varsayılanı
             <select value={draft.imagePreset} onChange={(e) => setDraft({ ...draft, imagePreset: e.target.value as 'economy' })} className={field}><option value="economy">Ekonomik</option><option value="quality">Yüksek kalite</option></select>
           </label>
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">Aylık bütçe (USD, 0 = kapalı)
+          <label className="grid gap-1 text-[12px] font-bold text-subtle">Aylık tahmini kullanım eşiği (USD, 0 = kapalı)
             <input type="number" min={0} step="0.5" value={draft.monthlyBudgetUsd} onChange={(e) => setDraft({ ...draft, monthlyBudgetUsd: Number(e.target.value) })} className={field} />
           </label>
           <label className="grid gap-1 text-[12px] font-bold text-subtle">İstek başına en çok çıktı token
@@ -134,8 +134,12 @@ export default function AiSettingsCard() {
 
         {data.spend ? (
           <div>
-            <p className="text-[12px] text-subtle">Bu ay (UTC) tahmini harcama: <b className="text-white">${data.spend.spent.toFixed(4)}</b> / ${draft.monthlyBudgetUsd.toFixed(2)} · {data.spend.text} metin, {data.spend.images} görsel isteği. Tahmin, OpenAI yanıtındaki gerçek token sayıları × aşağıdaki fiyat tablosudur; kesin tutar OpenAI faturasıdır.</p>
+            <p className="text-[12px] text-subtle">Bu ay (UTC) tahmini kullanım: <b className="text-white">${data.spend.spent.toFixed(4)}</b> / eşik ${draft.monthlyBudgetUsd.toFixed(2)} · {data.spend.text} metin, {data.spend.images} görsel isteği. Tahmin, OpenAI yanıtındaki gerçek token sayıları × aşağıdaki fiyat tablosudur; kesin tutar OpenAI faturasıdır.</p>
             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface"><div className="h-full bg-yoca-lime" style={{ width: `${budgetPct}%` }} /></div>
+            {(data.spend.unknownCost ?? 0) > 0 && (
+              <p className="mt-1 text-[12px] text-yellow-300">Bu ay {data.spend.unknownCost} işlemin maliyeti bilinmiyor (modelinin fiyatı tabloda yoktu). Bu işlemler ücretsiz sayılmadı; yukarıdaki toplamda yer almıyor, gerçek tutarları OpenAI kullanım ekranında görünür.</p>
+            )}
+            <p className="mt-2 text-[12px] text-subtle"><b className="text-white">Bu bir kesin harcama sınırı değildir.</b> Her yapay zekâ isteğinden önce bu ayın tahmini toplamı eşikle karşılaştırılır; eşiğe ulaşılınca yeni istek başlamaz. Sürmekte olan ya da aynı anda başlatılan işlemler bu toplamda henüz yer almadığı için, son işlemlerle birlikte gerçek kullanım eşiği aşabilir. Eşik her ay (UTC) sıfırlanır ve toplam test bütçesinden ayrıdır; o bütçe ayrıca izlenir. Kesin durdurma için OpenAI proje ayarlarındaki harcama sınırı (hard limit) kullanılır. Fiyatı tabloda olmayan bir modelle ücretli üretim yapılmaz.</p>
           </div>
         ) : (
           <Notice tone="warning">{data.spendError ?? 'Kullanım okunamadı.'}</Notice>
@@ -187,7 +191,7 @@ export default function AiSettingsCard() {
             {data.runs.map((r) => (
               <li key={r.id} className="flex flex-wrap justify-between gap-2 border-t border-line py-1">
                 <span>{new Date(r.created_at).toLocaleString('tr-TR')} · {r.action} · <span className="font-mono">{r.model}</span> · {r.status}{r.error ? ` — ${r.error.slice(0, 80)}` : ''}</span>
-                <span className="text-subtle">{r.tokens_in ?? 0}/{r.tokens_out ?? 0} tk{r.images ? ` · ${r.images} görsel` : ''} · {r.est_cost_usd === null ? 'fiyat yok' : `$${Number(r.est_cost_usd).toFixed(4)} (tahmini)`}</span>
+                <span className="text-subtle">{r.tokens_in ?? 0}/{r.tokens_out ?? 0} tk{r.images ? ` · ${r.images} görsel` : ''} · {r.est_cost_usd === null ? (r.status === 'running' ? 'sürüyor' : 'maliyet bilinmiyor') : `$${Number(r.est_cost_usd).toFixed(4)} (tahmini)`}</span>
               </li>
             ))}
           </ul>

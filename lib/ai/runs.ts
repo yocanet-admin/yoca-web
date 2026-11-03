@@ -1,5 +1,5 @@
 import { getSupabaseServiceRole } from '@/lib/supabase';
-import { budgetBlock, estimateCost, monthStartIso } from '@/lib/ai/cost';
+import { budgetBlock, estimateCost, monthStartIso, priceBlock } from '@/lib/ai/cost';
 import { OpenAIError, type OpenAIUsage } from '@/lib/ai/openai';
 import type { AiSettings } from '@/lib/ai/settings';
 
@@ -36,20 +36,31 @@ function db() {
   return supabase;
 }
 
-export async function monthSpendUsd(): Promise<{ spent: number; runs: number; text: number; images: number }> {
+/**
+ * This month's ESTIMATED spend. A finished call without an estimate (its model
+ * had no price) is NOT counted as 0 USD: it is reported in unknownCost so the
+ * panel can say "maliyet bilinmiyor".
+ */
+export async function monthSpendUsd(): Promise<{ spent: number; runs: number; text: number; images: number; unknownCost: number }> {
   const { data, error } = await db().from('ai_runs').select('est_cost_usd, kind, images, status').gte('created_at', monthStartIso());
   if (error) throw new OpenAIError('Yapay zekâ kayıt tablosu güncel değil (supabase/upgrade-v14-content.sql çalıştırılmalı).', 503, 'server');
   let spent = 0;
   let text = 0;
   let images = 0;
+  let unknownCost = 0;
   for (const row of (data ?? []) as Array<{ est_cost_usd: number | null; kind: string | null; images: number | null; status: string }>) {
-    spent += Number(row.est_cost_usd ?? 0);
-    if (row.status === 'ok' || row.status === 'error') {
+    const finished = row.status === 'ok' || row.status === 'error';
+    if (row.est_cost_usd === null || row.est_cost_usd === undefined) {
+      if (finished) unknownCost += 1;
+    } else {
+      spent += Number(row.est_cost_usd);
+    }
+    if (finished) {
       if (row.kind === 'image') images += Number(row.images ?? 0);
       else text += 1;
     }
   }
-  return { spent: Math.round(spent * 10_000) / 10_000, runs: (data ?? []).length, text, images };
+  return { spent: Math.round(spent * 10_000) / 10_000, runs: (data ?? []).length, text, images, unknownCost };
 }
 
 /** Budget check + idempotent start. */
@@ -57,6 +68,8 @@ export async function startRun(input: RunStart, settings: AiSettings, mock: bool
   if (!/^[A-Za-z0-9-]{8,80}$/.test(input.idempotencyKey)) throw new OpenAIError('İstek anahtarı eksik.', 400, 'bad_request');
   const supabase = db();
   if (!mock) {
+    const unpriced = priceBlock(input.model, settings.prices);
+    if (unpriced) throw new OpenAIError(unpriced, 402, 'no_price');
     const { spent } = await monthSpendUsd();
     const blocked = budgetBlock(spent, settings.monthlyBudgetUsd);
     if (blocked) throw new OpenAIError(blocked, 402, 'budget');

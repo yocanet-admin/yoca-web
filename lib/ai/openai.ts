@@ -58,6 +58,7 @@ export type OpenAIErrorCode =
   | 'bad_request'
   | 'server'
   | 'budget'
+  | 'no_price'
   | 'mock_refused';
 
 export class OpenAIError extends Error {
