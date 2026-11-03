@@ -174,8 +174,8 @@ export default function AdminSettings() {
               <Row label="Yapay zekâ (OpenAI)" ok={i.openai}>
                 {i.openai ? 'lead özeti, yanıt taslağı' : ''}
               </Row>
-              <Row label="Zamanlanmış görev şifresi" ok={i.cronSecret ? true : null}>
-                {i.cronSecret ? 'CRON_SECRET' : ''}
+              <Row label="Zamanlanmış görev şifresi" ok={i.cronSecret}>
+                {i.cronSecret ? 'CRON_SECRET' : 'eksik: site kontrolü ve sabah özeti çalışmaz'}
               </Row>
             </ul>
           )}

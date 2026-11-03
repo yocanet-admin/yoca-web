@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cronAuthorized } from '@/lib/cockpit/cron';
+import { cronAuth } from '@/lib/cockpit/cron';
 import { checkSites, type MonitoredSite, type SiteCheck } from '@/lib/cockpit/monitor';
 import { getCronState, saveCronState } from '@/lib/cockpit/settings';
 import { escapeHtml, notifyAdmins } from '@/lib/notify';
@@ -62,7 +62,8 @@ async function publishDueInsights(): Promise<number | null> {
 }
 
 export async function GET(request: NextRequest) {
-  if (!cronAuthorized(request)) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  const auth = cronAuth(request);
+  if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
 
   // Scheduled Insights go live once their time has come (runs even when the site check is throttled).
   const published = await publishDueInsights();
