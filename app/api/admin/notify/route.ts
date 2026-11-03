@@ -46,6 +46,8 @@ export async function POST(request: NextRequest) {
   const admin = await requireAdmin(request);
   if (!admin) return unauthorized();
   const body = (await request.json().catch(() => ({}))) as { action?: string; settings?: Partial<NotifySettings> };
+  // The admin's verified access token: settings changes are written as them (audit actor).
+  const token = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
 
   switch (body.action) {
     case 'save': {
@@ -59,7 +61,7 @@ export async function POST(request: NextRequest) {
       for (const key of ['lead_alerts', 'site_alerts', 'morning_summary'] as const) {
         if (typeof input[key] === 'boolean') patch[key] = input[key];
       }
-      const ok = await saveNotifySettings(patch);
+      const ok = await saveNotifySettings(patch, token);
       return NextResponse.json({ ok, error: ok ? undefined : saveError() });
     }
 
@@ -74,14 +76,14 @@ export async function POST(request: NextRequest) {
       const chat = chats[0]?.chat as (TelegramUpdate['message'] & object)['chat'] | undefined;
       if (!chat) return NextResponse.json({ ok: false, error: 'Bota henüz mesaj gelmemiş. Telegram’da botu açıp /start yazın, sonra tekrar deneyin.' });
       const name = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || chat.username || String(chat.id);
-      const saved = await saveNotifySettings({ telegram_chat_id: String(chat.id), telegram_chat_name: name });
+      const saved = await saveNotifySettings({ telegram_chat_id: String(chat.id), telegram_chat_name: name }, token);
       if (!saved) return NextResponse.json({ ok: false, error: saveError() });
       await sendTelegram(String(chat.id), `${tgHead('✅', 'Yoca kokpit bağlandı')}\n\nYeni lead, site uyarıları ve sabah özeti buraya gelecek.\n<i>Bağlayan: ${escapeHtml(admin.email ?? 'admin')}</i>`, [[{ text: 'Kokpiti aç →', url: `${SITE}/admin` }]]);
       return NextResponse.json({ ok: true, chat: { id: String(chat.id), name } });
     }
 
     case 'telegram-unlink': {
-      const ok = await saveNotifySettings({ telegram_chat_id: null, telegram_chat_name: null });
+      const ok = await saveNotifySettings({ telegram_chat_id: null, telegram_chat_name: null }, token);
       return NextResponse.json({ ok });
     }
 
