@@ -76,8 +76,8 @@ export default function CaseStudyVideo({ src, mp4Src, poster, alt, className }: 
       onError={() => setFailed(true)}
       className={`block h-auto w-full ${className ?? ''}`}
     >
-      {near && <source src={src} type="video/webm" onError={mp4 ? undefined : () => setFailed(true)} />}
-      {near && mp4 && <source src={mp4} type="video/mp4" onError={() => setFailed(true)} />}
+      {near && <source src={src} type='video/webm; codecs="vp9"' onError={mp4 ? undefined : () => setFailed(true)} />}
+      {near && mp4 && <source src={mp4} type='video/mp4; codecs="avc1.640028"' onError={() => setFailed(true)} />}
     </video>
   );
 }
