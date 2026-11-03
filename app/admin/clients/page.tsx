@@ -85,11 +85,41 @@ function ClientsInner() {
   const selected = data.clients.find((c) => c.id === selectedId) ?? null;
   const clientName = (id: string) => data.clients.find((c) => c.id === id)?.name ?? '—';
 
-  const createClient = async () => {
-    const name = window.prompt('Firma / marka adı');
-    if (!name?.trim()) return;
-    const client = await saveClient({ name: name.trim(), status: 'prospect', source_type: 'manual' });
-    if (!client) return say('Oluşturulamadı.');
+  // New client: inline form (a native prompt() was easy to miss and is blocked in some browsers).
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newError, setNewError] = useState('');
+  const [newBusy, setNewBusy] = useState(false);
+  const openCreate = () => {
+    setCreating(true);
+    setNewName('');
+    setNewError('');
+  };
+  const cancelCreate = () => {
+    setCreating(false);
+    setNewError('');
+  };
+  const createClient = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    const name = newName.trim();
+    if (name.length < 2) {
+      setNewError('Firma / marka adı en az 2 karakter olmalı.');
+      return;
+    }
+    if (data.clients.some((c) => c.name.trim().toLowerCase() === name.toLowerCase())) {
+      setNewError('Bu adla bir müşteri zaten var.');
+      return;
+    }
+    setNewBusy(true);
+    setNewError('');
+    const client = await saveClient({ name, status: 'prospect', source_type: 'manual' });
+    setNewBusy(false);
+    if (!client) {
+      setNewError('Oluşturulamadı. Bağlantıyı kontrol edip tekrar deneyin.');
+      return;
+    }
+    setCreating(false);
+    say(`${client.name} eklendi.`);
     await reload();
     select(client.id);
   };
@@ -103,11 +133,35 @@ function ClientsInner() {
         </div>
         <div className="flex items-center gap-3">
           {flash && <span role="status" className="text-[13px] font-bold text-yoca-lime">{flash}</span>}
-          <button type="button" onClick={createClient} disabled={!data.ready} className="admin-btn-primary">
+          <button type="button" onClick={openCreate} disabled={!data.ready || creating} aria-expanded={creating} className="admin-btn-primary">
             + Yeni müşteri
           </button>
         </div>
       </header>
+
+      {creating && (
+        <form onSubmit={createClient} className="admin-card grid gap-3 !p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end" aria-label="Yeni müşteri">
+          <label className="grid gap-1 text-[12px] font-semibold text-muted">
+            Firma / marka adı
+            <input
+              autoFocus
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Escape' && cancelCreate()}
+              maxLength={120}
+              aria-invalid={!!newError}
+              className="w-full rounded-md border border-line bg-surface-deep px-3 py-2 text-[14px] text-white outline-none focus:border-yoca-lime"
+              placeholder="Örn. Kuzey Mimarlık"
+            />
+          </label>
+          <div className="flex gap-2">
+            <button type="submit" disabled={newBusy} className="admin-btn-primary">{newBusy ? 'Ekleniyor…' : 'Ekle'}</button>
+            <button type="button" onClick={cancelCreate} className="admin-btn">Vazgeç</button>
+          </div>
+          {newError && <p role="alert" className="text-[13px] font-semibold text-red-400 sm:col-span-2">{newError}</p>}
+          <p className="text-[12px] text-subtle sm:col-span-2">Aday olarak eklenir; iletişim bilgilerini, fırsatları ve görevleri sonra müşteri kartından girersiniz.</p>
+        </form>
+      )}
 
       {!data.ready && !loading && (
         <Notice tone="warning">
