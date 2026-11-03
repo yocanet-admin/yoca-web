@@ -19,7 +19,7 @@ import {
 } from '@/lib/ai/editorial';
 import { researchTopic } from '@/lib/ai/research';
 import { generateCoverImage, storeCover } from '@/lib/ai/images';
-import { isAllowedAdminEmail } from '@/lib/cockpit/auth';
+import { requireAdmin } from '@/lib/cockpit/auth';
 
 /**
  * Yoca — admin AI endpoint (server only).
@@ -58,17 +58,13 @@ interface Payload {
   [key: string]: unknown;
 }
 
+/**
+ * Same admin rule as every /api/admin/* route: valid session + optional ADMIN_EMAILS
+ * + database is_admin() (lib/cockpit/auth.ts). A signed-in non-admin gets 401 before
+ * anything else is looked at (no OpenAI configuration details, no model call).
+ */
 async function authenticate(request: NextRequest): Promise<{ id: string; email?: string } | null> {
-  const header = request.headers.get('authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (!token) return null;
-  const admin = getSupabaseAdmin();
-  if (!admin) return null;
-  const { data, error } = await admin.auth.getUser(token);
-  if (error || !data.user) return null;
-  // Optional ADMIN_EMAILS allowlist (no-op when unset) — same rule as /api/admin/*.
-  if (!isAllowedAdminEmail(data.user.email)) return null;
-  return { id: data.user.id, email: data.user.email ?? undefined };
+  return requireAdmin(request);
 }
 
 async function logRun(entry: { insightId?: string; action: string; model: string; locale?: string; status: string; createdBy?: string; tokensIn?: number; tokensOut?: number; error?: string }) {
