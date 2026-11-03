@@ -182,8 +182,8 @@ export default function WorkGrid({ studies, base, labels }: WorkGridProps) {
                               <source src={study.videoUrl} onError={() => dropVideo(study.slug)} />
                             ) : (
                               <>
-                                <source src={media.interaction!.video} type="video/webm" />
-                                <source src={media.interaction!.video.replace(/\.webm$/, '.mp4')} type="video/mp4" onError={() => dropVideo(study.slug)} />
+                                <source src={media.interaction!.video} type='video/webm; codecs="vp9"' />
+                                <source src={media.interaction!.video.replace(/\.webm$/, '.mp4')} type='video/mp4; codecs="avc1.640028"' onError={() => dropVideo(study.slug)} />
                               </>
                             )}
                           </video>
