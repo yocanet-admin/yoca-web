@@ -37,6 +37,8 @@ import {
 const NOTIFY_FROM = process.env.NOTIFY_EMAIL_FROM ?? 'Yoca <noreply@yoca.net>';
 // Test environments point these at a capture server; production leaves them unset.
 const RESEND_ENDPOINT = process.env.NOTIFY_RESEND_ENDPOINT || 'https://api.resend.com/emails';
+// A test capture endpoint behind the Supabase gateway also needs the key as `apikey`.
+const CAPTURE_MODE = Boolean(process.env.NOTIFY_RESEND_ENDPOINT);
 const TELEGRAM_API = (process.env.NOTIFY_TELEGRAM_API || 'https://api.telegram.org').replace(/\/$/, '');
 
 export type ChannelResult = 'sent' | 'skipped' | 'error';
@@ -57,7 +59,7 @@ export async function sendEmail(to: string, subject: string, html: string, reply
   try {
     const response = await fetch(RESEND_ENDPOINT, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(CAPTURE_MODE ? { apikey: key } : {}) },
       body: JSON.stringify({
         from: NOTIFY_FROM,
         to: to.split(',').map((x) => x.trim()).filter(Boolean),
