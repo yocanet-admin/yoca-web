@@ -6,6 +6,9 @@ import { notifyCheckup } from '@/lib/notify';
 import { logSpam, screenSubmission } from '@/lib/spam';
 import type { CheckupAnswer, CheckupPayload, Locale } from '@/types';
 
+/** Identical re-sends inside this window are treated as one submission. */
+const DUPLICATE_WINDOW_MS = 30 * 60 * 1000;
+
 const TOO_MANY: Record<string, string> = {"tr": "Kısa sürede çok fazla gönderim yapıldı. Lütfen biraz sonra tekrar deneyin.", "en": "Too many submissions. Please try again later.", "az": "Qısa müddətdə çox göndəriş edildi. Bir az sonra yenidən cəhd edin.", "ar": "عدد كبير من الإرسالات. يرجى المحاولة لاحقًا."};
 
 /**
@@ -114,6 +117,15 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json({ ok: false, error: dict.checkup.errorGeneric }, { status: 503 });
+  }
+
+  // Same person sending the Check-Up again within the window (retry / double click):
+  // one row, one notification. Logged as "duplicate" in spam_log.
+  const since = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+  const dup = await supabase.from('checkup_submissions').select('id').eq('contact_info_json->>email', email).gte('created_at', since).limit(1);
+  if (!dup.error && (dup.data?.length ?? 0) > 0) {
+    await logSpam('checkup', ['duplicate']);
+    return NextResponse.json({ ok: true, score: finalScore });
   }
 
   const id = randomUUID();
