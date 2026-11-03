@@ -21,6 +21,11 @@ import { refData } from '@/lib/signatureRef';
 interface CheckUpWizardProps {
   locale: Locale;
   t: Dict['checkup'];
+  /** Privacy-notice line on the contact step (information, not a consent box). */
+  legal: Dict['legal'];
+  privacyHref: string;
+  /** Automatic receipt vs. human review (lib/responseCopy.ts). */
+  receiptNote: string;
 }
 
 type Status = 'idle' | 'submitting' | 'success' | 'error';
@@ -37,7 +42,7 @@ const SECTION_KEYS: string[][] = [
 /** Dictionary section key for each group above (labels are looked up by key, not position). */
 const SECTION_NAMES = ['business', 'brand', 'website', 'marketing', 'measurement', 'goals'];
 
-export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
+export default function CheckUpWizard({ locale, t, legal, privacyHref, receiptNote }: CheckUpWizardProps) {
   const prefersReducedMotion = useReducedMotion();
   // Re-order questions to follow the six sections; unknown keys keep dict order.
   const questions = useMemo(() => {
@@ -60,7 +65,6 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
   const [direction, setDirection] = useState(1);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [contact, setContact] = useState({ name: '', company: '', email: '', phone: '' });
-  const [consent, setConsent] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -107,7 +111,7 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
     event.preventDefault();
     setErrorMessage('');
 
-    if (!contact.name.trim() || !contact.email.trim() || !consent) {
+    if (!contact.name.trim() || !contact.email.trim()) {
       setErrorMessage(t.errorRequired);
       return;
     }
@@ -177,6 +181,7 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
           ✓
         </span>
         <p className="text-[16px] leading-relaxed text-soft">{t.success}</p>
+        <p className="text-[13px] leading-relaxed text-muted">{receiptNote}</p>
       </div>
     );
   }
@@ -420,16 +425,13 @@ export default function CheckUpWizard({ locale, t }: CheckUpWizardProps) {
                   />
                 </div>
               </div>
-              <label className="mt-5 flex cursor-pointer items-start gap-3 text-[14px] text-muted">
-                <input
-                  type="checkbox"
-                  checked={consent}
-                  onChange={(e) => setConsent(e.target.checked)}
-                  className="mt-0.5 h-[18px] w-[18px] flex-none accent-yoca-lime"
-                  required
-                />
-                <span>{t.consent}</span>
-              </label>
+              <p className="mt-5 text-[13px] leading-relaxed text-muted">
+                {legal.formNoticeBefore}
+                <a href={privacyHref} className="font-semibold text-soft underline underline-offset-2 hover:text-yoca-lime">
+                  {legal.formNoticeLink}
+                </a>
+                {legal.formNoticeAfter}
+              </p>
             </motion.fieldset>
           )}
         </AnimatePresence>

@@ -7,6 +7,8 @@ import type { InsightRow, Locale } from '@/types';
 /**
  * Yoca — admin-side Insights helpers (browser, Supabase Auth + RLS).
  * Slug generation, editable payload building, revisions, AI endpoint calls.
+ * Publishing is NOT done here: status PUBLISHED/SCHEDULED is set only by the
+ * explicit publish route (app/api/admin/insights/publish).
  */
 
 export const INSIGHT_LOCALES: Array<{ code: Locale; label: string }> = [
@@ -89,34 +91,84 @@ export function toPayload(row: EditableInsight) {
   };
 }
 
-export async function saveRevision(insightId: string, row: Pick<EditableInsight, 'title' | 'excerpt' | 'body_md'>, reason: string) {
+export type RevisionKind = 'snapshot' | 'ai_proposal' | 'restore' | 'autosave' | 'publish';
+
+export async function saveRevision(insightId: string, row: Pick<EditableInsight, 'title' | 'excerpt' | 'body_md'>, reason: string, kind: RevisionKind = 'snapshot'): Promise<boolean> {
   const supabase = getAdminClient();
-  if (!supabase || !row.body_md) return;
-  await supabase.from('insight_revisions').insert({ insight_id: insightId, title: row.title, excerpt: row.excerpt, body_md: row.body_md, reason });
+  if (!supabase || !row.body_md) return false;
+  const { data } = await supabase.auth.getSession();
+  const withKind = await supabase.from('insight_revisions').insert({ insight_id: insightId, title: row.title, excerpt: row.excerpt, body_md: row.body_md, reason, kind, created_by: data.session?.user.email ?? null });
+  if (!withKind.error) return true;
+  // Before v14 the table has no kind/created_by columns: keep the old behaviour.
+  const legacy = await supabase.from('insight_revisions').insert({ insight_id: insightId, title: row.title, excerpt: row.excerpt, body_md: row.body_md, reason });
+  return !legacy.error;
 }
 
-/** Call the server AI endpoint with the current session token. */
-export async function callAi<T = unknown>(payload: Record<string, unknown>): Promise<T> {
+async function accessToken(): Promise<string> {
   const supabase = getAdminClient();
   const { data } = (await supabase?.auth.getSession()) ?? { data: { session: null } };
   const token = data.session?.access_token;
   if (!token) throw new Error('Oturum bulunamadı — yeniden giriş yapın.');
-  const res = await fetch('/api/ai', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(payload),
-  });
-  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; result?: T; error?: string };
-  if (!res.ok || !json.ok) {
-    const map: Record<string, string> = {
-      unauthorized: 'Yetkisiz — yeniden giriş yapın.',
-      rate_limited: 'Çok fazla istek — biraz bekleyin.',
-      topic_required: 'Konu gerekli.',
-      selection_required: 'Önce metin seçin.',
-    };
-    throw new Error(map[json.error ?? ''] ?? json.error ?? 'AI isteği başarısız oldu.');
+  return token;
+}
+
+export interface AiRunInfo {
+  id: string;
+  model: string;
+  usage: { input_tokens?: number; output_tokens?: number; cached_tokens?: number; images?: number };
+  estCostUsd: number | null;
+  mock: boolean;
+}
+
+export class AiCallError extends Error {
+  code?: string;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
   }
-  return json.result as T;
+}
+
+/**
+ * Call the server AI endpoint. Every call carries a fresh idempotency key: the
+ * button is disabled while it runs and the server refuses a second job with
+ * the same key. Never throws for HTTP errors without a Turkish message.
+ */
+export async function callAi<T = unknown>(payload: Record<string, unknown>, requestKey: string = crypto.randomUUID()): Promise<{ result: T; run?: AiRunInfo; replay?: boolean }> {
+  const token = await accessToken();
+  let res: Response;
+  try {
+    res = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ ...payload, requestKey }),
+    });
+  } catch {
+    throw new AiCallError('Sunucuya ulaşılamadı. Metniniz değişmedi; bağlantıyı kontrol edip tekrar deneyin.');
+  }
+  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; result?: T; run?: AiRunInfo; replay?: boolean; error?: string; code?: string };
+  if (!res.ok || !json.ok) {
+    const map: Record<string, string> = { unauthorized: 'Yetkisiz — yeniden giriş yapın.', unknown_action: 'Bilinmeyen işlem.' };
+    throw new AiCallError(map[json.error ?? ''] ?? json.error ?? `Yapay zekâ isteği başarısız oldu (HTTP ${res.status}). Metniniz değişmedi.`, json.code);
+  }
+  return { result: json.result as T, run: json.run, replay: json.replay };
+}
+
+/** Authenticated JSON/multipart call to an admin route. */
+export async function adminFetch<T = unknown>(path: string, init: { method?: 'GET' | 'POST'; json?: unknown; form?: FormData } = {}): Promise<T & { ok: boolean; error?: string }> {
+  const token = await accessToken();
+  try {
+    const res = await fetch(path, {
+      method: init.method ?? (init.json || init.form ? 'POST' : 'GET'),
+      headers: { Authorization: `Bearer ${token}`, ...(init.json ? { 'Content-Type': 'application/json' } : {}) },
+      body: init.form ?? (init.json ? JSON.stringify(init.json) : undefined),
+      cache: 'no-store',
+    });
+    const json = (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))) as T & { ok: boolean; error?: string };
+    if (!res.ok && json.ok !== false) return { ...json, ok: false, error: `HTTP ${res.status}` };
+    return json;
+  } catch {
+    return { ok: false, error: 'Sunucuya ulaşılamadı.' } as T & { ok: boolean; error?: string };
+  }
 }
 
 /** Local datetime-local ↔ ISO helpers (editor shows local time, stores UTC). */

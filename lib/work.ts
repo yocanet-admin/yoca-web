@@ -81,11 +81,21 @@ async function publicEntries() {
   return mergeWorkSources(rows ?? [], { includeHidden: false }).filter((entry) => allowCode || entry.source === 'db');
 }
 
+/**
+ * Results, metric badges, stats and quotes stored in the case content are NOT
+ * public: they carry no client approval. Verified results come only from
+ * case_study_results (lib/caseResults.ts, approved + site scope).
+ */
+function withoutUnverifiedResults(cs: CaseStudy): CaseStudy {
+  return { ...cs, results: '', metricBadge: undefined, stats: undefined, quote: undefined, quoteAuthor: undefined };
+}
+
 export async function getCaseStudies(locale: Locale): Promise<CaseStudy[]> {
   const code = new Map(staticCaseStudies(locale).map((cs) => [cs.slug, cs]));
   return (await publicEntries())
     .map((entry) => (entry.source === 'db' ? rowToCaseStudy(entry.row, locale) : code.get(entry.slug) ?? null))
-    .filter((cs): cs is CaseStudy => cs !== null);
+    .filter((cs): cs is CaseStudy => cs !== null)
+    .map(withoutUnverifiedResults);
 }
 
 export async function getCaseStudy(locale: Locale, slug: string): Promise<CaseStudy | null> {

@@ -193,6 +193,84 @@ export interface CoverConcept {
   alt: string;
 }
 
+/** Simple-screen title alternatives. */
+export const TitleOptionsSchema = {
+  name: 'title_options',
+  schema: { type: 'object', additionalProperties: false, required: ['titles'], properties: { titles: strArr } },
+};
+
+/** "Yazım kalıplarını incele": findings only — no score, no AI-authorship guess. */
+export const StyleReviewSchema = {
+  name: 'style_review',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['findings'],
+    properties: {
+      findings: {
+        type: 'array',
+        items: { type: 'object', additionalProperties: false, required: ['excerpt', 'pattern', 'suggestion'], properties: { excerpt: str, pattern: str, suggestion: str } },
+      },
+    },
+  },
+};
+export interface StyleFinding {
+  excerpt: string;
+  pattern: string;
+  suggestion: string;
+  /** Set by the server: the excerpt really occurs in the text. */
+  found?: boolean;
+}
+
+/** "Metni düzenle": the full edited text + a short list of what changed. */
+export const StyleEditSchema = {
+  name: 'style_edit',
+  schema: { type: 'object', additionalProperties: false, required: ['text', 'changes'], properties: { text: str, changes: strArr } },
+};
+
+/** "Kaynakları kontrol et": claims vs. the sources that were actually fetched. */
+export const SourceCheckSchema = {
+  name: 'source_check',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['claims'],
+    properties: {
+      claims: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['claim', 'status', 'source', 'note'],
+          properties: { claim: str, status: { type: 'string', enum: ['supported', 'unsupported', 'needs_source', 'contradicted'] }, source: str, note: str },
+        },
+      },
+    },
+  },
+};
+export interface SourceClaim {
+  claim: string;
+  status: 'supported' | 'unsupported' | 'needs_source' | 'contradicted';
+  source: string;
+  note: string;
+}
+
+/** Cover brief: what to show, which visual approach, and a descriptive alt text. */
+export const CoverBriefSchema = {
+  name: 'cover_brief',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['brief', 'approach', 'alt'],
+    properties: { brief: str, approach: { type: 'string', enum: ['photo', 'illustration', 'diagram'] }, alt: str },
+  },
+};
+export interface CoverBrief {
+  brief: string;
+  approach: 'photo' | 'illustration' | 'diagram';
+  alt: string;
+}
+
 // ── Runtime validation (defence in depth) ─────────────────────────
 export function isString(v: unknown, max = 200_000): v is string {
   return typeof v === 'string' && v.length <= max;
@@ -219,4 +297,21 @@ export function validateTranslation(v: unknown): v is Translation {
 export function validatePolish(v: unknown): v is Polish {
   const d = v as Partial<Polish>;
   return !!d && isString(d.title, 300) && isString(d.excerpt, 1000) && isString(d.body) && isStringArray(d.changes, 40);
+}
+
+export function validateStyleReview(v: unknown): v is { findings: StyleFinding[] } {
+  const d = v as { findings?: unknown };
+  return !!d && Array.isArray(d.findings) && d.findings.length <= 60 && d.findings.every((f) => f && isString((f as StyleFinding).excerpt, 2000) && isString((f as StyleFinding).pattern, 60) && isString((f as StyleFinding).suggestion, 400));
+}
+export function validateStyleEdit(v: unknown): v is { text: string; changes: string[] } {
+  const d = v as { text?: unknown; changes?: unknown };
+  return !!d && isString(d.text) && isStringArray(d.changes, 40);
+}
+export function validateSourceCheck(v: unknown): v is { claims: SourceClaim[] } {
+  const d = v as { claims?: unknown };
+  return !!d && Array.isArray(d.claims) && d.claims.length <= 80 && d.claims.every((c) => c && isString((c as SourceClaim).claim, 2000) && ['supported', 'unsupported', 'needs_source', 'contradicted'].includes((c as SourceClaim).status));
+}
+export function validateCoverBrief(v: unknown): v is CoverBrief {
+  const d = v as Partial<CoverBrief>;
+  return !!d && isString(d.brief, 2000) && ['photo', 'illustration', 'diagram'].includes(String(d.approach)) && isString(d.alt, 400);
 }

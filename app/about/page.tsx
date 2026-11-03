@@ -15,6 +15,7 @@ import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { buildMetadata, breadcrumbSchema, getRequestContext, jsonLdString } from '@/lib/seo';
 import { brandText } from '@/components/ui/BrandText';
+import { getAboutIntro } from '@/lib/siteSettings';
 
 export function generateMetadata(): Metadata {
   const ctx = getRequestContext();
@@ -49,6 +50,9 @@ export default async function AboutPage() {
   const t = await getContent(ctx.locale);
   const base = ctx.base;
   const a = t.about;
+  // Admin-approved intro (Metinler → Hakkımızda giriş metni); a draft is never shown.
+  const intro = await getAboutIntro();
+  const introText = intro.status === 'approved' ? intro.text[ctx.locale] ?? '' : '';
 
   return (
     <>
@@ -68,6 +72,13 @@ export default async function AboutPage() {
         {/* ── Intro ─────────────────────────────────────────────── */}
         <PageIntro eyebrow={a.eyebrow} title={a.heading} sub={a.sub} subTone="lime" titleMax="max-w-[22ch]" />
         <PageVisual src="/visuals/about.webp" priority />
+        {introText && (
+          <section className="relative z-[7] py-12 lg:py-16">
+            <div className="container-y">
+              <p className="max-w-[60ch] text-[clamp(19px,1.8vw,24px)] font-semibold leading-[1.6] text-soft">{introText}</p>
+            </div>
+          </section>
+        )}
 
         {/* ── Editorial spread: sticky manifesto + flowing methodology ── */}
         <section className="relative z-[7] border-t border-line bg-surface py-16 lg:py-28">

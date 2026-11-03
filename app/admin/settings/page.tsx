@@ -3,6 +3,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Card, Notice, StatusBadge } from '@/components/admin/cockpit/Widgets';
 import { adminApi, adminPost, fmtDate } from '@/lib/cockpit/client';
+import ResponseTimesCard from '@/components/admin/settings/ResponseTimesCard';
+import AiSettingsCard from '@/components/admin/settings/AiSettingsCard';
 
 /**
  * Yoca Admin — Ayarlar (bildirimler ve entegrasyonlar).
@@ -120,7 +122,7 @@ export default function AdminSettings() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Ayarlar</h1>
-          <p className="mt-1.5 text-[14px] text-muted">Bildirimler, sabah özeti ve yapay zekâ bağlantıları.</p>
+          <p className="mt-1.5 text-[14px] text-muted">Bildirimler, sabah özeti, yanıt süreleri ve yapay zekâ.</p>
         </div>
         {flash && (
           <span role="status" className={`text-[13px] font-bold ${flash.tone === 'ok' ? 'text-yoca-lime' : 'text-amber-300'}`}>
@@ -231,6 +233,11 @@ export default function AdminSettings() {
         </Card>
       </div>
 
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ResponseTimesCard />
+        <AiSettingsCard />
+      </div>
+
       <Card title="Dene">
         <div className="flex flex-wrap gap-2">
           <button type="button" className="admin-btn-primary" disabled={busy !== null} onClick={() => act('test')}>
@@ -282,7 +289,8 @@ export default function AdminSettings() {
             <li>
               Vercel’e {code('OPENAI_API_KEY')} adıyla ekleyin, sonra Redeploy. Aynı anahtar İçerik / Insights editöründeki yapay zekâyı da açar.
             </li>
-            <li>Leadler sayfasında bir lead’i açıp “Özetle” veya “Yanıt taslağı”na basın.</li>
+            <li>Bu sayfadaki “Yapay zekâ” kartında “Modelleri doğrula”ya basın, listeden metin ve görsel modellerini seçin, aylık bütçe girin (0 iken yapay zekâ kapalıdır).</li>
+            <li>Leadler sayfasında bir lead’i açıp “Özetle” veya “Yanıt taslağı”na basın; e-posta ve telefon OpenAI’ye gönderilmez.</li>
           </Steps>
           <p className="mt-3 text-[12px] text-subtle">Kullanım ücreti OpenAI hesabınıza yansır. Yapay zekâ hiçbir şeyi kendiliğinden göndermez; taslakları siz gönderirsiniz.</p>
         </Card>

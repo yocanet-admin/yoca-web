@@ -1,6 +1,9 @@
 /* eslint-disable @next/next/no-img-element */
 import Link from 'next/link';
 import { fetchMenu } from '@/lib/supabase';
+import { hasPublishedInsights } from '@/lib/insights';
+import { getCompanyInfo, getKvkkPublish } from '@/lib/siteSettings';
+import { noticeIsFinal } from '@/lib/companyInfo';
 import { getRequestContext } from '@/lib/seo';
 import type { Dict } from '@/lib/i18n';
 import { COMPANY } from '@/lib/company';
@@ -24,7 +27,9 @@ export default async function SiteFooter({ t }: SiteFooterProps) {
   const base = ctx.base;
   const withBase = (url: string) => (url === '/' ? base : `${base}${url}`);
 
-  const rows = await fetchMenu('footer');
+  const [rows, insightsLive, company, kvkk] = await Promise.all([fetchMenu('footer'), hasPublishedInsights(ctx.locale), getCompanyInfo(), getKvkkPublish()]);
+  // The notice is linked here only once the owner published it as final (kvkk_published).
+  const noticeFinal = noticeIsFinal(company, kvkk);
   const year = new Date().getFullYear();
 
   const systemsCol = [
@@ -37,7 +42,7 @@ export default async function SiteFooter({ t }: SiteFooterProps) {
     { title: t.overview.title, url: `${base}/overview` },
     { title: t.nav.services, url: `${base}/services` },
     { title: t.nav.work, url: `${base}/work` },
-    { title: t.nav.insights, url: `${base}/insights` },
+    ...(insightsLive ? [{ title: t.nav.insights, url: `${base}/insights` }] : []),
     { title: t.nav.checkup, url: `${base}/checkup` },
     { title: t.nav.contact, url: `${base}/contact` },
   ];
@@ -151,6 +156,7 @@ export default async function SiteFooter({ t }: SiteFooterProps) {
             </p>
             <p className="text-[12px]">{t.footer.message}</p>
             <address className="text-[12px] not-italic" dir="ltr">{COMPANY.address.line}</address>
+            {noticeFinal && <Link href={`${base}/privacy`} className="text-[12px] transition-colors hover:text-yoca-lime">{t.legal.noticeTitle}</Link>}
           </div>
           <YocaSignature variant="signature" theme="dark" source="yoca.net" className="footer-signature" />
         </div>

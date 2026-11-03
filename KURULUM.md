@@ -164,16 +164,33 @@ işareti birebir geometriyle çizer — başka yerde yeniden çizmeyin.
    (tablolar: `insights`, `insight_categories`, `insight_revisions`, `ai_runs`;
    `insights` storage bucket'ı; RLS: herkese açık okuma yalnızca YAYINDA + yayın saati geçmiş).
 2. Vercel → Environment Variables:
-   - `OPENAI_API_KEY` (zorunlu — yalnız sunucu)
-   - `OPENAI_EDITORIAL_MODEL`, `OPENAI_RESEARCH_MODEL` (isteğe bağlı; varsayılan gpt-4.1)
-   - `INSIGHTS_PREVIEW_SECRET` (taslak önizleme anahtarı — rastgele uzun bir değer)
-   - `SUPABASE_SERVICE_ROLE_KEY` zaten tanımlı olmalı (AI uç noktası oturumu bununla doğrular).
-3. `/admin/insights` → "+ Yeni içerik". Elle yazın ya da sağdaki AI Asistan ile
-   taslak üretin. AI **her zaman Taslak** oluşturur; yayın kararı sizindir.
-4. Header menüsü veritabanından yönetiliyorsa `/admin/menus`'a `/insights` satırı
-   ekleyin (eklenene kadar site otomatik ekler).
-5. Önizleme: editördeki "Önizle" düğmesi anahtarı sorar; URL
-   `/{dil}/insights/{slug}?preview={id}&token=…` — noindex, yalnız anahtarla açılır.
+   - `OPENAI_API_KEY` (zorunlu — yalnız sunucu; hiçbir route, ayar ya da log bu değeri göstermez)
+   - Model kimlikleri tahmin edilmez, koda gömülü varsayılan yoktur. Ya Ayarlar → Yapay zekâ
+     bölümünden seçin (“Modelleri doğrula” hesabın erişebildiği modelleri listeler) ya da env ile verin:
+     `OPENAI_TEXT_MODEL_ECONOMY`, `OPENAI_TEXT_MODEL_QUALITY`, `OPENAI_IMAGE_MODEL_ECONOMY`,
+     `OPENAI_IMAGE_MODEL_QUALITY` (eski `OPENAI_EDITORIAL_MODEL` / `OPENAI_IMAGE_MODEL` de okunur).
+   - `AI_MONTHLY_BUDGET_USD` (isteğe bağlı başlangıç bütçesi; 0 ya da boşken yapay zekâ kapalıdır,
+     Ayarlar’dan değiştirilebilir)
+   - `INSIGHTS_PREVIEW_SECRET` (herkese açık sayfa önizlemesi için; editör içi önizleme anahtar istemez)
+   - `SUPABASE_SERVICE_ROLE_KEY` zaten tanımlı olmalı (kullanım kaydı, görseller, ayarlar).
+   - `AI_MOCK=1` YALNIZCA yerel test içindir; `VERCEL_ENV=production` iken reddedilir.
+3. `supabase/upgrade-v14-content.sql` (İçerik stüdyosu, kullanım kaydı, özel görsel
+   deposu, ekip doğrulaması, vaka sonuçları). İsteğe bağlı: `supabase/seed/insights-drafts-tr.sql`
+   beş Türkçe TASLAK yazı ekler (yayınlanmaz).
+4. `/admin/insights` → "+ Yeni içerik". Sağdaki İçerik stüdyosu adım adım ilerler:
+   Konu → Taslak → Editörlük kontrolü → Görsel → Önizleme → İnceleme → Yayın. Yapay zekâ
+   **yalnızca öneri** üretir (sürüm geçmişine kaydedilir); “Yayınla” / “Zamanla” ayrı düğmelerdir.
+   “Web’de araştır” isteğe bağlıdır (OpenAI web araması): bulunan adresler “doğrulanmadı” olarak
+   gösterilir; bir adres ancak sunucu sayfayı gerçekten indirip okuduğunda (“Kaynakları şimdi oku”)
+   kaynak sayılır. Web arama ücreti tahmini maliyete dahil değildir.
+   Modeller: “Ekonomik” / “Yüksek kalite” yalnızca etikettir; bir model ancak “Modelleri doğrula”
+   (GET /v1/models) onu bu anahtar için listelediyse kullanılır.
+5. Insights bağlantısı menüde, bir dilde en az bir yazı yayımlanınca kendiliğinden görünür.
+   Ayar anahtarları (cockpit_settings): `site_copy` (yanıt süreleri + “Süreleri sitede göster”),
+   `company_info` (veri sorumlusu bilgileri), `kvkk_published` (Aydınlatma Metni nihai mi; varsayılan
+   kapalı), `about_intro` (Hakkımızda taslak metni), `ai` (yapay zekâ ayarları).
+   Testler (ağ ve veritabanı gerekmez): `npx tsx --test tests/*.test.ts`
+6. Herkese açık önizleme: `/{dil}/insights/{slug}?preview={id}&token=…` — noindex, yalnız anahtarla açılır.
 
 ## 5. Yayın Sonrası Kontrol Listesi
 

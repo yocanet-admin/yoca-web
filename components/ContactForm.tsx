@@ -18,6 +18,11 @@ interface ContactFormProps {
   errorGeneric: string;
   /** Optional opening line for the message (e.g. from a product card). */
   prefillMessage?: string;
+  /** Privacy-notice line under the form (no consent box: it is information, not a condition). */
+  legal: Dict['legal'];
+  privacyHref: string;
+  /** Automatic receipt vs. human reply (lib/responseCopy.ts). */
+  receiptNote: string;
 }
 
 type Status = 'idle' | 'submitting' | 'success';
@@ -29,12 +34,14 @@ export default function ContactForm({
   errorEmail,
   errorGeneric,
   prefillMessage = '',
+  legal,
+  privacyHref,
+  receiptNote,
 }: ContactFormProps) {
   const [form, setForm] = useState({ name: '', email: '', company: '', message: prefillMessage, phone: '', website: '' });
   const [selectedSystems, setSelectedSystems] = useState<string[]>([]);
   const [budget, setBudget] = useState<string>('');
   const [launch, setLaunch] = useState<string>('');
-  const [consent, setConsent] = useState(false);
   // Spam screening: a real hidden honeypot + how long the form was open.
   const [honeypot, setHoneypot] = useState('');
   const openedAt = useRef(0);
@@ -57,7 +64,7 @@ export default function ContactForm({
     event.preventDefault();
     setError('');
 
-    if (!form.name.trim() || !form.email.trim() || !form.message.trim() || !consent) {
+    if (!form.name.trim() || !form.email.trim() || !form.message.trim()) {
       setError(errorRequired);
       return;
     }
@@ -126,6 +133,7 @@ export default function ContactForm({
           ✓
         </span>
         <p className="max-w-[40ch] text-[clamp(20px,2vw,26px)] font-extrabold leading-snug tracking-[-0.02em] text-white">{successMessage}</p>
+        <p className="max-w-[60ch] text-[13px] leading-relaxed text-muted">{receiptNote}</p>
         <div className="w-full">
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-subtle">{t.nextTitle}</p>
           <div className="mt-4">
@@ -312,16 +320,13 @@ export default function ContactForm({
           className={`${inputClass} min-h-[140px] resize-y py-3`}
         />
       </div>
-      <label className="flex cursor-pointer items-start gap-3 text-[14px] text-muted">
-        <input
-          type="checkbox"
-          checked={consent}
-          onChange={(e) => setConsent(e.target.checked)}
-          className="mt-0.5 h-[18px] w-[18px] flex-none accent-yoca-lime"
-          required
-        />
-        <span>{t.consent}</span>
-      </label>
+      <p className="text-[13px] leading-relaxed text-muted">
+        {legal.formNoticeBefore}
+        <a href={privacyHref} className="font-semibold text-soft underline underline-offset-2 hover:text-yoca-lime">
+          {legal.formNoticeLink}
+        </a>
+        {legal.formNoticeAfter}
+      </p>
       <div>
         <button
           type="submit"

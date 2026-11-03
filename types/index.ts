@@ -37,6 +37,16 @@ export interface TeamMemberRow {
   tags: string[] | null;
   order_index: number;
   is_active: boolean;
+  /** v14: short bio, extra links and the verification gate. */
+  bio?: string;
+  links?: Array<{ label: string; url: string }>;
+  name_confirmed?: boolean;
+  role_confirmed?: boolean;
+  photo_confirmed?: boolean;
+  /** Public only when verified (name, role and photo confirmed) AND active. */
+  verified?: boolean;
+  verified_at?: string | null;
+  verified_by?: string | null;
 }
 
 export interface CheckupSubmissionRow {

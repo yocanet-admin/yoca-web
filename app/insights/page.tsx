@@ -8,14 +8,16 @@ import InsightCard from '@/components/insights/InsightCard';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { buildMetadata, breadcrumbSchema, getRequestContext, jsonLdString } from '@/lib/seo';
-import { categoryName, getFeaturedInsight, getInsightCategories, INSIGHTS_PAGE_SIZE, listInsights } from '@/lib/insights';
+import { categoryName, getFeaturedInsight, getInsightCategories, hasPublishedInsights, INSIGHTS_PAGE_SIZE, listInsights } from '@/lib/insights';
 
 /** Yoca — Insights journal: featured essay + latest index, lightweight category filter. */
 
-export function generateMetadata(): Metadata {
+export async function generateMetadata(): Promise<Metadata> {
   const ctx = getRequestContext();
   const t = getDict(ctx.locale);
-  return buildMetadata({ ctx, path: '/insights', title: t.insights.metaTitle, description: t.insights.metaDescription });
+  const meta = buildMetadata({ ctx, path: '/insights', title: t.insights.metaTitle, description: t.insights.metaDescription });
+  // An empty section stays reachable but is not offered to search engines.
+  return (await hasPublishedInsights(ctx.locale)) ? meta : { ...meta, robots: { index: false, follow: true } };
 }
 
 interface PageProps {

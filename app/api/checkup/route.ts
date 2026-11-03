@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { CHECKUP_WEIGHTS, getDict } from '@/lib/i18n';
 import { notifyCheckup } from '@/lib/notify';
+import { getFormCopy } from '@/lib/siteSettings';
 import { checkupFingerprint, clientIp, rateLimited, storedCheckupFingerprint } from '@/lib/formGuard';
 import { logSpam, screenSubmission } from '@/lib/spam';
 import type { CheckupAnswer, CheckupPayload, Locale } from '@/types';
@@ -16,8 +17,10 @@ const TOO_MANY: Record<string, string> = {"tr": "Kısa sürede çok fazla gönde
  * Yoca — Digital Check-Up submission endpoint.
  *
  * Validates the wizard payload server-side (spam screen, field limits, option
- * ranges), computes the 0–100 digital-health score and inserts the record
- * into the Supabase `checkup_submissions` table.
+ * ranges), computes the 0–100 digital-health score FOR INTERNAL USE (stored
+ * with the submission, shown only in the admin) and inserts the record into
+ * the Supabase `checkup_submissions` table. The score is not returned to the
+ * visitor and the visitor-facing copy does not promise one.
  */
 
 export const runtime = 'nodejs';
@@ -44,6 +47,7 @@ export async function POST(request: NextRequest) {
 
   const locale: Locale = LOCALES.includes(payload.locale) ? payload.locale : 'en';
   const dict = getDict(locale);
+  const message = (await getFormCopy(locale).catch(() => null))?.checkupSuccess ?? dict.checkup.success;
 
   // ── Contact validation ───────────────────────────────────────
   const contact = payload.contact ?? { name: '', company: '', email: '', phone: '' };
@@ -70,7 +74,7 @@ export async function POST(request: NextRequest) {
   if (verdict.spam) {
     console.warn('checkup spam dropped:', verdict.reasons.join(','));
     await logSpam('checkup', verdict.reasons);
-    return NextResponse.json({ ok: true, score: 0 });
+    return NextResponse.json({ ok: true, message });
   }
 
   // ── Answer validation + scoring ──────────────────────────────
@@ -119,7 +123,7 @@ export async function POST(request: NextRequest) {
     .limit(10);
   if (!recent.error && (recent.data ?? []).some((row) => storedCheckupFingerprint(row) === fingerprint)) {
     await logSpam('checkup', ['duplicate']);
-    return NextResponse.json({ ok: true, score: finalScore });
+    return NextResponse.json({ ok: true, message });
   }
 
   const id = randomUUID();
@@ -136,5 +140,5 @@ export async function POST(request: NextRequest) {
 
   await notifyCheckup({ id, name, email, company, phone, locale, score: finalScore, answers });
 
-  return NextResponse.json({ ok: true, score: finalScore });
+  return NextResponse.json({ ok: true, message });
 }

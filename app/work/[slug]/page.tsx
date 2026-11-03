@@ -10,6 +10,7 @@ import Reveal from '@/components/ui/Reveal';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { getCaseStudies, getCaseStudy } from '@/lib/work';
+import { getSiteResults } from '@/lib/caseResults';
 import { getWorkMedia } from '@/lib/workMedia';
 import ParallaxMedia from '@/components/ui/ParallaxMedia';
 import CaseStudyVideo from '@/components/ui/CaseStudyVideo';
@@ -68,14 +69,15 @@ export default async function CaseStudyPage({ params }: PageProps) {
           : study.kind === 'venture'
             ? t.work.statusVenture
             : t.work.statusExp;
-  /** Verified outcome only: module 4 shows its heading when a real result exists. */
-  const hasResults = Boolean(study.results?.trim()) || Boolean(study.stats?.length);
+  /** Verified outcome only: approved, site-scoped records from case_study_results. */
+  const { metrics, testimonials } = await getSiteResults(study.slug, ctx.locale);
+  const hasResults = metrics.length > 0;
   const index = all.findIndex((cs) => cs.slug === study.slug);
   const prev = index > 0 ? all[index - 1] : null;
   const next = index < all.length - 1 ? all[index + 1] : null;
 
-  /** 5-module case template: Challenge → Applied System → Execution & Tech
-   *  → Verified Results (chart) → Client Quote. */
+  /** Case template: Need → Yoca's scope → Delivered features → visuals + live
+   *  link → (optional) verified result + testimonial, each only when approved. */
   const narrative: Array<{ label: string; text: string }> = [
     { label: t.work.problem, text: study.problem },
     { label: t.work.approach, text: study.approach },
@@ -234,33 +236,19 @@ export default async function CaseStudyPage({ params }: PageProps) {
             </div>
             )}
             <div>
-              {study.results?.trim() && (
-                <p className="max-w-[62ch] text-[17px] leading-[1.8] text-soft">{study.results}</p>
-              )}
-              {study.stats && study.stats.length > 0 && (
-                <div className="mt-9 grid gap-5">
-                  {study.stats.map((stat) => (
-                    <Reveal key={stat.label}>
-                      <div>
-                        <div className="flex items-baseline justify-between gap-4">
-                          <span className="text-[13px] font-bold uppercase tracking-[0.08em] text-subtle">
-                            {stat.label}
-                          </span>
-                          <span className="text-xl font-extrabold tabular-nums text-yoca-lime">
-                            {stat.value}
-                          </span>
-                        </div>
-                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-elevated">
-                          <div
-                            className="h-full rounded-full bg-yoca-lime"
-                            style={{ width: `${Math.min(100, Math.max(4, stat.bar ?? 50))}%` }}
-                          />
-                        </div>
-                      </div>
-                    </Reveal>
+              {metrics.length > 0 && (
+                <dl className="grid gap-6">
+                  {metrics.map((m) => (
+                    <div key={m.id} className="grid gap-1 border-t border-line pt-4">
+                      <dt className="text-[13px] font-bold uppercase tracking-[0.08em] text-subtle">{m.metric_name}</dt>
+                      <dd className="text-[clamp(24px,2.6vw,34px)] font-extrabold tabular-nums text-yoca-lime">{m.metric_value}</dd>
+                      <dd className="text-[13px] text-muted">
+                        {[m.period && `${t.work.resultPeriod}: ${m.period}`, m.baseline && `${t.work.resultBaseline}: ${m.baseline}`, m.source_basis && `${t.work.resultBasis}: ${m.source_basis}`].filter(Boolean).join(' · ')}
+                      </dd>
+                    </div>
                   ))}
                   <p className="text-[12px] text-subtle">{t.work.metricNote}</p>
-                </div>
+                </dl>
               )}
               {study.liveUrl && (
                 <a
@@ -277,24 +265,26 @@ export default async function CaseStudyPage({ params }: PageProps) {
         </section>
         )}
 
-        {/* Module 5: Client Quote — renders only when a real quote exists */}
-        {study.quote && (
+        {/* Module 5: client testimonial — only approved, site-scoped records */}
+        {testimonials.length > 0 && (
           <section className="relative z-[7] py-16 lg:py-24">
             <div className="container-y grid gap-10 md:grid-cols-[minmax(200px,1fr)_2fr] md:gap-8">
               <div>
                 <span className="text-[13px] font-extrabold tracking-[0.1em] text-yoca-lime">05</span>
                 <h2 className="mt-2 text-xl font-extrabold">{t.work.quoteLabel}</h2>
               </div>
-              <figure className="glass max-w-[62ch] rounded-md p-8 lg:p-10">
-                <blockquote className="text-xl font-bold leading-[1.6] text-white">
-                  “{study.quote}”
-                </blockquote>
-                {study.quoteAuthor && (
-                  <figcaption className="mt-4 text-[14px] font-semibold text-yoca-lime">
-                    — {study.quoteAuthor}
-                  </figcaption>
-                )}
-              </figure>
+              <div className="grid gap-6">
+                {testimonials.map((q) => (
+                  <figure key={q.id} className="glass max-w-[62ch] rounded-md p-8 lg:p-10">
+                    <blockquote className="text-xl font-bold leading-[1.6] text-white">“{q.testimonial_text}”</blockquote>
+                    {(q.testimonial_author || q.testimonial_author_title) && (
+                      <figcaption className="mt-4 text-[14px] font-semibold text-yoca-lime">
+                        — {[q.testimonial_author, q.testimonial_author_title].filter(Boolean).join(', ')}
+                      </figcaption>
+                    )}
+                  </figure>
+                ))}
+              </div>
             </div>
           </section>
         )}

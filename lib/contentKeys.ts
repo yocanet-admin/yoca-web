@@ -5,7 +5,12 @@ import type { Dict } from '@/lib/i18n';
  * Shared by the server content layer (lib/content.ts) and the admin panel.
  */
 
-/** Keys editable from the admin panel (dot paths into Dict) + Turkish labels. */
+/**
+ * Keys editable from the admin panel (dot paths into Dict) + Turkish labels.
+ * contact.description, checkup.description and checkup.introSub are NOT here:
+ * they come from Ayarlar → Yanıt süreleri (lib/responseCopy.ts), so an old
+ * override can never re-introduce an unapproved response-time promise.
+ */
 export const CONTENT_KEYS: Array<{ key: string; label: string; multiline?: boolean }> = [
   { key: 'hero.eyebrow', label: 'Hero — üst etiket' },
   { key: 'hero.title', label: 'Hero — ana başlık', multiline: true },
@@ -28,19 +33,16 @@ export const CONTENT_KEYS: Array<{ key: string; label: string; multiline?: boole
   { key: 'cta.button', label: 'CTA — buton' },
   { key: 'footer.message', label: 'Footer — mesaj', multiline: true },
   { key: 'checkup.title', label: 'Check-Up — başlık' },
-  { key: 'checkup.description', label: 'Check-Up — açıklama', multiline: true },
   { key: 'about.heading', label: 'Hakkımızda — başlık' },
   { key: 'about.sub', label: 'Hakkımızda — alt metin', multiline: true },
   { key: 'about.story1', label: 'Hakkımızda — hikâye 1', multiline: true },
   { key: 'about.story2', label: 'Hakkımızda — hikâye 2', multiline: true },
   { key: 'about.story3', label: 'Hakkımızda — hikâye 3', multiline: true },
   { key: 'contact.heading', label: 'İletişim — başlık' },
-  { key: 'contact.description', label: 'İletişim — açıklama', multiline: true },
   { key: 'contact.calendlyUrl', label: 'İletişim — Calendly linki (https://calendly.com/…)' },
   { key: 'footer.hook', label: 'Footer — kapanış kancası', multiline: true },
   { key: 'footer.hookCta', label: 'Footer — kanca butonu' },
   { key: 'checkup.introTitle', label: 'Check-Up — intro başlık' },
-  { key: 'checkup.introSub', label: 'Check-Up — intro açıklama', multiline: true },
 ];
 
 export const ALLOWED_CONTENT_KEYS = new Set(CONTENT_KEYS.map((entry) => entry.key));

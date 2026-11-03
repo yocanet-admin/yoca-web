@@ -42,6 +42,30 @@ export function categoryName(categories: InsightCategoryRow[], key: string | nul
   return cat ? cat.names[locale] ?? cat.names.en : '';
 }
 
+/**
+ * Does this locale have at least one published (and due) article? Drives the
+ * Insights link in the header/footer and the sitemap: an empty section is not
+ * advertised, and the link appears by itself once a post is published.
+ * Fails closed (false) when Supabase is unreachable. The admin editor is
+ * never affected.
+ */
+export const hasPublishedInsights = cache(async (locale: Locale): Promise<boolean> => {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  try {
+    const { data, error } = await supabase
+      .from('insights')
+      .select('id')
+      .eq('locale', locale)
+      .eq('status', 'PUBLISHED')
+      .lte('publish_at', new Date().toISOString())
+      .limit(1);
+    return !error && (data ?? []).length > 0;
+  } catch {
+    return false;
+  }
+});
+
 export async function listInsights(locale: Locale, opts: { category?: string; page?: number } = {}): Promise<{ items: InsightSummary[]; total: number }> {
   const supabase = getSupabase();
   if (!supabase) return { items: [], total: 0 };

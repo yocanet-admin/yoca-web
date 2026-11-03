@@ -7,6 +7,7 @@ import CopyEmail from '@/components/ui/CopyEmail';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { COMPANY } from '@/lib/company';
+import { getFormCopy } from '@/lib/siteSettings';
 import { buildMetadata, breadcrumbSchema, getRequestContext, jsonLdString } from '@/lib/seo';
 
 export function generateMetadata(): Metadata {
@@ -23,6 +24,7 @@ export function generateMetadata(): Metadata {
 export default async function ContactPage({ searchParams }: { searchParams?: { product?: string } }) {
   const ctx = getRequestContext();
   const t = await getContent(ctx.locale);
+  const copy = await getFormCopy(ctx.locale);
   // Coming from a product card: start the message with the product's name (only known keys).
   const product = t.products.items.find((item) => item.key === searchParams?.product);
   const prefill = product ? t.products.enquirePrefill.replace('{product}', product.name) : '';
@@ -55,13 +57,16 @@ export default async function ContactPage({ searchParams }: { searchParams?: { p
       />
       <SiteHeader t={t} path="/contact" />
       <main id="main">
-        <PageIntro eyebrow={t.contact.eyebrow} title={t.contact.heading} sub={t.contact.description} compact />
+        <PageIntro eyebrow={t.contact.eyebrow} title={t.contact.heading} sub={copy.contactDescription} compact />
 
         <section className="relative z-[7] py-16 lg:py-20">
           <div className="container-y grid items-start gap-10 lg:grid-cols-[7fr_4fr] lg:gap-16">
             <ContactForm
               locale={ctx.locale}
-              t={t.contact}
+              t={{ ...t.contact, description: copy.contactDescription, success: copy.contactSuccess }}
+              legal={t.legal}
+              privacyHref={`${base}/privacy`}
+              receiptNote={copy.receiptNote}
               errorRequired={t.checkup.errorRequired}
               errorEmail={t.checkup.errorEmail}
               errorGeneric={t.checkup.errorGeneric}

@@ -39,6 +39,7 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
   {
     title: 'Sistem',
     items: [
+      { href: '/admin/company', label: 'Şirket bilgileri', icon: '§' },
       { href: '/admin/activity', label: 'İşlem geçmişi', icon: '↺' },
       { href: '/admin/settings', label: 'Ayarlar', icon: '⚙' },
     ],

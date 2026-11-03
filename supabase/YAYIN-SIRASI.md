@@ -62,3 +62,16 @@ PR #16'nın dalı PR #15'in son commit'ini (`6878a9d`) içerir; GitHub'ın #15'i
 - **Squash / Rebase:** #15 açık kalır; aşağıdaki kontrolden sonra elle kapatılır.
 
 Kontrol (arada başka PR birleştirilmediyse): `compare/<#16 son commit SHA>..main` (iki nokta) boş olmalı. Boşsa #15 "#16 ile birlikte yayına alındı" notuyla kapatılır; değilse kapatılmaz, fark incelenir.
+
+## v14 — İçerik stüdyosu (UYGULANMADI)
+
+`upgrade-v14-content.sql` ve `seed/insights-drafts-tr.sql` hiçbir canlı, önizleme ya da staging
+veritabanında çalıştırılmadı. Yalnızca geçici bir yerel Postgres 16 veritabanında (Supabase `auth` /
+`storage` şemaları için basit taklit tablolarla, v3–v13 uygulanmış) ikişer kez çalıştırıldı: hata
+vermedi, ikinci çalıştırma bir şey değiştirmedi; anon / giriş yapmış yönetici olmayan / yönetici
+rolleriyle RLS ve kısıtlar denendi. Gerçek Supabase Storage API’si ve Auth ile denenmedi.
+Ön koşul: v10 PART A (`is_admin()`), v12.
+Etkisi: ekip kartları, “doğrulandı” işaretlenene kadar sitede görünmez (ziyaretçi politikası değişir).
+Uygulama v14’ten önce yayınlanırsa: ekip bölümü gizli kalır, yapay zekâ “v14 SQL çalıştırılmalı”
+der ve kapalı kalır (bütçe uygulanamadığı için), vaka sonuçları gösterilmez, Aydınlatma Metni taslak
+kalır — hepsi güvenli tarafta.

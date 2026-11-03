@@ -5,6 +5,7 @@ import { getAdminClient } from '@/lib/adminClient';
 import { CONTENT_KEYS, getDictValue } from '@/lib/contentKeys';
 import { getDict } from '@/lib/i18n';
 import type { Locale, SiteContentRow } from '@/types';
+import AboutDraftCard from '@/components/admin/settings/AboutDraftCard';
 
 /**
  * Yoca Admin — site metinleri (4 dil).
@@ -182,6 +183,9 @@ export default function AdminContent() {
           </button>
         </div>
       </header>
+
+      <AboutDraftCard />
+      <p className="text-[12px] text-subtle">İletişim ve Check-Up açıklama/onay metinleri artık Ayarlar → Yanıt süreleri’nden yönetiliyor (süre taahhüdü onaylanana kadar süresiz metin).</p>
 
       <div className="flex gap-1 rounded-sm border border-line p-1 sm:w-fit">
         {LOCALES.map((locale) => (

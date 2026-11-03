@@ -1,6 +1,8 @@
 /* eslint-disable @next/next/no-img-element */
 import Link from 'next/link';
 import { fetchMenu } from '@/lib/supabase';
+import { hasPublishedInsights } from '@/lib/insights';
+import { applyInsightsVisibility } from '@/lib/publicRules';
 import { getRequestContext } from '@/lib/seo';
 import HeaderShell from '@/components/ui/HeaderShell';
 import LanguageMenu from '@/components/ui/LanguageMenu';
@@ -50,7 +52,7 @@ export default async function SiteHeader({ t, path = '/' }: SiteHeaderProps) {
   const base = ctx.base;
   const withBase = (url: string) => (url === '/' ? base : `${base}${url}`);
 
-  const rows = await fetchMenu('header');
+  const [rows, insightsLive] = await Promise.all([fetchMenu('header'), hasPublishedInsights(ctx.locale)]);
   const rawItems: Array<MenuItem & { logical?: string }> = rows
     ? rows
         .filter((row) => !NON_NAV_URLS.has(row.url))
@@ -66,12 +68,9 @@ export default async function SiteHeader({ t, path = '/' }: SiteHeaderProps) {
         { title: t.nav.products, url: '/products' },
         { title: t.nav.insights, url: '/insights' },
       ];
-  // Insights is part of the primary navigation; append it when a CMS-managed
-  // header menu predates it (until an /insights row is added in /admin/menus).
-  if (rows && !rawItems.some((item) => item.url === '/insights')) {
-    rawItems.push({ title: t.nav.insights, url: '/insights', external: false });
-  }
-  const items = rawItems.map((item) =>
+  // Insights is part of the primary navigation once THIS locale has a published
+  // post; until then the link is hidden (also when a CMS menu row lists it).
+  const items = applyInsightsVisibility(rawItems, insightsLive, { title: t.nav.insights, url: '/insights', external: false }).map((item) =>
     item.external ? item : { ...item, logical: item.url, url: withBase(item.url) },
   );
 
