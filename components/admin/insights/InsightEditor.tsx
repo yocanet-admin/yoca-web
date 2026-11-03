@@ -350,6 +350,7 @@ export default function InsightEditor({ id }: Props) {
               onApplyFaq={(faq) => update({ faq })}
               onCreateTranslation={createTranslation}
               onSetTitle={(title) => update({ title, ...(slugTouched ? {} : { slug: slugify(title) }) })}
+              onSetCover={(url, alt) => update({ cover_url: url, cover_alt: alt })}
             />
           </div>
         )}
