@@ -10,7 +10,7 @@ import { loadLeads, type Lead } from '@/lib/cockpit/leads';
 import { loadCrm, money, pipelineByCurrency, type CrmData } from '@/lib/cockpit/crm';
 import { siteIssues, type HealthResponse, type Severity } from '@/lib/cockpit/sites';
 import type { TrafficReport } from '@/lib/cockpit/vercel';
-import { getDefaultCaseStudyRows } from '@/lib/workData';
+import { mergeWorkSources } from '@/lib/workData';
 
 /**
  * Yoca Admin — Kokpit.
@@ -25,15 +25,13 @@ interface ContentStats {
   drafts: number;
   scheduled: number;
   hiddenSections: number;
-  /** case_studies rows in the database (null = table unreadable). */
-  work: number | null;
+  /** Work projects as the site merges them: database rows + code projects without a row (null = table unreadable). */
+  work: { db: number; code: number; hidden: number } | null;
   team: number;
   spam7: number | null;
 }
 
 const today = istanbulToday;
-/** Shown when the case_studies table is empty: the public site then falls back to these code-defined projects. */
-const staticCaseStudyCount = getDefaultCaseStudyRows().length;
 const VERCEL_DASHBOARD = process.env.NEXT_PUBLIC_VERCEL_DASHBOARD_URL || 'https://vercel.com/mgs-projects-8dc47200/yoca-web';
 const DAY = 86_400_000;
 
@@ -339,7 +337,7 @@ export default function Cockpit() {
             <li className="flex justify-between gap-3">
               <span className="text-subtle">Work projesi</span>
               <Link href="/admin/work" className="font-bold hover:text-yoca-lime">
-                {content ? (content.work === null ? '–' : content.work > 0 ? content.work : `${staticCaseStudyCount} (koddan)`) : '…'}
+                {content ? (content.work === null ? '–' : `${content.work.db - content.work.hidden + content.work.code} (${content.work.db - content.work.hidden} veritabanı, ${content.work.code} kod${content.work.hidden ? `, ${content.work.hidden} gizli` : ''})`) : '…'}
               </Link>
             </li>
             <li className="flex justify-between gap-3">
@@ -369,12 +367,23 @@ async function loadContent(): Promise<ContentStats> {
       return null;
     }
   };
+  const workCount = async (): Promise<ContentStats['work']> => {
+    try {
+      const { data, error } = await supabase.from('case_studies').select('id,slug,is_active,order_index');
+      if (error || !data) return null;
+      const rows = data as Array<{ id: number; slug: string; is_active: boolean; order_index: number }>;
+      const code = mergeWorkSources(rows, { includeHidden: true }).filter((entry) => entry.source === 'code').length;
+      return { db: rows.length, code, hidden: rows.filter((row) => !row.is_active).length };
+    } catch {
+      return null;
+    }
+  };
   const since = new Date(Date.now() - 7 * DAY).toISOString();
   const [drafts, scheduled, hiddenSections, work, team, spam7] = await Promise.all([
     count('insights', (q) => q.in('status', ['DRAFT', 'IN_REVIEW'])),
     count('insights', (q) => q.eq('status', 'SCHEDULED')),
     count('sections', (q) => q.eq('is_active', false)),
-    count('case_studies'),
+    workCount(),
     count('team_members'),
     count('spam_log', (q) => q.gte('created_at', since)),
   ]);
