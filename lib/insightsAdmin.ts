@@ -73,6 +73,11 @@ export function emptyInsight(locale: Locale = 'tr', groupId?: string): EditableI
     noindex: false,
     sources: [],
     faq: [],
+    source_insight_id: null,
+    source_hash: null,
+    language_reviewed: false,
+    language_reviewed_at: null,
+    language_reviewed_by: null,
   };
 }
 

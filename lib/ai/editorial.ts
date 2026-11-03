@@ -2,6 +2,7 @@ import { callOpenAI, OpenAIError, outputCitations, type OpenAIResult } from '@/l
 import { DEPTH_TARGETS, LOCALE_NAMES, TONE_MODIFIERS, YOCA_EDITORIAL_SYSTEM } from '@/lib/ai/prompts/yoca-editorial';
 import { NO_AI_SLOP_DETECT, NO_AI_SLOP_EDIT, NO_AI_SLOP_EVAL, SLOP_PATTERN_IDS } from '@/lib/ai/prompts/no-ai-slop';
 import { fence, safeSourceUrl, unsupportedNumberSentences } from '@/lib/ai/sourceText';
+import { asciiSlug, localizeInternalLinks } from '@/lib/ai/translateHelpers';
 import type { FetchedSource } from '@/lib/ai/sources';
 import {
   ArticleDraftSchema,
@@ -157,7 +158,7 @@ export async function styleReview(model: string, text: string, locale: string): 
   const res = await callOpenAI<{ findings: StyleFinding[] }>({
     model,
     system: YOCA_EDITORIAL_SYSTEM,
-    user: `${NO_AI_SLOP_DETECT}\nAllowed pattern ids: ${SLOP_PATTERN_IDS.join(', ')}.\nText language: ${lang(locale)}. Suggestions in Turkish.\n\n${fence('TEXT', text.slice(0, 60_000))}`,
+    user: `${NO_AI_SLOP_DETECT}\nAllowed pattern ids: ${SLOP_PATTERN_IDS.join(', ')}.\nText language: ${lang(locale)} — use the pattern forms listed for this language; copy excerpts in the original language. Suggestions in Turkish.\n\n${fence('TEXT', text.slice(0, 60_000))}`,
     schema: StyleReviewSchema,
     maxOutputTokens: 3000,
   });
@@ -169,7 +170,7 @@ export async function styleEdit(model: string, text: string, locale: string, max
   const res = await callOpenAI<{ text: string; changes: string[] }>({
     model,
     system: YOCA_EDITORIAL_SYSTEM,
-    user: `${NO_AI_SLOP_EDIT}\n${NO_AI_SLOP_EVAL}\nLanguage: ${lang(locale)}. Return the full edited text (only what is inside the TEXT block) and a short list (Turkish, max 10 items) of the kinds of changes you made.\n\n${fence('TEXT', text.slice(0, 60_000))}`,
+    user: `${NO_AI_SLOP_EDIT}\n${NO_AI_SLOP_EVAL}\nLanguage: ${lang(locale)} — edit in this language, using the pattern forms listed for it. Return the full edited text (only what is inside the TEXT block) and a short list (Turkish, max 10 items) of the kinds of changes you made.\n\n${fence('TEXT', text.slice(0, 60_000))}`,
     schema: StyleEditSchema,
     maxOutputTokens: Math.min(maxOutputTokens, 12_000),
     timeoutMs: 180_000,
@@ -231,17 +232,70 @@ export async function faqPack(model: string, title: string, body: string, locale
   return { ...res, data: res.data.faq ?? [] };
 }
 
-export async function translateArticle(model: string, article: { title: string; excerpt: string; body: string; seoTitle?: string | null; metaDescription?: string | null }, from: string, to: string): Promise<OpenAIResult<Translation>> {
+export interface TranslatableArticle {
+  title: string;
+  excerpt: string;
+  body: string;
+  seoTitle?: string | null;
+  metaDescription?: string | null;
+  ogTitle?: string | null;
+  ogDescription?: string | null;
+  faq?: Array<{ q: string; a: string }>;
+  tags?: string[];
+  coverAlt?: string | null;
+  coverCaption?: string | null;
+}
+
+/**
+ * Translates EVERY reader/search-facing field of an Insight (title, excerpt,
+ * body, SEO title, meta description, OG title/description, FAQ, tags, cover
+ * alt text and caption) and returns an ASCII slug. Internal links are moved
+ * to the target language afterwards (deterministic, not left to the model).
+ */
+export async function translateArticle(model: string, article: TranslatableArticle, from: string, to: string, maxOutputTokens = 9000): Promise<OpenAIResult<Translation>> {
+  const faq = (article.faq ?? []).filter((f) => f && (f.q || f.a)).slice(0, 20);
+  const fields = JSON.stringify({
+    title: article.title,
+    excerpt: article.excerpt,
+    seoTitle: article.seoTitle ?? '',
+    metaDescription: article.metaDescription ?? '',
+    ogTitle: article.ogTitle ?? '',
+    ogDescription: article.ogDescription ?? '',
+    faq,
+    tags: (article.tags ?? []).slice(0, 30),
+    coverAlt: article.coverAlt ?? '',
+    coverCaption: article.coverCaption ?? '',
+  });
   const res = await callOpenAI<Translation>({
     model,
     system: YOCA_EDITORIAL_SYSTEM,
-    user: `Translate this Yoca Insight from ${lang(from)} to ${lang(to)}. Preserve structure, headings, links, meaning, every factual claim and [KAYNAK GEREKLİ] markers; localise naturally. Return a URL-safe ASCII slug for the translated title.\n\nTitle: ${article.title}\nExcerpt: ${article.excerpt}\nSEO title: ${article.seoTitle ?? ''}\nMeta description: ${article.metaDescription ?? ''}\n\n${fence('TEXT', article.body.slice(0, 60_000))}`,
+    user: [
+      `Translate this Yoca Insight from ${lang(from)} to ${lang(to)} — every field, written as a native ${lang(to)} editor would write it, not word for word.`,
+      'Rules:',
+      '- Preserve meaning, structure, Markdown headings and lists, every factual claim, number, date and name. Do not add, drop or soften claims.',
+      '- Keep every [KAYNAK GEREKLİ] marker exactly as written (do not translate it); it blocks publishing until a source is added.',
+      '- Keep image references exactly: in ![alt](yoca-image:<id>) translate only the alt text. Keep every URL unchanged.',
+      '- Apply the no-AI-slop rules for the target language while translating (no empty openers, no "not just X but Y", no puffery).',
+      '- Empty source fields stay empty strings. Return the FAQ with the same number of items in the same order; translate tags (brand and product names unchanged).',
+      `- seoTitle ≤ 60 characters, metaDescription ≤ 155 characters, natural in ${lang(to)}.`,
+      `- slug: URL-safe ASCII (a-z, 0-9, hyphens) made from the translated title${to === 'ar' ? ' (transliterate Arabic to Latin letters)' : ''}.`,
+      '',
+      `Fields (JSON): ${fields}`,
+      '',
+      fence('TEXT', article.body.slice(0, 60_000)),
+    ].join('\n'),
     schema: TranslationSchema,
-    maxOutputTokens: 9000,
-    timeoutMs: 180_000,
+    maxOutputTokens: Math.min(16_000, Math.max(maxOutputTokens, 14_000)), // every field + body; billed by actual use
+    timeoutMs: 240_000,
   });
   if (!validateTranslation(res.data)) throw new OpenAIError('Çeviri doğrulamadan geçmedi.', 502, 'invalid_output', res.requestId);
-  return res;
+  const data: Translation = {
+    ...res.data,
+    body: localizeInternalLinks(res.data.body, from, to),
+    slug: asciiSlug(res.data.slug) || asciiSlug(res.data.title),
+    faq: faq.length ? res.data.faq.slice(0, faq.length) : [],
+  };
+  return { ...res, data };
 }
 
 export async function repurpose(model: string, platform: 'linkedin' | 'instagram' | 'newsletter' | 'x', title: string, body: string, locale: string): Promise<OpenAIResult<string>> {

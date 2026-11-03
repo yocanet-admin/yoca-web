@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseServiceRole } from '@/lib/supabase';
-import { CROP_SIZES, DRAFT_BUCKET, imageSize, readDraftImage, serverCrop, storeDraftImage } from '@/lib/ai/images';
+import { CROP_SIZES, DRAFT_BUCKET, imageSize, readDraftImage, serverCrop, shouldBrand, storeDraftImage } from '@/lib/ai/images';
 import { OpenAIError } from '@/lib/ai/openai';
 
 /**
@@ -10,9 +10,9 @@ import { OpenAIError } from '@/lib/ai/openai';
  * POST multipart (file, groupId, insightId, kind=upload|crop, parentId?, crop?, alt?)
  *                            → own upload or a social/mobile crop, stored PRIVATE
  * POST JSON { action: 'select_cover' | 'alt' | 'crop', … }
- *   crop: { imageId, crop: '1200x630' | '1080x1080' } — server-side crop with
- *   sharp when it is installed; 501 { code: 'no_sharp' } otherwise (the UI
- *   then crops in the browser and uploads the result as kind=crop).
+ *   crop: { imageId, crop: '1200x630' | '1080x1080' } — server-side crop
+ *   (sharp) of the logo-free original; crops of AI images get the logo again.
+ *   (The browser crop in ImageStudio is only a fallback for an old server.)
  * Nothing here publishes: public copies are made only by the publish route.
  */
 
@@ -94,12 +94,13 @@ export async function POST(request: NextRequest) {
     const key = String(body.crop ?? '');
     if (!CROP_SIZES[key]) return NextResponse.json({ ok: false, error: 'Geçersiz kırpım.' }, { status: 400 });
     try {
-      const source = await readDraftImage(body.imageId as string);
+      // Crop the logo-free original; the logo is added to the crop afterwards (AI images).
+      const source = await readDraftImage(body.imageId as string, { master: true });
       const cropped = await serverCrop(source.bytes, key);
       if (!cropped) return NextResponse.json({ ok: false, code: 'no_sharp', error: 'Sunucuda görsel işleme (sharp) yok; tarayıcıda kırpılacak.' }, { status: 501 });
       const dims = imageSize(cropped);
-      const row = source.row as { insight_id: string | null; group_id: string | null; alt_text: string };
-      const saved = await storeDraftImage(cropped, { insightId: row.insight_id, groupId: row.group_id, kind: 'crop', origin: 'crop', parentId: body.imageId as string, crop: key, width: dims?.width, height: dims?.height, size: key, altText: row.alt_text ?? '', createdBy, mime: 'image/png' });
+      const row = source.row as { insight_id: string | null; group_id: string | null; alt_text: string; origin: string };
+      const saved = await storeDraftImage(cropped, { insightId: row.insight_id, groupId: row.group_id, kind: 'crop', origin: 'crop', parentId: body.imageId as string, crop: key, width: dims?.width, height: dims?.height, size: key, altText: row.alt_text ?? '', createdBy, mime: 'image/png', brand: shouldBrand(row) });
       return NextResponse.json({ ok: true, imageId: saved.id, server: true });
     } catch (error) {
       const e = error instanceof OpenAIError ? error : new OpenAIError('Kırpım yapılamadı.', 500);

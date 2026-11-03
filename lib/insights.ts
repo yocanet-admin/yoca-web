@@ -121,16 +121,15 @@ export async function getInsightForPreview(id: string): Promise<InsightRow | nul
 }
 
 /** Same translation group in other locales (published only) → hreflang. */
-export async function getInsightAlternates(groupId: string): Promise<Array<{ locale: Locale; slug: string }>> {
+export async function getInsightAlternates(groupId: string): Promise<Array<{ locale: Locale; slug: string; source_insight_id?: string | null }>> {
   const supabase = getSupabase();
   if (!supabase) return [];
-  const { data } = await supabase
-    .from('insights')
-    .select('locale,slug')
-    .eq('group_id', groupId)
-    .eq('status', 'PUBLISHED')
-    .lte('publish_at', new Date().toISOString());
-  return (data as Array<{ locale: Locale; slug: string }> | null) ?? [];
+  const query = (columns: string) =>
+    supabase.from('insights').select(columns).eq('group_id', groupId).eq('status', 'PUBLISHED').lte('publish_at', new Date().toISOString());
+  const v15 = await query('locale,slug,source_insight_id');
+  if (!v15.error) return (v15.data as unknown as Array<{ locale: Locale; slug: string; source_insight_id: string | null }> | null) ?? [];
+  const legacy = await query('locale,slug');
+  return (legacy.data as unknown as Array<{ locale: Locale; slug: string }> | null) ?? [];
 }
 
 export async function getRelatedInsights(article: InsightRow, limit = 3): Promise<InsightSummary[]> {
@@ -158,15 +157,15 @@ export async function getRelatedInsights(article: InsightRow, limit = 3): Promis
 }
 
 /** For the sitemap: every published article per locale with its group. */
-export async function getAllPublishedInsights(): Promise<Array<{ locale: Locale; slug: string; group_id: string; updated_at: string }>> {
+export async function getAllPublishedInsights(): Promise<Array<{ locale: Locale; slug: string; group_id: string; updated_at: string; source_insight_id?: string | null }>> {
   const supabase = getSupabase();
   if (!supabase) return [];
-  const { data } = await supabase
-    .from('insights')
-    .select('locale,slug,group_id,updated_at')
-    .eq('status', 'PUBLISHED')
-    .lte('publish_at', new Date().toISOString());
-  return (data as Array<{ locale: Locale; slug: string; group_id: string; updated_at: string }> | null) ?? [];
+  const query = (columns: string) => supabase.from('insights').select(columns).eq('status', 'PUBLISHED').lte('publish_at', new Date().toISOString());
+  type Row = { locale: Locale; slug: string; group_id: string; updated_at: string; source_insight_id?: string | null };
+  const v15 = await query('locale,slug,group_id,updated_at,source_insight_id');
+  if (!v15.error) return (v15.data as unknown as Row[] | null) ?? [];
+  const legacy = await query('locale,slug,group_id,updated_at');
+  return (legacy.data as unknown as Row[] | null) ?? [];
 }
 
 export function formatInsightDate(iso: string | null, locale: Locale): string {

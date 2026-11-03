@@ -11,7 +11,8 @@ import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { SERVICE_SLUGS } from '@/lib/serviceSlugs';
 import { absoluteLocalizedUrl, absoluteUrl, HREFLANG } from '@/lib/domains';
-import { articleSchema, breadcrumbSchema, getRequestContext, jsonLdString } from '@/lib/seo';
+import { articleSchema, breadcrumbSchema, getRequestContext, jsonLdString, OG_LOCALES } from '@/lib/seo';
+import { insightLocalePaths, insightXDefault } from '@/lib/insightAlternates';
 import {
   categoryName,
   formatInsightDate,
@@ -55,10 +56,16 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   const alternates = preview ? [] : await getInsightAlternates(article.group_id);
   const languages: Record<string, string> = {};
   for (const alt of alternates) languages[HREFLANG[alt.locale]] = absoluteLocalizedUrl(ctx.host, alt.locale, `/insights/${alt.slug}`);
+  if (alternates.length) {
+    const xLocale = insightXDefault(alternates, ctx.locale);
+    const xAlt = alternates.find((alt) => alt.locale === xLocale);
+    languages['x-default'] = xAlt ? absoluteLocalizedUrl(ctx.host, xAlt.locale, `/insights/${xAlt.slug}`) : canonical;
+  }
   const title = article.seo_title || `${article.title} | Yoca`;
   const description = article.meta_description || article.excerpt;
   const fallbackOg = categoryOgImage(article.category_key);
   const ogImage = article.og_image || article.cover_url || absoluteUrl(ctx.host, fallbackOg ?? '/brand/og-default.png');
+  const ogImageUrl = ogImage.startsWith('http') ? ogImage : absoluteUrl(ctx.host, ogImage);
   return {
     title,
     description,
@@ -69,11 +76,14 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
       title: article.og_title || title,
       description: article.og_description || description,
       url: canonical,
-      images: [{ url: ogImage.startsWith('http') ? ogImage : absoluteUrl(ctx.host, ogImage) }],
+      siteName: 'Yoca',
+      locale: OG_LOCALES[ctx.locale],
+      alternateLocale: alternates.filter((alt) => alt.locale !== ctx.locale).map((alt) => OG_LOCALES[alt.locale]),
+      images: [{ url: ogImageUrl, alt: article.cover_alt || article.title }],
       publishedTime: article.publish_at ?? undefined,
       modifiedTime: article.updated_at,
     },
-    twitter: { card: 'summary_large_image', title, description },
+    twitter: { card: 'summary_large_image', title: article.og_title || title, description: article.og_description || description, images: [ogImageUrl] },
   };
 }
 
@@ -84,7 +94,13 @@ export default async function InsightPage({ params, searchParams }: PageProps) {
   const { article, preview } = await load(ctx.locale, params.slug, searchParams);
   if (!article) notFound();
 
-  const [categories, related] = await Promise.all([getInsightCategories(), preview ? Promise.resolve([]) : getRelatedInsights(article)]);
+  const [categories, related, alternates] = await Promise.all([
+    getInsightCategories(),
+    preview ? Promise.resolve([]) : getRelatedInsights(article),
+    preview ? Promise.resolve([]) : getInsightAlternates(article.group_id),
+  ]);
+  // Language menu: the same article in each language, or that language's Insights index.
+  const localePaths = insightLocalePaths(alternates, { locale: ctx.locale, slug: article.slug });
   const category = categoryName(categories, article.category_key, ctx.locale);
   const serviceIndex = article.related_service ? (SERVICE_SLUGS as readonly string[]).indexOf(article.related_service) : -1;
   const service = serviceIndex >= 0 ? t.services.items[serviceIndex] : null;
@@ -131,7 +147,7 @@ export default async function InsightPage({ params, searchParams }: PageProps) {
           ),
         }}
       />
-      <SiteHeader t={t} path={`/insights/${article.slug}`} />
+      <SiteHeader t={t} path={`/insights/${article.slug}`} localePaths={localePaths} />
       <main id="main">
         {preview && (
           <p className="relative z-[8] bg-yellow-300 px-4 py-2 text-center text-[13px] font-bold text-black">

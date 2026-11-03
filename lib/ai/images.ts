@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import { getSupabaseServiceRole } from '@/lib/supabase';
 import { OpenAIError } from '@/lib/ai/openai';
+import { applyLogo } from '@/lib/ai/logo';
 
 /**
  * Yoca — Insights images (server only).
@@ -16,6 +18,11 @@ import { OpenAIError } from '@/lib/ai/openai';
  *  - AI images are illustrations. They are never presented as client work,
  *    team photos or evidence; titles are added later with real typography and
  *    the logo is never drawn by the model.
+ *  - Branding: AI images (generated, alternative, edited) and crops of them get
+ *    the real Yoca logo bottom-right (lib/ai/logo.ts). The logo-free original
+ *    is kept next to it as "<id>.master.png"; edits and crops start from that
+ *    master and the logo is added again at the end, so it is never cropped
+ *    away or redrawn by the model.
  */
 
 export const DRAFT_BUCKET = 'insight-drafts';
@@ -67,19 +74,45 @@ export interface ImageRecordInput {
   aiRunId?: string | null;
   createdBy: string;
   mime: string;
+  /** Add the Yoca logo (and keep a logo-free master). */
+  brand?: boolean;
 }
 
 const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
+/** "<folder>/<id>.png" → "<folder>/<id>.master.png" (the logo-free original). Pure. */
+export function masterPath(path: string): string {
+  return path.replace(/\.(png|jpg|webp)$/, '') + '.master.png';
+}
+
 /** Store bytes in the private bucket and record the image. Throws without side effects on the article. */
-export async function storeDraftImage(bytes: Buffer, input: ImageRecordInput): Promise<{ id: string; path: string }> {
+export async function storeDraftImage(bytes: Buffer, input: ImageRecordInput): Promise<{ id: string; path: string; logo: boolean | null }> {
   const supabase = storage();
-  const ext = EXT[input.mime];
-  if (!ext) throw new OpenAIError('Desteklenmeyen görsel türü (PNG, JPEG veya WebP).', 415, 'bad_request');
+  if (!EXT[input.mime]) throw new OpenAIError('Desteklenmeyen görsel türü (PNG, JPEG veya WebP).', 415, 'bad_request');
   const folder = input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : 'unassigned';
   const id = randomUUID();
-  const path = `${folder}/${id}.${ext}`;
-  const up = await supabase.storage.from(DRAFT_BUCKET).upload(path, bytes, { contentType: input.mime, upsert: false });
+
+  let mainBytes = bytes;
+  let mainMime = input.mime;
+  let logo: boolean | null = null;
+  if (input.brand) {
+    // Keep the clean original, then brand the copy that is shown and published.
+    const master = await sharp(bytes, { failOn: 'none' }).png().toBuffer();
+    const mUp = await supabase.storage.from(DRAFT_BUCKET).upload(`${folder}/${id}.master.png`, master, { contentType: 'image/png', upsert: false });
+    if (mUp.error) throw new OpenAIError(`Görsel depoya kaydedilemedi: ${mUp.error.message}`, 500, 'server');
+    try {
+      mainBytes = (await applyLogo(master)).bytes;
+      mainMime = 'image/png';
+      logo = true;
+    } catch (error) {
+      console.error('[images] logo could not be applied:', (error as Error).message);
+      mainBytes = master;
+      mainMime = 'image/png';
+      logo = false;
+    }
+  }
+  const path = `${folder}/${id}.${EXT[mainMime]}`;
+  const up = await supabase.storage.from(DRAFT_BUCKET).upload(path, mainBytes, { contentType: mainMime, upsert: false });
   if (up.error) throw new OpenAIError(`Görsel depoya kaydedilemedi: ${up.error.message}`, 500, 'server');
   const { error } = await supabase.from('insight_images').insert({
     id,
@@ -102,19 +135,33 @@ export async function storeDraftImage(bytes: Buffer, input: ImageRecordInput): P
     created_by: input.createdBy,
   });
   if (error) throw new OpenAIError(`Görsel kaydı oluşturulamadı: ${error.message} (v14 SQL çalıştırıldı mı?)`, 500, 'server');
-  return { id, path };
+  return { id, path, logo };
 }
 
-export async function readDraftImage(id: string): Promise<{ bytes: Buffer; mime: string; row: Record<string, unknown> }> {
+/**
+ * Read a stored image. With { master: true } the logo-free original is
+ * returned when it exists (AI images created after the logo change); older
+ * images and uploads have no master and their stored file is returned.
+ */
+export async function readDraftImage(id: string, opts: { master?: boolean } = {}): Promise<{ bytes: Buffer; mime: string; row: Record<string, unknown>; fromMaster: boolean }> {
   const supabase = storage();
   const { data: row } = await supabase.from('insight_images').select('*').eq('id', id).maybeSingle();
   if (!row) throw new OpenAIError('Görsel bulunamadı.', 404, 'bad_request');
   const r = row as { bucket: string; path: string };
+  if (opts.master) {
+    const m = await supabase.storage.from(r.bucket).download(masterPath(r.path));
+    if (!m.error && m.data) return { bytes: Buffer.from(await m.data.arrayBuffer()), mime: 'image/png', row: row as Record<string, unknown>, fromMaster: true };
+  }
   const dl = await supabase.storage.from(r.bucket).download(r.path);
   if (dl.error || !dl.data) throw new OpenAIError('Görsel okunamadı.', 500, 'server');
   const bytes = Buffer.from(await dl.data.arrayBuffer());
   const mime = r.path.endsWith('.png') ? 'image/png' : r.path.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
-  return { bytes, mime, row: row as Record<string, unknown> };
+  return { bytes, mime, row: row as Record<string, unknown>, fromMaster: false };
+}
+
+/** AI-made images carry the logo; so do crops made from them (the caller passes the source row). Pure. */
+export function shouldBrand(source: { origin?: unknown }): boolean {
+  return source.origin === 'ai';
 }
 
 /** PNG/JPEG/WebP dimensions from the header bytes (no dependency). Pure. */
@@ -143,38 +190,13 @@ export function imageSize(bytes: Buffer): { width: number; height: number; mime:
   return null;
 }
 
-// ── Server-side crops (sharp, only if installed) ─────────────────
-
-type SharpChain = { resize: (w: number, h: number, o: { fit: string; position: string }) => SharpChain; png: () => SharpChain; toBuffer: () => Promise<Buffer> };
-type SharpFactory = (input: Buffer) => SharpChain;
-
-declare const __non_webpack_require__: NodeRequire | undefined;
-
-/**
- * sharp is NOT a dependency of this project (package.json). If it is present
- * at runtime it is used; otherwise null and the admin UI falls back to the
- * browser (canvas) crop. Under webpack (Next) __non_webpack_require__ is the
- * plain Node require, so the bundler neither resolves nor stubs it (a
- * createRequire() call was compiled to undefined); outside webpack (tests)
- * the module-scope require is used.
- */
-export function loadSharp(): SharpFactory | null {
-  try {
-    // eslint-disable-next-line no-eval
-    const req: NodeRequire = typeof __non_webpack_require__ === 'function' ? __non_webpack_require__ : (eval('require') as NodeRequire);
-    const mod = req('sharp') as SharpFactory | { default: SharpFactory };
-    return typeof mod === 'function' ? mod : mod.default;
-  } catch {
-    return null;
-  }
-}
+// ── Server-side crops (sharp) ───────────────────────────────────
 
 export const CROP_SIZES: Record<string, { w: number; h: number }> = { '1200x630': { w: 1200, h: 630 }, '1080x1080': { w: 1080, h: 1080 } };
 
-/** Centre crop to an exact size; null when sharp is unavailable. */
+/** Centre crop to an exact size (PNG). */
 export async function serverCrop(bytes: Buffer, key: string): Promise<Buffer | null> {
   const size = CROP_SIZES[key];
-  const sharp = loadSharp();
-  if (!size || !sharp) return null;
-  return sharp(bytes).resize(size.w, size.h, { fit: 'cover', position: 'centre' }).png().toBuffer();
+  if (!size) return null;
+  return sharp(bytes, { failOn: 'none' }).resize(size.w, size.h, { fit: 'cover', position: 'centre' }).png().toBuffer();
 }

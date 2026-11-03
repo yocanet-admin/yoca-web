@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { Locale } from '@/types';
-import { localizePath, LOCALES } from '@/lib/domains';
+import { HREFLANG, localizePath, LOCALES } from '@/lib/domains';
 import { DUR, EASE_YOCA } from '@/lib/motion';
 
 /**
@@ -18,6 +18,8 @@ interface LanguageMenuProps {
   current: Locale;
   /** Logical path without the locale prefix, e.g. "/work". */
   path: string;
+  /** Per-language path when it differs (e.g. an Insight's slug in each language). */
+  localePaths?: Partial<Record<Locale, string>>;
   ariaLabel: string;
 }
 
@@ -28,7 +30,7 @@ const NATIVE: Record<Locale, { code: string; name: string }> = {
   ar: { code: 'AR', name: 'العربية' },
 };
 
-export default function LanguageMenu({ current, path, ariaLabel }: LanguageMenuProps) {
+export default function LanguageMenu({ current, path, localePaths, ariaLabel }: LanguageMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
@@ -90,8 +92,8 @@ export default function LanguageMenu({ current, path, ariaLabel }: LanguageMenuP
                 return (
                   <li key={locale}>
                     <a
-                      href={localizePath(locale, path)}
-                      hrefLang={locale}
+                      href={localizePath(locale, localePaths?.[locale] ?? path)}
+                      hrefLang={HREFLANG[locale]}
                       lang={locale}
                       dir={locale === 'ar' ? 'rtl' : 'ltr'}
                       aria-current={isActive ? 'true' : undefined}

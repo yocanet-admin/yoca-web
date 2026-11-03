@@ -119,7 +119,7 @@ export function mockStructured(schemaName: string, input: string): unknown {
     case 'seo_pack':
       return { seoTitle: 'Mock SEO', metaDescription: 'Mock meta', titleOptions: ['A', 'B', 'C', 'D', 'E'], keywords: ['mock'], internalLinks: [{ path: '/contact', anchor: 'iletişim', why: 'mock' }] };
     case 'translation':
-      return { title: 'Mock translation', excerpt: 'Mock excerpt', body: 'Mock body', seoTitle: 'Mock', metaDescription: 'Mock', slug: 'mock-translation' };
+      return { title: 'Mock translation', excerpt: 'Mock excerpt', body: 'Mock body', seoTitle: 'Mock', metaDescription: 'Mock', ogTitle: '', ogDescription: '', faq: [], tags: [], coverAlt: '', coverCaption: '', slug: 'mock-translation' };
     case 'rewrite':
       return { text: 'Mock yeniden yazım.' };
     case 'cover_brief':

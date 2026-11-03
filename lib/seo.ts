@@ -29,7 +29,7 @@ export function getRequestContext(): RequestSeoContext {
   return { locale, host, base };
 }
 
-const OG_LOCALES: Record<Locale, string> = {
+export const OG_LOCALES: Record<Locale, string> = {
   en: 'en_US',
   tr: 'tr_TR',
   az: 'az_AZ',

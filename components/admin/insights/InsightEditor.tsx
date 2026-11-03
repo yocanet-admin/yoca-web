@@ -18,6 +18,8 @@ import {
 } from '@/lib/insightsAdmin';
 import { readingMinutes } from '@/lib/markdown';
 import type { ArticleDraft, Translation } from '@/lib/ai/schemas';
+import { sourceFingerprint, uniqueSlug, asciiSlug, type TranslatableFields } from '@/lib/ai/translateHelpers';
+import type { SiblingInfo } from '@/components/admin/insights/MultilangPanel';
 import type { InsightCategoryRow, InsightRow, InsightSource, Locale } from '@/types';
 import StudioPanel from '@/components/admin/insights/StudioPanel';
 import PreviewModal from '@/components/admin/insights/PreviewModal';
@@ -33,6 +35,11 @@ import type { StudioImage } from '@/components/admin/insights/ImageStudio';
  * Saving checks updated_at so a stale tab cannot silently overwrite newer
  * text; unsaved edits are also kept in this browser until saved.
  * Publishing and scheduling are separate explicit buttons (publish route).
+ * Languages (v15): a source article creates every other language from the
+ * studio ("Diller"); each translation remembers its source and a fingerprint
+ * of the source text, so a changed source shows "kaynak değişti". A
+ * translation needs "Dil kontrolü yapıldı" before it can be published;
+ * "Tüm dilleri yayınla" publishes the source and its checked translations.
  */
 
 type RevisionRow = { id: string; created_at: string; reason: string | null; title: string; excerpt: string; body_md: string; kind?: string | null; created_by?: string | null };
@@ -42,6 +49,12 @@ const localKey = (id: string) => `yoca-insight-unsaved:${id}`;
 
 const SERVICES = ['brand-strategy-identity', 'web-digital-experiences', 'growth-performance', 'creative-production', 'ai-automation', 'digital-product-development'];
 const PRODUCTS = ['yocaserve', 'wonkick', 'yocastudio', 'demo-hub', 'labs'];
+const SIBLING_COLUMNS = 'id,locale,title,status,source_insight_id,source_hash,language_reviewed,updated_at';
+const SIBLING_COLUMNS_LEGACY = 'id,locale,title,status,updated_at';
+const translatable = (r: Pick<EditableInsight, keyof TranslatableFields>): TranslatableFields => ({
+  title: r.title, excerpt: r.excerpt, body_md: r.body_md, seo_title: r.seo_title, meta_description: r.meta_description,
+  og_title: r.og_title, og_description: r.og_description, faq: r.faq ?? [], tags: r.tags ?? [], cover_alt: r.cover_alt, cover_caption: r.cover_caption,
+});
 
 interface Props {
   id: string; // 'new' or uuid
@@ -52,7 +65,10 @@ export default function InsightEditor({ id }: Props) {
   const router = useRouter();
   const [row, setRow] = useState<EditableInsight | null>(null);
   const [categories, setCategories] = useState<InsightCategoryRow[]>([]);
-  const [siblings, setSiblings] = useState<Array<Pick<InsightRow, 'id' | 'locale' | 'title' | 'status'>>>([]);
+  const [siblings, setSiblings] = useState<Array<SiblingInfo & { updated_at?: string }>>([]);
+  // v15: fingerprint of this article's text (source view) / of its source (translation view).
+  const [ownFingerprint, setOwnFingerprint] = useState<string | null>(null);
+  const [sourceState, setSourceState] = useState<{ id: string; locale: Locale; title: string; fingerprint: string } | null>(null);
   const [revisions, setRevisions] = useState<RevisionRow[]>([]);
   const [loadedUpdatedAt, setLoadedUpdatedAt] = useState<string | null>(null);
   const [images, setImages] = useState<StudioImage[]>([]);
@@ -102,13 +118,34 @@ export default function InsightEditor({ id }: Props) {
           else window.localStorage.removeItem(localKey(r.id));
         }
       } catch { /* storage unavailable */ }
-      const { data: sib } = await supabase.from('insights').select('id,locale,title,status').eq('group_id', r.group_id);
-      setSiblings((sib as typeof siblings) ?? []);
+      await loadSiblings(r.group_id);
+      if (r.source_insight_id) {
+        const { data: src } = await supabase.from('insights').select('id,locale,title,excerpt,body_md,seo_title,meta_description,og_title,og_description,faq,tags,cover_alt,cover_caption').eq('id', r.source_insight_id).maybeSingle();
+        if (src) {
+          const s = src as EditableInsight & { id: string };
+          setSourceState({ id: s.id, locale: s.locale, title: s.title, fingerprint: await sourceFingerprint(translatable(s)) });
+        }
+      }
       await loadRevisions(r.id);
       await loadImages(r.group_id);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  const loadSiblings = async (groupId: string) => {
+    if (!supabase) return;
+    const v15 = await supabase.from('insights').select(SIBLING_COLUMNS).eq('group_id', groupId);
+    if (!v15.error) { setSiblings((v15.data as unknown as typeof siblings) ?? []); return; }
+    const legacy = await supabase.from('insights').select(SIBLING_COLUMNS_LEGACY).eq('group_id', groupId);
+    setSiblings((legacy.data as unknown as typeof siblings) ?? []);
+  };
+
+  // Source view: fingerprint of the text as it is now, to tell which translations are behind.
+  useEffect(() => {
+    if (!row || row.source_insight_id) return;
+    const t = setTimeout(() => { sourceFingerprint(translatable(row)).then(setOwnFingerprint).catch(() => undefined); }, 400);
+    return () => clearTimeout(t);
+  }, [row]);
 
   const loadRevisions = async (insightId: string) => {
     if (!supabase) return;
@@ -263,22 +300,107 @@ export default function InsightEditor({ id }: Props) {
     setSelection('');
   };
 
-  const createTranslation = async (to: Locale, tr: Translation) => {
-    if (!supabase || !row?.id) return;
-    const base = emptyInsight(to, row.group_id);
-    const payload = toPayload({
-      ...base,
-      title: tr.title, excerpt: tr.excerpt, body_md: tr.body, slug: slugify(tr.slug || tr.title),
-      seo_title: tr.seoTitle, meta_description: tr.metaDescription,
-      category_key: row.category_key, tags: row.tags, author_name: row.author_name, author_role: row.author_role,
-      related_service: row.related_service, related_product: row.related_product, cta_type: row.cta_type,
-      cover_url: row.cover_url, cover_alt: row.cover_alt, sources: row.sources, faq: [],
-      status: 'DRAFT',
-    });
-    const { data, error } = await supabase.from('insights').insert(payload).select('id').single();
-    if (error || !data) { flash(`Çeviri oluşturulamadı: ${error?.message ?? ''}`); return; }
-    flash(`Çeviri taslağı oluşturuldu (${to.toUpperCase()}).`);
-    router.push(`/admin/insights/${(data as { id: string }).id}`);
+  /**
+   * Saves the studio's translations. Per language:
+   *  - no row yet → a new DRAFT in the same group (unique slug in that language);
+   *  - a draft row → snapshot revision, then the fields are replaced;
+   *  - a published/scheduled row → NOT changed; the new text is stored as a
+   *    proposal revision on it.
+   * Returns a note per locale; a note starting with "!" is an error.
+   */
+  const saveTranslations = async (items: Array<{ locale: Locale; translation: Translation }>, fingerprint: string): Promise<Record<string, string>> => {
+    const out: Record<string, string> = {};
+    if (!supabase || !row?.id) return Object.fromEntries(items.map((i) => [i.locale, '!Önce kaynak yazıyı kaydedin.']));
+    const { data: fresh } = await supabase.from('insights').select('id,locale,slug,status,title,excerpt,body_md').eq('group_id', row.group_id);
+    const group = (fresh ?? []) as Array<Pick<InsightRow, 'id' | 'locale' | 'slug' | 'status' | 'title' | 'excerpt' | 'body_md'>>;
+    for (const { locale, translation: t } of items) {
+      const fields = {
+        title: t.title.trim(),
+        excerpt: t.excerpt.trim(),
+        body_md: t.body,
+        seo_title: t.seoTitle.trim() || null,
+        meta_description: t.metaDescription.trim() || null,
+        og_title: t.ogTitle.trim() || null,
+        og_description: t.ogDescription.trim() || null,
+        faq: t.faq.filter((f) => f.q.trim() && f.a.trim()),
+        tags: t.tags.map((x) => x.trim()).filter(Boolean),
+        cover_alt: t.coverAlt.trim() || row.cover_alt,
+        cover_caption: t.coverCaption.trim() || row.cover_caption,
+        source_insight_id: row.id,
+        source_hash: fingerprint,
+        language_reviewed: false,
+        language_reviewed_at: null,
+        language_reviewed_by: null,
+        reading_minutes: readingMinutes(t.body),
+      };
+      const existing = group.find((g) => g.locale === locale && g.id !== row.id);
+      if (existing && (existing.status === 'PUBLISHED' || existing.status === 'SCHEDULED')) {
+        const ok = await saveRevision(existing.id, { title: fields.title, excerpt: fields.excerpt, body_md: fields.body_md }, 'Çok dilli çeviri önerisi (yayındaki metin değiştirilmedi)', 'ai_proposal');
+        out[locale] = ok ? 'Bu dil yayında; yayındaki metin değiştirilmedi. Yeni çeviri o yazının sürüm geçmişine öneri olarak kaydedildi.' : '!Yayındaki çeviriye öneri kaydedilemedi.';
+        continue;
+      }
+      if (existing) {
+        await saveRevision(existing.id, existing, 'Çok dilli güncelleme öncesi');
+        const { error } = await supabase.from('insights').update(fields).eq('id', existing.id);
+        out[locale] = error ? `!Kaydedilemedi: ${error.message}` : 'Mevcut taslak güncellendi (önceki metin sürüm geçmişinde).';
+        continue;
+      }
+      const base = asciiSlug(t.slug) || asciiSlug(t.title) || `${slugify(row.slug || row.title)}-${locale}`;
+      const { data: taken } = await supabase.from('insights').select('slug').eq('locale', locale).like('slug', `${base}%`);
+      let slug = uniqueSlug(base, ((taken ?? []) as Array<{ slug: string }>).map((x) => x.slug), `${slugify(row.slug)}-${locale}`);
+      const payload = () => toPayload({
+        ...emptyInsight(locale, row.group_id),
+        ...fields,
+        slug,
+        category_key: row.category_key,
+        author_name: row.author_name,
+        author_role: row.author_role,
+        related_service: row.related_service,
+        related_product: row.related_product,
+        cta_type: row.cta_type,
+        cover_url: row.cover_url,
+        og_image: row.og_image,
+        sources: row.sources,
+        status: 'DRAFT',
+      });
+      let ins = await supabase.from('insights').insert(payload()).select('id').single();
+      if (ins.error?.code === '23505') {
+        slug = `${base}-${Date.now().toString(36)}`;
+        ins = await supabase.from('insights').insert(payload()).select('id').single();
+      }
+      out[locale] = ins.error ? `!Kaydedilemedi: ${ins.error.message}` : `Yeni taslak oluşturuldu (/${locale}/insights/${slug}).`;
+    }
+    await loadSiblings(row.group_id);
+    return out;
+  };
+
+  /** Publishes the source and every translation with "Dil kontrolü yapıldı"; skips the rest. */
+  const publishAll = async () => {
+    if (!row?.id || !supabase) return;
+    if (dirty) { flash('Önce kaydedin; yayın kaydedilmiş sürümle yapılır.'); return; }
+    const mine = siblings.filter((s) => s.source_insight_id === row.id);
+    const ready = mine.filter((s) => s.language_reviewed && s.status !== 'PUBLISHED');
+    const skipped = mine.filter((s) => !s.language_reviewed && s.status !== 'PUBLISHED');
+    const list = [...(row.status !== 'PUBLISHED' ? [{ id: row.id, locale: row.locale, updated_at: loadedUpdatedAt ?? undefined }] : []), ...ready.map((s) => ({ id: s.id, locale: s.locale, updated_at: s.updated_at }))];
+    if (!list.length) { flash(skipped.length ? `Yayınlanacak dil yok: ${skipped.map((s) => s.locale.toUpperCase()).join(', ')} için dil kontrolü işaretlenmedi.` : 'Tüm diller zaten yayında.'); return; }
+    if (!window.confirm(`Şimdi yayınlanacak: ${list.map((l) => l.locale.toUpperCase()).join(', ')}.${skipped.length ? ` Dil kontrolü yapılmadığı için atlanacak: ${skipped.map((s) => s.locale.toUpperCase()).join(', ')}.` : ''} Devam edilsin mi?`)) return;
+    setPublishing(true);
+    const results: string[] = [];
+    for (const item of list) {
+      const r = await adminFetch('/api/admin/insights/publish', { json: { insightId: item.id, action: 'publish', expectedUpdatedAt: item.updated_at } });
+      results.push(`${item.locale.toUpperCase()}: ${r.ok ? 'yayınlandı' : r.error ?? 'başarısız'}`);
+    }
+    setPublishing(false);
+    const { data } = await supabase.from('insights').select('*').eq('id', row.id).single();
+    if (data) { setRow(data as InsightRow); setLoadedUpdatedAt((data as InsightRow).updated_at); setDirty(false); }
+    await loadSiblings(row.group_id);
+    await loadImages(row.group_id);
+    setMessage(results.join(' · '));
+  };
+
+  const setReviewed = async (checked: boolean) => {
+    const { data } = supabase ? await supabase.auth.getSession() : { data: null };
+    update({ language_reviewed: checked, language_reviewed_at: checked ? new Date().toISOString() : null, language_reviewed_by: checked ? data?.session?.user.email ?? null : null });
   };
 
   const restore = async (rev: RevisionRow) => {
@@ -321,6 +443,12 @@ export default function InsightEditor({ id }: Props) {
           <button type="button" className="admin-btn !px-2 !py-0.5 !text-[12px]" onClick={() => { try { window.localStorage.removeItem(localKey(row.id as string)); } catch { /* ignore */ } setRestorable(null); }}>Sil</button>
         </div>
       )}
+      {row.source_insight_id && sourceState && row.source_hash && sourceState.fingerprint !== row.source_hash && (
+        <div className="flex flex-wrap items-center gap-2 rounded-sm border border-yellow-400/40 bg-yellow-400/10 px-4 py-2 text-[13px] text-yellow-200">
+          Kaynak yazı ({sourceState.locale.toUpperCase()}) bu çeviri yapıldıktan sonra değişti; bu çeviri eski olabilir.
+          <a href={`/admin/insights/${sourceState.id}`} className="admin-btn !px-2 !py-0.5 !text-[12px]">Kaynağı aç → Diller ile yeniden oluştur</a>
+        </div>
+      )}
       {previewOpen && (
         <PreviewModal title={row.title} excerpt={row.excerpt} body={row.body_md} locale={row.locale} coverUrl={selectedCover?.url ?? row.cover_url} coverAlt={selectedCover?.alt_text ?? row.cover_alt ?? ''} imageUrls={imageUrls} onClose={() => setPreviewOpen(false)} />
       )}
@@ -337,11 +465,11 @@ export default function InsightEditor({ id }: Props) {
           {tab === 'content' && (
             <div className="admin-card grid gap-4">
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_140px]">
-                <label className={label}>Başlık<input value={row.title} onChange={(e) => { update({ title: e.target.value, ...(slugTouched ? {} : { slug: slugify(e.target.value) }) }); }} className={`${field} !text-[18px] !font-bold`} /></label>
+                <label className={label}>Başlık<input value={row.title} onChange={(e) => { update({ title: e.target.value, ...(slugTouched ? {} : { slug: slugify(e.target.value) }) }); }} dir={row.locale === 'ar' ? 'rtl' : 'ltr'} className={`${field} !text-[18px] !font-bold`} /></label>
                 <label className={label}>Dil<select value={row.locale} onChange={(e) => update({ locale: e.target.value as Locale })} className={field}>{INSIGHT_LOCALES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</select></label>
               </div>
               <label className={label}>Slug (URL)<input value={row.slug} onChange={(e) => { setSlugTouched(true); update({ slug: e.target.value }); }} onBlur={() => update({ slug: slugify(row.slug || row.title) })} className={field} /></label>
-              <label className={label}>Özet (giriş)<textarea value={row.excerpt} onChange={(e) => update({ excerpt: e.target.value })} rows={2} className={field} /></label>
+              <label className={label}>Özet (giriş)<textarea value={row.excerpt} onChange={(e) => update({ excerpt: e.target.value })} rows={2} dir={row.locale === 'ar' ? 'rtl' : 'ltr'} className={field} /></label>
               <label className={label}>
                 <span className="flex items-center justify-between"><span>Gövde (Markdown: ## başlık, ### alt başlık, listeler, **kalın**, *italik*, &gt; alıntı, [bağlantı](url), ![alt](görsel) *başlık*, ---)</span><span className="text-[11px] text-subtle">{words} kelime · ~{readingMinutes(row.body_md)} dk</span></span>
                 <textarea
@@ -402,6 +530,13 @@ export default function InsightEditor({ id }: Props) {
                     <label className={label}>Zamanla (yerel saat)<input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className={field} /></label>
                     <button type="button" className="admin-btn" disabled={publishing || dirty || !scheduleAt} onClick={() => publishAction('schedule')}>Zamanla</button>
                     {(row.status === 'PUBLISHED' || row.status === 'SCHEDULED') && <button type="button" className="admin-btn" disabled={publishing || dirty} onClick={() => publishAction('unpublish')}>Yayından kaldır</button>}
+                    {!row.source_insight_id && siblings.some((s) => s.source_insight_id === row.id) && <button type="button" className="admin-btn" disabled={publishing || dirty} onClick={publishAll} title="Kaynak yazıyı ve dil kontrolü işaretlenmiş çevirileri yayınlar">Tüm dilleri yayınla</button>}
+                  </div>
+                )}
+                {row.source_insight_id && (
+                  <div className="grid gap-1 border border-line p-3">
+                    <label className="flex items-center gap-2 text-[13px] font-semibold text-white"><input type="checkbox" checked={Boolean(row.language_reviewed)} onChange={(e) => setReviewed(e.target.checked)} /> Dil kontrolü yapıldı</label>
+                    <p className="text-[12px] text-subtle">Bu yazı {sourceState ? `${sourceState.locale.toUpperCase()} kaynaktan` : 'kaynak yazıdan'} yapay zekâ ile çevrildi. {INSIGHT_LOCALES.find((l) => l.code === row.locale)?.label} bilen biri metni okuyup işaretlemeden (ve kaydetmeden) yayınlanamaz.{row.language_reviewed && row.language_reviewed_by ? ` İşaretleyen: ${row.language_reviewed_by}${row.language_reviewed_at ? ` · ${new Date(row.language_reviewed_at).toLocaleString('tr-TR')}` : ''}.` : ''}</p>
                   </div>
                 )}
                 <p className="text-[12px] text-subtle">Yayın kaydedilmiş sürümle yapılır; kullanılan taslak görseller o anda herkese açık depoya kopyalanır. Metinde [KAYNAK GEREKLİ] kaldıysa yayın engellenir. Zamanlanmış içerik saatinden önce görünmez. Yapay zekâ işlemleri hiçbir zaman yayınlamaz.</p>
@@ -417,14 +552,19 @@ export default function InsightEditor({ id }: Props) {
                 <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
                   {INSIGHT_LOCALES.map((l) => {
                     const s = siblings.find((x) => x.locale === l.code) ?? (l.code === row.locale && row.id ? { id: row.id, locale: row.locale, title: row.title, status: row.status } : null);
+                    const sib = s as Partial<SiblingInfo>;
+                    const stale = !row.source_insight_id && sib.source_insight_id === row.id && ownFingerprint && sib.source_hash ? sib.source_hash !== ownFingerprint : false;
+                    const fresh = !row.source_insight_id && sib.source_insight_id === row.id && ownFingerprint && sib.source_hash === ownFingerprint;
                     return s ? (
-                      <a key={l.code} href={`/admin/insights/${s.id}`} className="border border-yoca-green/50 px-2.5 py-1 font-bold text-yoca-green">{l.code.toUpperCase()} ✓ · {STATUS_LABELS[s.status]}</a>
+                      <a key={l.code} href={`/admin/insights/${s.id}`} className={`border px-2.5 py-1 font-bold ${stale ? 'border-yellow-400/60 text-yellow-300' : 'border-yoca-green/50 text-yoca-green'}`}>
+                        {l.code.toUpperCase()} ✓ · {STATUS_LABELS[s.status]}{stale ? ' · kaynak değişti' : fresh ? ' · güncel' : ''}{sib.source_insight_id === row.id ? (sib.language_reviewed ? ' · dil kontrolü ✓' : ' · dil kontrolü bekliyor') : ''}
+                      </a>
                     ) : (
                       <span key={l.code} className="border border-line px-2.5 py-1 text-subtle">{l.code.toUpperCase()} —</span>
                     );
                   })}
                 </div>
-                <p className="mt-2 text-[12px] text-subtle">Yeni çeviri için AI panelindeki “Çevir” sekmesini kullanın; çeviri taslak olarak açılır.</p>
+                <p className="mt-2 text-[12px] text-subtle">{row.source_insight_id ? 'Bu yazı bir çeviri; diğer diller kaynak yazıdan oluşturulur.' : 'Diğer dilleri İçerik stüdyosundaki “Diller” adımında “Tüm dilleri oluştur” ile hazırlayın; kaydedilenler taslaktır. “kaynak değişti” yazan çeviri, bu metnin eski hâlinden yapılmıştır.'}</p>
               </div>
             </div>
           )}
@@ -503,7 +643,9 @@ export default function InsightEditor({ id }: Props) {
               onReplaceBody={replaceBody}
               onApplySeo={(seo) => update(seo)}
               onApplyFaq={(faq) => update({ faq })}
-              onCreateTranslation={createTranslation}
+              dirty={dirty}
+              siblings={siblings.filter((x) => x.id !== row.id)}
+              onSaveTranslations={saveTranslations}
               onSetTitle={(title) => update({ title, ...(slugTouched ? {} : { slug: slugify(title) }) })}
               onInsertImage={insertAtCursor}
               onOpenPreview={() => setPreviewOpen(true)}

@@ -19,10 +19,11 @@ interface MobileMenuProps {
   secondaryCta?: { title: string; url: string };
   locale: Locale;
   path: string;
+  localePaths?: Partial<Record<Locale, string>>;
   languageLabel: string;
 }
 
-export default function MobileMenu({ items, cta, secondaryCta, locale, path, languageLabel }: MobileMenuProps) {
+export default function MobileMenu({ items, cta, secondaryCta, locale, path, localePaths, languageLabel }: MobileMenuProps) {
   const [open, setOpen] = useState(false);
 
   // Lock body scroll while the panel is open.
@@ -109,7 +110,7 @@ export default function MobileMenu({ items, cta, secondaryCta, locale, path, lan
               </ul>
 
               <div className="grid gap-4">
-                <LanguageSwitcher current={locale} path={path} ariaLabel={languageLabel} />
+                <LanguageSwitcher current={locale} path={path} localePaths={localePaths} ariaLabel={languageLabel} />
                 {secondaryCta && (
                   <Link
                     href={secondaryCta.url}

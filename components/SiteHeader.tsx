@@ -1,3 +1,4 @@
+import type { Locale } from '@/types';
 /* eslint-disable @next/next/no-img-element */
 import Link from 'next/link';
 import { fetchMenu } from '@/lib/supabase';
@@ -27,6 +28,11 @@ interface SiteHeaderProps {
   t: Dict;
   /** Current logical path (no locale prefix). */
   path?: string;
+  /**
+   * Per-language target when the page's path differs by language (an Insight
+   * has a different slug in each language). Missing locales use `path`.
+   */
+  localePaths?: Partial<Record<Locale, string>>;
 }
 
 /** Map known internal routes to their localized nav labels. */
@@ -47,7 +53,7 @@ function localizedTitle(url: string, fallback: string, t: Dict): string {
 /** Routes that live in the utility group / logo, never in the main nav. */
 const NON_NAV_URLS = new Set(['/', '/checkup', '/contact']);
 
-export default async function SiteHeader({ t, path = '/' }: SiteHeaderProps) {
+export default async function SiteHeader({ t, path = '/', localePaths }: SiteHeaderProps) {
   const ctx = getRequestContext();
   const base = ctx.base;
   const withBase = (url: string) => (url === '/' ? base : `${base}${url}`);
@@ -144,7 +150,7 @@ export default async function SiteHeader({ t, path = '/' }: SiteHeaderProps) {
             <span className="sr-only min-[1280px]:hidden">{t.nav.checkup}</span>
           </Link>
           <div className="max-[359px]:hidden">
-            <LanguageMenu current={ctx.locale} path={path} ariaLabel={t.common.languageSwitcher} />
+            <LanguageMenu current={ctx.locale} path={path} localePaths={localePaths} ariaLabel={t.common.languageSwitcher} />
           </div>
           <Link
             href={`${base}/contact`}
@@ -159,6 +165,7 @@ export default async function SiteHeader({ t, path = '/' }: SiteHeaderProps) {
               secondaryCta={{ title: t.nav.checkup, url: `${base}/checkup` }}
               locale={ctx.locale}
               path={path}
+              localePaths={localePaths}
               languageLabel={t.common.languageSwitcher}
             />
           </div>
