@@ -60,6 +60,9 @@ const STATUS_STYLE: Record<CaseStudy['kind'], string> = {
 export default function WorkGrid({ studies, base, labels }: WorkGridProps) {
   const [filter, setFilter] = useState<Filter>('all');
   const [hovered, setHovered] = useState<string | null>(null);
+  // Slugs whose hover clip failed to play: keep showing the cover image for them.
+  const [noVideo, setNoVideo] = useState<string[]>([]);
+  const dropVideo = (slug: string) => setNoVideo((list) => (list.includes(slug) ? list : [...list, slug]));
   // Contextual cursor ("View Project ↗") — pointer devices only, inside the grid.
   const gridRef = useRef<HTMLDivElement>(null);
   const cx = useMotionValue(0);
@@ -163,17 +166,27 @@ export default function WorkGrid({ studies, base, labels }: WorkGridProps) {
                         <span className="absolute inset-0 block transition-transform duration-700 ease-out group-hover:scale-[1.03]">
                           <ProjectCover slug={study.slug} name={study.name} sector={study.sector} index={index} priority={featured} />
                         </span>
-                        {hovered === study.slug && (study.videoUrl || media.interaction) && (
+                        {hovered === study.slug && !noVideo.includes(study.slug) && (study.videoUrl || media.interaction) && (
                           <video
-                            src={study.videoUrl ?? media.interaction!.video}
                             poster={media.interaction?.poster}
                             autoPlay
                             muted
                             loop
                             playsInline
                             preload="none"
+                            // If the clip can't play, drop it so the cover image stays visible.
+                            onError={() => dropVideo(study.slug)}
                             className="hover-preview absolute inset-0 h-full w-full object-cover"
-                          />
+                          >
+                            {study.videoUrl ? (
+                              <source src={study.videoUrl} onError={() => dropVideo(study.slug)} />
+                            ) : (
+                              <>
+                                <source src={media.interaction!.video} type="video/webm" />
+                                <source src={media.interaction!.video.replace(/\.webm$/, '.mp4')} type="video/mp4" onError={() => dropVideo(study.slug)} />
+                              </>
+                            )}
+                          </video>
                         )}
                       </span>
                     )}
