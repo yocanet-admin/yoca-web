@@ -166,6 +166,33 @@ export const RewriteSchema = {
   schema: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: str } },
 };
 
+/** House-style pass over a finished draft (minimal edits, same facts). */
+export const PolishSchema = {
+  name: 'polish',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['title', 'excerpt', 'body', 'changes'],
+    properties: { title: str, excerpt: str, body: str, changes: strArr },
+  },
+};
+export interface Polish {
+  title: string;
+  excerpt: string;
+  body: string;
+  changes: string[];
+}
+
+/** What the cover image should show (an object metaphor, never text). */
+export const CoverConceptSchema = {
+  name: 'cover_concept',
+  schema: { type: 'object', additionalProperties: false, required: ['subject', 'alt'], properties: { subject: str, alt: str } },
+};
+export interface CoverConcept {
+  subject: string;
+  alt: string;
+}
+
 // ── Runtime validation (defence in depth) ─────────────────────────
 export function isString(v: unknown, max = 200_000): v is string {
   return typeof v === 'string' && v.length <= max;
@@ -188,4 +215,8 @@ export function validateReview(v: unknown): v is EditorialReview {
 export function validateTranslation(v: unknown): v is Translation {
   const d = v as Partial<Translation>;
   return !!d && isString(d.title, 300) && isString(d.excerpt, 1000) && isString(d.body) && isString(d.seoTitle, 200) && isString(d.metaDescription, 400) && isString(d.slug, 200);
+}
+export function validatePolish(v: unknown): v is Polish {
+  const d = v as Partial<Polish>;
+  return !!d && isString(d.title, 300) && isString(d.excerpt, 1000) && isString(d.body) && isStringArray(d.changes, 40);
 }
