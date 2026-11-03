@@ -7,6 +7,9 @@ import { getAdminClient } from '@/lib/adminClient';
 import type { TrafficReport } from '@/lib/cockpit/vercel';
 import { TokenHelp } from '@/components/admin/cockpit/TokenHelp';
 
+const istanbulDateTime = (iso: string) =>
+  new Date(iso).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
 /**
  * Yoca Admin — Trafik (Vercel Web Analytics).
  * One date-range row scopes every number on the page; previous period for
@@ -36,7 +39,7 @@ const DEVICE: Record<string, string> = { desktop: 'Masaüstü', mobile: 'Mobil',
 export default function AdminTraffic() {
   const [days, setDays] = useState(30);
   // Server-side lead counts for the same UTC range (null = not readable).
-  const [server, setServer] = useState<{ accepted: number | null; dropped: number | null; stored: number | null } | null>(null);
+  const [server, setServer] = useState<{ accepted: number | null; dropped: number | null; stored: number | null; coverageStart: string | null } | null>(null);
   const [metric, setMetric] = useState<'visitors' | 'pageviews'>('visitors');
   const [result, setResult] = useState<Response | null>(null);
   const [busy, setBusy] = useState(true);
@@ -74,7 +77,7 @@ export default function AdminTraffic() {
   useEffect(() => {
     const supabase = getAdminClient();
     if (!supabase) {
-      setServer({ accepted: null, dropped: null, stored: null });
+      setServer({ accepted: null, dropped: null, stored: null, coverageStart: null });
       return;
     }
     let cancelled = false;
@@ -93,8 +96,12 @@ export default function AdminTraffic() {
         count(supabase.from('contact_submissions').select('id', { count: 'exact', head: true }).gte('created_at', sinceUtc).neq('status', 'spam')),
         count(supabase.from('checkup_submissions').select('id', { count: 'exact', head: true }).gte('created_at', sinceUtc).neq('status', 'spam')),
       ]).then(([a, b]) => (a === null || b === null ? null : a + b)),
-    ]).then(([accepted, dropped, stored]) => {
-      if (!cancelled) setServer({ accepted, dropped, stored });
+      // Coverage: server-side counting exists only since the first audit_log entry (v9 SQL).
+      Promise.resolve(supabase.from('audit_log').select('at').order('at', { ascending: true }).limit(1)).then((r) =>
+        r.error ? null : ((r.data?.[0] as { at?: string } | undefined)?.at ?? ''),
+      ),
+    ]).then(([accepted, dropped, stored, coverageStart]) => {
+      if (!cancelled) setServer({ accepted, dropped, stored, coverageStart });
     });
     return () => {
       cancelled = true;
@@ -103,7 +110,15 @@ export default function AdminTraffic() {
 
   const visitors = report?.totals.visitors ?? 0;
   const accepted = server?.accepted ?? null;
-  const rate = accepted !== null && visitors > 0 ? ((accepted / visitors) * 100).toFixed(1) : null;
+  // Coverage of the server count for the selected range:
+  //   full    → counting started before the range began
+  //   partial → counting started inside the range (earlier days are NOT zero, they are unmeasured)
+  //   none    → no audit entries at all / unreadable
+  const coverageStart = server?.coverageStart ?? null;
+  const coverage: 'full' | 'partial' | 'none' =
+    !coverageStart ? 'none' : new Date(coverageStart).getTime() <= new Date(sinceUtc).getTime() ? 'full' : 'partial';
+  const coverageLabel = coverageStart ? istanbulDateTime(coverageStart) : null;
+  const rate = coverage === 'full' && accepted !== null && visitors > 0 ? ((accepted / visitors) * 100).toFixed(1) : null;
   const show = (n: number | null | undefined) => (n === null || n === undefined ? '–' : fmtNumber(n));
 
   return (
@@ -146,11 +161,25 @@ export default function AdminTraffic() {
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatTile label="Ziyaretçi" value={report ? fmtNumber(report.totals.visitors) : null} deltaPct={report ? delta(report.totals.visitors, report.previous.visitors) : null} deltaLabel={`önceki ${days} güne göre`} />
             <StatTile label="Sayfa görüntüleme" value={report ? fmtNumber(report.totals.pageviews) : null} deltaPct={report ? delta(report.totals.pageviews, report.previous.pageviews) : null} deltaLabel={`önceki ${days} güne göre`} />
-            <StatTile label="Kaydedilen başvuru" value={report && server ? show(accepted) : null} hint="Sunucuda kabul edilip kaydedilen (İletişim + Check-Up)" />
+            <StatTile
+              label="Kaydedilen başvuru"
+              value={report && server ? (coverage === 'none' ? '–' : show(accepted)) : null}
+              hint={
+                coverage === 'partial'
+                  ? `Yalnızca ${coverageLabel} sonrası ölçüldü; öncesi bilinmiyor (sıfır değil)`
+                  : coverage === 'none'
+                    ? 'Sunucu sayımı yok (işlem geçmişi boş ya da okunamadı)'
+                    : 'Sunucuda kabul edilip kaydedilen (İletişim + Check-Up)'
+              }
+            />
             <StatTile
               label="Başvuru / ziyaretçi"
               value={report && server ? (rate === null ? '–' : `%${rate}`) : null}
-              hint={`${show(accepted)} başvuru / ${show(visitors)} ziyaretçi`}
+              hint={
+                coverage === 'full'
+                  ? `${show(accepted)} başvuru / ${show(visitors)} ziyaretçi`
+                  : 'Aralığın tamamı ölçülmediği için oran gösterilmiyor'
+              }
             />
           </div>
 
@@ -161,7 +190,19 @@ export default function AdminTraffic() {
             <p>
               <strong className="text-muted">Tanımlar:</strong> “Kaydedilen başvuru” sunucunun veritabanına yazdığı kayıttır (işlem geçmişinden sayılır, sonradan silinse de düşmez). “Tarayıcıda gönderim olayı” formun başarı yanıtı aldığı an Vercel’e giden olaydır; sessizce elenen spam ve tekrar gönderimler de aynı yanıtı aldığı için kaydedilen sayıdan büyük olabilir. Oran, kaydedilen başvurunun benzersiz ziyaretçiye bölümüdür; ziyaretçi sayısı küçükken tek bir başvuru oranı çok oynatır, bu yüzden sayıları yanında gösteriyoruz.
             </p>
-            <p>Gün aralığı UTC’dir (İstanbul’da 03:00’te başlar). İşlem geçmişi v9 SQL’den önceki kayıtları içermez.</p>
+            <p>
+              <strong className="text-muted">Sunucu sayımının başlangıcı:</strong>{' '}
+              {coverageLabel ? `${coverageLabel} (İstanbul) — işlem geçmişindeki ilk kayıt.` : 'işlem geçmişinde kayıt yok.'}{' '}
+              {coverage === 'partial' && 'Seçili aralığın bu tarihten önceki kısmı ölçülmedi; o günler sıfır değil, bilinmiyor. '}
+              Gün aralığı UTC’dir (İstanbul’da 03:00’te başlar).
+            </p>
+            <p>
+              <strong className="text-muted">Sayımın sınırları:</strong> “Kaydedilen başvuru” işlem geçmişindeki (audit_log) İletişim ve
+              Check-Up <em>ekleme</em> olaylarıdır. Başvuru sonradan silinse de olay satırı kalır, sayı düşmez; işlem geçmişinin kendisi
+              silinir ya da temizlenirse sayı da düşer. Şu an otomatik temizleme yok; ileride saklama süresi konursa o süreden eski
+              aralıklar yine “ölçülmedi” sayılmalıdır. SQL editöründen elle ya da toplu eklenen satırlar da olay ürettiği için sayılır.
+              Elenen spam ve tekrar gönderimler ayrı tablodan (spam_log) gelir ve kaydedilen sayıya girmez.
+            </p>
           </div>
 
           <Card
