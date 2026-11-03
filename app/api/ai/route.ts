@@ -3,7 +3,9 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { OpenAIError, MODELS } from '@/lib/ai/openai';
 import {
   contentBrief,
+  coverConcept,
   faqPack,
+  polishDraft,
   generateDirection,
   generateDraft,
   repurpose,
@@ -16,6 +18,7 @@ import {
   type InlineAction,
 } from '@/lib/ai/editorial';
 import { researchTopic } from '@/lib/ai/research';
+import { generateCoverImage, storeCover } from '@/lib/ai/images';
 import { isAllowedAdminEmail } from '@/lib/cockpit/auth';
 
 /**
@@ -46,7 +49,7 @@ function rateLimited(userId: string): boolean {
 }
 
 const LOCALES = new Set(['en', 'tr', 'az', 'ar']);
-const INLINE_ACTIONS: InlineAction[] = ['rewrite', 'shorter', 'natural', 'clearer', 'technical', 'editorial', 'yoca-tone', 'improve-title', 'strengthen-intro', 'add-example', 'remove-repetition', 'section-rewrite', 'expand', 'condense'];
+const INLINE_ACTIONS: InlineAction[] = ['rewrite', 'shorter', 'natural', 'clearer', 'technical', 'editorial', 'yoca-tone', 'improve-title', 'strengthen-intro', 'add-example', 'remove-repetition', 'section-rewrite', 'expand', 'condense', 'house-style'];
 
 interface Payload {
   action: string;
@@ -101,7 +104,7 @@ export async function POST(request: NextRequest) {
   const locale = LOCALES.has(String(payload.locale)) ? String(payload.locale) : 'tr';
   const str = (v: unknown, max = 20_000) => (typeof v === 'string' ? v.slice(0, max) : '');
   const arr = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 20) as string[] : []);
-  const model = action === 'research' ? MODELS.research : MODELS.editorial;
+  const model = action === 'research' ? MODELS.research : action === 'cover' ? process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1' : MODELS.editorial;
 
   try {
     let result: unknown;
@@ -125,8 +128,25 @@ export async function POST(request: NextRequest) {
           research: str(payload.research, 40_000) || undefined,
         };
         if (!brief.topic) return NextResponse.json({ error: 'topic_required' }, { status: 400 });
-        const r = action === 'direction' ? await generateDirection(brief) : await generateDraft(brief);
-        result = r.data; usage = r.usage;
+        if (action === 'direction') {
+          const r = await generateDirection(brief);
+          result = r.data; usage = r.usage;
+          break;
+        }
+        const r = await generateDraft(brief);
+        usage = r.usage;
+        // House-style line edit on every new draft (skip with polish:false). A failed
+        // polish never loses the draft: the unpolished version is returned instead.
+        if (payload.polish !== false) {
+          try {
+            const p = await polishDraft({ title: r.data.title, excerpt: r.data.excerpt, body: r.data.body }, locale);
+            result = { ...r.data, title: p.data.title || r.data.title, excerpt: p.data.excerpt || r.data.excerpt, body: p.data.body || r.data.body, polishChanges: p.data.changes };
+            usage = { input_tokens: (usage.input_tokens ?? 0) + (p.usage.input_tokens ?? 0), output_tokens: (usage.output_tokens ?? 0) + (p.usage.output_tokens ?? 0) };
+          } catch (polishError) {
+            console.error('[ai] polish skipped:', (polishError as Error).message);
+            result = { ...r.data, polishChanges: [] };
+          }
+        } else result = r.data;
         break;
       }
       case 'research': {
@@ -143,6 +163,16 @@ export async function POST(request: NextRequest) {
         if (!selection.trim()) return NextResponse.json({ error: 'selection_required' }, { status: 400 });
         const r = await rewriteText(inline, selection, str(payload.context, 60_000), locale, str(payload.instruction, 500) || undefined);
         result = { text: r.data }; usage = r.usage;
+        break;
+      }
+      case 'cover': {
+        const title = str(payload.title, 300);
+        if (!title) return NextResponse.json({ error: 'title_required' }, { status: 400 });
+        const concept = await coverConcept(title, str(payload.excerpt, 1000));
+        const image = await generateCoverImage(concept.data.subject);
+        const url = await storeCover(image, str(payload.groupId, 64) || 'ai');
+        result = { url, alt: concept.data.alt, subject: concept.data.subject };
+        usage = concept.usage;
         break;
       }
       case 'review': {
