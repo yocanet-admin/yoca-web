@@ -54,7 +54,9 @@ export function wrapTemplate(heading: string, bodyHtml: string): string {
 }
 
 export async function sendEmail(to: string, subject: string, html: string, replyTo?: string): Promise<ChannelResult> {
-  const key = process.env.RESEND_API_KEY;
+  // Test capture (staging): the capture endpoint is behind the test project's
+  // gateway, which takes its public anon key; production never sets the endpoint.
+  const key = process.env.RESEND_API_KEY || (CAPTURE_MODE ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY : undefined);
   if (!key || !to) return 'skipped';
   try {
     const response = await fetch(RESEND_ENDPOINT, {

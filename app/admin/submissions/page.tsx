@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, DailyBars, Notice, StatTile } from '@/components/admin/cockpit/Widgets';
 import { LEAD_LABEL, LEAD_PILL, LEAD_STATUSES, OPEN_STATUSES, fmtDate, istanbulToday, timeAgo, type LeadStatus } from '@/lib/cockpit/client';
 import { LEAD_LIMIT, deleteLead, deleteLeads, loadLeads, replyHref, updateLead, updateLeads, weeklyCounts, type Lead } from '@/lib/cockpit/leads';
-import { clientFromLead } from '@/lib/cockpit/crm';
+import { clientFromLead, findClientForLead, linkLeadToClient, loadClientCandidates, type ClientCandidate } from '@/lib/cockpit/crm';
 import { LeadAI } from '@/components/admin/cockpit/LeadAI';
 import { adminApi } from '@/lib/cockpit/client';
 import { DEFAULT_RESPONSE_TIMES, dueBusinessDay, sanitizeResponseTimes, type ResponseTimes } from '@/lib/responseCopy';
@@ -219,15 +219,36 @@ function LeadsInner() {
     } else say('Silinemedi — oturumunuzu kontrol edin.');
   };
 
-  const makeClient = async (lead: Lead) => {
+  // Lead → client. An existing client is never picked automatically: when there
+  // are look-alikes (e-mail, firm or person name), the admin chooses one of them
+  // or creates a new client. The lead itself stays as it is (only client_id links it).
+  const [choice, setChoice] = useState<{ key: string; candidates: ClientCandidate[] } | null>(null);
+  const [linking, setLinking] = useState(false);
+  const makeClient = async (lead: Lead, forceNew = false) => {
+    const found = await findClientForLead(lead);
+    if (found) {
+      say('Bu lead zaten bir müşteriye bağlı — o kayıt açılıyor.');
+      return router.push(`/admin/clients?id=${found.id}`);
+    }
+    if (!forceNew) {
+      const candidates = await loadClientCandidates({ name: lead.name, company: lead.company, email: lead.email });
+      if (candidates.length) return setChoice({ key: keyOf(lead), candidates });
+    }
+    setChoice(null);
     const client = await clientFromLead(lead);
     if (!client) return say('Müşteri oluşturulamadı — CRM tabloları (SQL v8) kurulu mu?');
-    if (client.existing) {
-      say('Bu lead zaten müşteri — mevcut kayıt açılıyor.');
-      return router.push(`/admin/clients?id=${client.id}`);
-    }
     if (lead.status === 'new') await change(lead, { status: 'contacted' });
     router.push(`/admin/clients?id=${client.id}`);
+  };
+  const linkTo = async (lead: Lead, c: ClientCandidate) => {
+    setLinking(true);
+    const r = await linkLeadToClient(lead, c.client);
+    setLinking(false);
+    if (!r.ok) return say(r.error ?? 'Bağlanamadı.');
+    setChoice(null);
+    if (lead.status === 'new') await change(lead, { status: 'contacted' });
+    say(`Lead “${c.client.name}” müşterisine bağlandı; başvuru olduğu gibi duruyor.`);
+    router.push(`/admin/clients?id=${c.client.id}`);
   };
 
   return (
@@ -493,7 +514,7 @@ function LeadsInner() {
                           Yanıtla
                         </a>
                         <button type="button" onClick={() => makeClient(lead)} className="admin-btn">
-                          Müşteri yap →
+                          {lead.clientId ? 'Bağlı müşteriyi aç →' : 'Müşteri yap →'}
                         </button>
                         {lead.status !== 'spam' && (
                           <button type="button" disabled={!ready} onClick={() => change(lead, { status: 'spam' })} className="admin-btn">
@@ -504,6 +525,26 @@ function LeadsInner() {
                           Sil
                         </button>
                       </div>
+                      {choice?.key === key && (
+                        <div className="grid gap-2 rounded-sm border border-line p-3" role="group" aria-label="Benzer müşteriler">
+                          <p className="text-[13px] text-muted">Bu başvuruya benzeyen müşteri kayıtları var. Aynı müşteriyse bağlayın; değilse yeni müşteri oluşturun. Hiçbiri kendiliğinden seçilmez.</p>
+                          <ul className="grid gap-1">
+                            {choice.candidates.map((c) => (
+                              <li key={c.client.id} className="grid gap-1 border-t border-line py-1.5 text-[13px]">
+                                <span className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="min-w-0"><strong>{c.client.name}</strong><span className="text-subtle"> · {c.reasons.join(', ')}{c.client.email ? ` · ${c.client.email}` : ''}</span></span>
+                                  <button type="button" className="admin-btn" disabled={linking} onClick={() => linkTo(lead, c)}>Bu müşteriye bağla</button>
+                                </span>
+                                {c.conflict && <span role="note" className="text-[12px] font-semibold text-amber-300">Dikkat: {c.conflict}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                          <span className="flex flex-wrap gap-2">
+                            <button type="button" className="admin-btn" disabled={linking} onClick={() => makeClient(lead, true)}>Yeni müşteri oluştur</button>
+                            <button type="button" className="admin-btn" onClick={() => setChoice(null)}>Vazgeç</button>
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

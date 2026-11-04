@@ -7,14 +7,15 @@ import { Badge, DateOr, Details, Documents, Empty, EntityLink, Flash, PageHead, 
 import { archiveRow, db, loadOps, removeLink, saveRow, type Contact, type OpsData, type Party, type Project } from '@/lib/ops/data';
 import { KIND_LABEL, PAY_STATE_LABEL, RENEW_STATE_LABEL, SERVICE_STATUS_LABEL, dueText, istanbulDay, missingInfo, payState, renewState, type PayState, type Service } from '@/lib/ops/model';
 import { formatAmount, formatTotals, type Minor } from '@/lib/ops/money';
-import { findClientForLead } from '@/lib/cockpit/crm';
+import { linkLeadToClient, unlinkLead } from '@/lib/cockpit/crm';
 import { loadLeads, type Lead } from '@/lib/cockpit/leads';
 
 /**
  * Yoca Operasyon — one client / firm (public.clients) with its contacts,
  * projects, services, money, licenses, documents and history.
  * The CRM side (deals, activities) stays on /admin/clients?id=…; a lead is
- * only LINKED (source_type / source_id), never copied or deleted.
+ * only LINKED (lead.client_id, v18; or source_* for the lead it was created
+ * from), never copied or deleted.
  */
 
 const ZERO = BigInt(0);
@@ -286,55 +287,47 @@ function Summary({ party, parties, onSaved, onError, onArchive, provided }: { pa
   );
 }
 
-/* ── Lead bağlantısı (kopyalamaz, silmez) ─────────────────────────── */
+/* ── Leadler (bağlantı: lead kendi kaydı ve geçmişiyle kalır) ─────── */
 
 function LeadLink({ party, onSaved, onError }: { party: Party; onSaved: (m: string) => void; onError: (m: string) => void }) {
-  const linked = (party.source_type === 'contact' || party.source_type === 'checkup') && party.source_id;
-  const [lead, setLead] = useState<{ name: string; email: string; at: string } | null | undefined>(undefined);
   const [leads, setLeads] = useState<Lead[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    if (!linked) { setLead(undefined); return; }
     (async () => {
-      try {
-        if (party.source_type === 'contact') {
-          const { data } = await db().from('contact_submissions').select('name, email, created_at').eq('id', party.source_id as string).maybeSingle();
-          const r = data as { name?: string; email?: string; created_at: string } | null;
-          setLead(r ? { name: r.name ?? '', email: r.email ?? '', at: r.created_at } : null);
-        } else {
-          const { data } = await db().from('checkup_submissions').select('contact_info_json, created_at').eq('id', party.source_id as string).maybeSingle();
-          const r = data as { contact_info_json?: Record<string, unknown>; created_at: string } | null;
-          setLead(r ? { name: String(r.contact_info_json?.name ?? ''), email: String(r.contact_info_json?.email ?? ''), at: r.created_at } : null);
-        }
-      } catch { setLead(null); }
+      const r = await loadLeads();
+      setLoadErr(r.error);
+      setLeads(r.leads);
     })();
-  }, [linked, party.source_type, party.source_id]);
+  }, [tick]);
 
-  const openPicker = async () => {
-    setLoadErr(null);
-    const r = await loadLeads();
-    if (r.error) setLoadErr(r.error);
-    setLeads(r.leads);
-  };
+  // Linked = lead.client_id is this client (v18), or the lead this client was created from (source_*).
+  const isSource = (l: Lead) => party.source_type === l.type && party.source_id === l.id;
+  const linked = useMemo(() => (leads ?? []).filter((l) => l.clientId === party.id || (isSource(l) && !l.clientId)), [leads, party.id, party.source_id, party.source_type]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const link = async (l: Lead) => {
     setBusy(true);
-    const other = await findClientForLead(l);
-    if (other && other.id !== party.id) { setBusy(false); onError(`Bu lead zaten “${other.name}” kaydına bağlı. Önce oradaki bağlantıyı kaldırın.`); return; }
-    const r = await saveRow<Partial<Party>>('clients', { id: party.id, source_type: l.type, source_id: l.id, updated_at: new Date().toISOString() });
+    const r = await linkLeadToClient(l, party as unknown as Parameters<typeof linkLeadToClient>[1]);
     setBusy(false);
-    if (r.error) onError(r.error); else { setLeads(null); onSaved('Lead bağlandı (lead kopyalanmadı).'); }
+    if (!r.ok) { onError(r.error ?? 'Bağlanamadı.'); return; }
+    setPicking(false); setTick((t) => t + 1);
+    onSaved('Lead bağlandı (lead kopyalanmadı, kendi kaydı ve geçmişi duruyor).');
   };
 
-  const unlink = async () => {
+  const unlink = async (l: Lead) => {
     if (!window.confirm('Lead bağlantısı kaldırılsın mı? Lead silinmez; yalnızca bu kayıtla bağı kalkar.')) return;
     setBusy(true);
-    const r = await saveRow<Partial<Party>>('clients', { id: party.id, source_type: 'manual', source_id: null, updated_at: new Date().toISOString() });
+    let ok = true;
+    if (l.clientId === party.id) ok = await unlinkLead(l);
+    if (ok && isSource(l)) ok = !(await saveRow<Partial<Party>>('clients', { id: party.id, source_type: 'manual', source_id: null, updated_at: new Date().toISOString() })).error;
     setBusy(false);
-    if (r.error) onError(r.error); else onSaved('Lead bağlantısı kaldırıldı.');
+    if (!ok) { onError('Bağlantı kaldırılamadı.'); return; }
+    setTick((t) => t + 1);
+    onSaved('Lead bağlantısı kaldırıldı.');
   };
 
   const matches = useMemo(() => {
@@ -343,46 +336,48 @@ function LeadLink({ party, onSaved, onError }: { party: Party; onSaved: (m: stri
     const mine = [party.email, party.name].map((v) => (v ?? '').toLocaleLowerCase('tr')).filter(Boolean);
     const score = (l: Lead) => (mine.some((m) => m && (l.email.toLocaleLowerCase('tr') === m || l.company.toLocaleLowerCase('tr') === m)) ? 0 : 1);
     return leads
+      .filter((l) => !linked.includes(l))
       .filter((l) => !n || [l.name, l.email, l.company].some((v) => v.toLocaleLowerCase('tr').includes(n)))
       .sort((a, b) => score(a) - score(b) || b.createdAt.localeCompare(a.createdAt))
       .slice(0, 20);
-  }, [leads, q, party.email, party.name]);
+  }, [leads, linked, q, party.email, party.name]);
 
   return (
-    <section className="admin-card grid gap-3 !p-4" aria-label="Kaynak lead">
-      <h2 className="text-[13px] font-bold uppercase tracking-[0.08em] text-muted">Kaynak lead</h2>
-      {linked ? (
-        <div className="grid gap-2 text-[13px]">
-          <p>
-            {LEAD_TYPE[party.source_type as string]}:{' '}
-            <EntityLink href={`/admin/submissions?id=${party.source_id}&status=all`}>
-              {lead === undefined ? 'yükleniyor…' : lead === null ? 'lead bulunamadı (silinmiş olabilir)' : `${lead.name || lead.email || 'adsız'} · ${fmtDate(lead.at)}`}
-            </EntityLink>
-          </p>
-          <button type="button" className={`${small} justify-self-start`} disabled={busy} onClick={unlink}>Bağlantıyı kaldır</button>
-        </div>
+    <section className="admin-card grid gap-3 !p-4" aria-label="Leadler">
+      <h2 className="text-[13px] font-bold uppercase tracking-[0.08em] text-muted">Leadler</h2>
+      {loadErr && <p className="text-[12px] text-red-300">{loadErr}</p>}
+      {leads === null ? <p className="text-[13px] text-subtle">Yükleniyor…</p> : linked.length ? (
+        <ul className="grid gap-1 text-[13px]">
+          {linked.map((l) => (
+            <li key={`${l.type}-${l.id}`} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-1.5">
+              <span className="min-w-0">
+                {LEAD_TYPE[l.type]}: <EntityLink href={`/admin/submissions?id=${l.id}&status=all`}>{l.name || l.email || 'adsız'} · {fmtDate(l.createdAt)}</EntityLink>
+                {isSource(l) && <span className="text-subtle"> · bu kayıt bu leadden açıldı</span>}
+              </span>
+              <button type="button" className={small} disabled={busy} onClick={() => unlink(l)}>Bağlantıyı kaldır</button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[13px] text-muted">{party.source_type === 'manual' ? 'Elle eklendi; bağlı lead yok.' : 'Bağlı lead yok.'}</p>
+      )}
+      {!picking ? (
+        <button type="button" className={`${small} justify-self-start`} onClick={() => setPicking(true)} disabled={leads === null}>Mevcut lead bağla</button>
       ) : (
         <div className="grid gap-2 text-[13px]">
-          <p className="text-muted">{party.source_type === 'manual' ? 'Elle eklendi; bağlı lead yok.' : 'Bağlı lead yok.'} Mevcut bir başvuruyu bağlayabilirsiniz (kopyalanmaz, silinmez).</p>
-          {leads === null ? (
-            <button type="button" className={`${small} justify-self-start`} onClick={openPicker}>Mevcut lead bağla</button>
-          ) : (
-            <div className="grid gap-2">
-              {loadErr && <p className="text-[12px] text-red-300">{loadErr}</p>}
-              <input className={field} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ad, e-posta veya şirket ara…" aria-label="Lead ara" />
-              {matches.length === 0 ? <p className="text-subtle">Eşleşen lead yok.</p> : (
-                <ul className="grid gap-1">
-                  {matches.map((l) => (
-                    <li key={`${l.type}-${l.id}`} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-1.5">
-                      <span className="min-w-0 truncate">{l.name || '—'} <span className="text-subtle">· {l.email} {l.company && `· ${l.company}`} · {LEAD_TYPE[l.type]} · {fmtDate(l.createdAt)}</span></span>
-                      <button type="button" className={small} disabled={busy} onClick={() => link(l)}>Bağla</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <button type="button" className={`${small} justify-self-start`} onClick={() => setLeads(null)}>Vazgeç</button>
-            </div>
+          <p className="text-subtle">Bağlanan lead kopyalanmaz, silinmez; Leadler sayfasında durumu ve geçmişiyle kalır.</p>
+          <input className={field} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ad, e-posta veya şirket ara…" aria-label="Lead ara" />
+          {matches.length === 0 ? <p className="text-subtle">Eşleşen lead yok.</p> : (
+            <ul className="grid gap-1">
+              {matches.map((l) => (
+                <li key={`${l.type}-${l.id}`} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-1.5">
+                  <span className="min-w-0 truncate">{l.name || '—'} <span className="text-subtle">· {l.email} {l.company && `· ${l.company}`} · {LEAD_TYPE[l.type]} · {fmtDate(l.createdAt)}{l.clientId ? ' · başka müşteriye bağlı' : ''}</span></span>
+                  <button type="button" className={small} disabled={busy || Boolean(l.clientId)} onClick={() => link(l)}>Bağla</button>
+                </li>
+              ))}
+            </ul>
           )}
+          <button type="button" className={`${small} justify-self-start`} onClick={() => setPicking(false)}>Vazgeç</button>
         </div>
       )}
     </section>

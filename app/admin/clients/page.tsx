@@ -33,6 +33,9 @@ import {
   type Currency,
   type Deal,
   type DealStage,
+  ensureCustomerRole,
+  loadClientCandidates,
+  type ClientCandidate,
 } from '@/lib/cockpit/crm';
 
 /**
@@ -98,20 +101,28 @@ function ClientsInner() {
   const cancelCreate = () => {
     setCreating(false);
     setNewError('');
+    setCandidates(null);
   };
-  const createClient = async (event?: React.FormEvent) => {
+  // Possible existing records (CRM and Operasyon share one table). Only suggestions:
+  // the admin opens one of them or creates a new client anyway.
+  const [candidates, setCandidates] = useState<ClientCandidate[] | null>(null);
+  const createClient = async (event?: React.FormEvent, force = false) => {
     event?.preventDefault();
     const name = newName.trim();
     if (name.length < 2) {
       setNewError('Firma / marka adı en az 2 karakter olmalı.');
       return;
     }
-    if (data.clients.some((c) => c.name.trim().toLowerCase() === name.toLowerCase())) {
-      setNewError('Bu adla bir müşteri zaten var.');
-      return;
-    }
     setNewBusy(true);
     setNewError('');
+    if (!force) {
+      const found = await loadClientCandidates({ company: name });
+      if (found.length) {
+        setNewBusy(false);
+        setCandidates(found);
+        return;
+      }
+    }
     const client = await saveClient({ name, status: 'prospect', source_type: 'manual' });
     setNewBusy(false);
     if (!client) {
@@ -119,9 +130,19 @@ function ClientsInner() {
       return;
     }
     setCreating(false);
+    setCandidates(null);
     say(`${client.name} eklendi.`);
     await reload();
     select(client.id);
+  };
+  const openCandidate = async (c: ClientCandidate) => {
+    // A provider-only firm becomes a customer only because the admin chose it here.
+    await ensureCustomerRole(c.client);
+    setCreating(false);
+    setCandidates(null);
+    say(`${c.client.name} açıldı; yeni kayıt oluşturulmadı.`);
+    await reload();
+    select(c.client.id);
   };
 
   return (
@@ -129,7 +150,7 @@ function ClientsInner() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Müşteriler</h1>
-          <p className="mt-1.5 text-[14px] text-muted">Adaylar, aktif müşteriler, fırsatlar ve yapılacaklar.</p>
+          <p className="mt-1.5 text-[14px] text-muted">Adaylar, aktif müşteriler, fırsatlar ve yapılacaklar. Kayıtlar Operasyon → <Link href="/admin/ops/clients" className="underline">Müşteriler ve firmalar</Link> ile aynı kayıtlardır; bir müşteriyi iki ekrana ayrı ayrı girmeniz gerekmez.</p>
         </div>
         <div className="flex items-center gap-3">
           {flash && <span role="status" className="text-[13px] font-bold text-yoca-lime">{flash}</span>}
@@ -159,6 +180,25 @@ function ClientsInner() {
             <button type="button" onClick={cancelCreate} className="admin-btn">Vazgeç</button>
           </div>
           {newError && <p role="alert" className="text-[13px] font-semibold text-red-400 sm:col-span-2">{newError}</p>}
+          {candidates && (
+            <div className="grid gap-2 sm:col-span-2" role="group" aria-label="Benzer kayıtlar">
+              <p className="text-[13px] text-muted">Benzer kayıt var. Aynı müşteriyse onu açın; farklı bir müşteriyse yeni kayıt oluşturun (aynı ad tek başına aynı müşteri demek değildir).</p>
+              <ul className="grid gap-1">
+                {candidates.map((c) => (
+                  <li key={c.client.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-1.5 text-[13px]">
+                    <span className="min-w-0">
+                      <strong>{c.client.name}</strong>
+                      <span className="text-subtle"> · {c.reasons.join(', ')}{Array.isArray(c.client.roles) && !c.client.roles.includes('customer') ? ' · yalnız sağlayıcı olarak kayıtlı' : ''}{c.client.email ? ` · ${c.client.email}` : ''}</span>
+                    </span>
+                    <button type="button" className="admin-btn" onClick={() => openCandidate(c)}>
+                      {Array.isArray(c.client.roles) && !c.client.roles.includes('customer') ? 'Müşteri olarak işaretle ve aç' : 'Bu kaydı aç'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <button type="button" className="admin-btn justify-self-start" disabled={newBusy} onClick={() => createClient(undefined, true)}>Yine de yeni müşteri oluştur</button>
+            </div>
+          )}
           <p className="text-[12px] text-subtle sm:col-span-2">Aday olarak eklenir; iletişim bilgilerini, fırsatları ve görevleri sonra müşteri kartından girersiniz.</p>
         </form>
       )}
@@ -319,6 +359,8 @@ function ClientDetail({
       <Card
         title="Müşteri"
         action={
+          <span className="flex items-center gap-3">
+          <Link href={`/admin/ops/clients/${client.id}`} className="text-[12px] font-bold text-muted hover:text-yoca-lime">Operasyon kaydı →</Link>
           <button
             type="button"
             onClick={async () => {
@@ -328,6 +370,7 @@ function ClientDetail({
           >
             Sil
           </button>
+          </span>
         }
       >
         <div className="grid gap-3 sm:grid-cols-2">

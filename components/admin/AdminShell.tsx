@@ -19,7 +19,7 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
     items: [
       { href: '/admin', label: 'Kokpit', icon: '▦' },
       { href: '/admin/submissions', label: 'Leadler', icon: '✉' },
-      { href: '/admin/clients', label: 'Müşteriler', icon: '◎' },
+      { href: '/admin/clients', label: 'CRM · fırsatlar', icon: '◎' },
       { href: '/admin/traffic', label: 'Trafik', icon: '↗' },
       { href: '/admin/sites', label: 'Siteler', icon: '◍' },
     ],

@@ -11,6 +11,8 @@
 --                     billing, preferred_channel, owner_email, tags,
 --                     support_contact, panel_url, archived_at
 --                     (existing rows: party_type 'company', roles {customer})
+--   public.contact_submissions / checkup_submissions + client_id (nullable link
+--                     to the client; existing leads stay unlinked, admin-only to set)
 -- New tables (all admin-only through public.is_admin(), audit-logged):
 --   client_contacts, ops_projects, ops_provider_accounts, ops_services,
 --   ops_service_links, ops_service_relations, ops_periods, ops_payments,
@@ -70,6 +72,29 @@ begin
 end;
 $$;
 create index if not exists idx_clients_roles on public.clients using gin (roles);
+
+-- Leads ↔ client: a lead keeps its own record, status and history; client_id
+-- only LINKS it to the client it belongs to (several leads per client, set by an
+-- admin's explicit choice). Removing a client keeps the lead (set null).
+alter table public.contact_submissions add column if not exists client_id uuid references public.clients(id) on delete set null;
+alter table public.checkup_submissions add column if not exists client_id uuid references public.clients(id) on delete set null;
+create index if not exists idx_contact_submissions_client on public.contact_submissions (client_id);
+create index if not exists idx_checkup_submissions_client on public.checkup_submissions (client_id);
+-- The public forms can insert leads; only an admin may set or change the link.
+create or replace function public.lead_client_link_guard() returns trigger
+language plpgsql security invoker set search_path = public as $$
+begin
+  if current_user in ('anon', 'authenticated') and not coalesce(public.is_admin(), false) then
+    if tg_op = 'INSERT' then new.client_id := null;
+    elsif new.client_id is distinct from old.client_id then new.client_id := old.client_id;
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists contact_submissions_client_guard on public.contact_submissions;
+create trigger contact_submissions_client_guard before insert or update on public.contact_submissions for each row execute function public.lead_client_link_guard();
+drop trigger if exists checkup_submissions_client_guard on public.checkup_submissions;
+create trigger checkup_submissions_client_guard before insert or update on public.checkup_submissions for each row execute function public.lead_client_link_guard();
 
 create table if not exists public.client_contacts (
   id uuid primary key default gen_random_uuid(),
@@ -447,5 +472,10 @@ commit;
 --     public.ops_confirm_renewal(uuid, date, numeric, text, text, date, date);
 --   drop policy if exists "admin read ops docs" on storage.objects; (… write / update)
 --   alter table public.clients drop column if exists party_type, drop column if exists roles, … (the 12 above);
+--   drop trigger if exists contact_submissions_client_guard on public.contact_submissions;
+--   drop trigger if exists checkup_submissions_client_guard on public.checkup_submissions;
+--   drop function if exists public.lead_client_link_guard();
+--   alter table public.contact_submissions drop column if exists client_id;  (lead rows stay; only the link goes)
+--   alter table public.checkup_submissions drop column if exists client_id;
 -- commit;
 -- The bucket "ops-docs" is left in place by the undo (it may hold uploaded files).

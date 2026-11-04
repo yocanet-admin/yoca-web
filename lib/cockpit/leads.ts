@@ -27,6 +27,8 @@ export interface Lead {
   followUpOn: string | null;
   aiSummary: AiSummary | null;
   aiSummaryAt: string | null;
+  /** v18: the client this lead is linked to (the lead itself stays as it is). */
+  clientId: string | null;
 }
 
 /** Saved AI brief (upgrade-v9, written by /api/admin/lead-ai). */
@@ -95,6 +97,7 @@ export async function loadLeads(): Promise<LeadsResult> {
       followUpOn: (row.follow_up_on as string | null) ?? null,
       aiSummary: (row.ai_summary as AiSummary | null) ?? null,
       aiSummaryAt: (row.ai_summary_at as string | null) ?? null,
+      clientId: (row.client_id as string | null) ?? null,
     })),
     ...((checkups.data as Row[]) ?? []).map((row) => {
       const contact = (row.contact_info_json ?? {}) as Record<string, unknown>;
@@ -115,6 +118,7 @@ export async function loadLeads(): Promise<LeadsResult> {
         followUpOn: (row.follow_up_on as string | null) ?? null,
         aiSummary: (row.ai_summary as AiSummary | null) ?? null,
         aiSummaryAt: (row.ai_summary_at as string | null) ?? null,
+        clientId: (row.client_id as string | null) ?? null,
       };
     }),
   ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
