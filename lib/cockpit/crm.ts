@@ -2,6 +2,7 @@
 
 import { getAdminClient } from '@/lib/adminClient';
 import type { Lead } from '@/lib/cockpit/leads';
+import { clientCandidates, type Candidate, type ContactLike, type PartyLike } from '@/lib/cockpit/match';
 
 /**
  * Yoca cockpit — CRM (clients, deals, activities) on Supabase.
@@ -162,10 +163,14 @@ export async function deleteActivity(id: string): Promise<boolean> {
   return !error;
 }
 
-/** The client already created from this lead, if any. */
-export async function findClientForLead(lead: Pick<Lead, 'id' | 'type'>): Promise<Client | null> {
+/** The client this lead is linked to (v18 lead.client_id), else the one created from it (source_*). */
+export async function findClientForLead(lead: Pick<Lead, 'id' | 'type'> & { clientId?: string | null }): Promise<Client | null> {
   const supabase = getAdminClient();
   if (!supabase) return null;
+  if (lead.clientId) {
+    const { data } = await supabase.from('clients').select('*').eq('id', lead.clientId).maybeSingle();
+    if (data) return data as Client;
+  }
   const { data, error } = await supabase
     .from('clients')
     .select('*')
@@ -177,62 +182,73 @@ export async function findClientForLead(lead: Pick<Lead, 'id' | 'type'>): Promis
   return data[0] as Client;
 }
 
-const likeExact = (value: string) => value.trim().replace(/[\\%_]/g, (c) => `\\${c}`);
+export type ClientCandidate = Candidate<Client & PartyLike>;
 
 /**
- * The one client record behind a name or e-mail — CRM and Operasyon share
- * the clients table, so a firm entered on either screen is found here
- * (also a firm that is only a provider, or whose e-mail is on a contact).
+ * Existing clients that MAY be the same as { name, company, email } — CRM and
+ * Operasyon records alike (one clients table). Only suggestions with reasons;
+ * the admin chooses. Same name ≠ same client: nothing is linked here.
  */
-export async function findMatchingClient(name: string, email?: string | null): Promise<(Client & { roles?: string[] }) | null> {
+export async function loadClientCandidates(input: { name?: string | null; company?: string | null; email?: string | null }): Promise<ClientCandidate[]> {
   const supabase = getAdminClient();
-  if (!supabase) return null;
-  const mail = String(email ?? '').trim();
-  if (mail.includes('@')) {
-    const { data } = await supabase.from('clients').select('*').ilike('email', likeExact(mail)).order('created_at', { ascending: true }).limit(1);
-    if (data?.length) return data[0] as Client;
-    const contact = await supabase.from('client_contacts').select('client_id').ilike('email', likeExact(mail)).limit(1);
-    const id = (contact.data?.[0] as { client_id?: string } | undefined)?.client_id;
-    if (!contact.error && id) {
-      const { data: c } = await supabase.from('clients').select('*').eq('id', id).maybeSingle();
-      if (c) return c as Client;
-    }
-  }
-  if (name.trim().length >= 2) {
-    const { data } = await supabase.from('clients').select('*').ilike('name', likeExact(name)).order('created_at', { ascending: true }).limit(1);
-    if (data?.length) return data[0] as Client;
-  }
-  return null;
+  if (!supabase) return [];
+  const [clients, contacts] = await Promise.all([
+    supabase.from('clients').select('*'),
+    supabase.from('client_contacts').select('client_id, email'),
+  ]);
+  return clientCandidates(input, ((clients.data ?? []) as Array<Client & PartyLike>), contacts.error ? [] : ((contacts.data ?? []) as ContactLike[]));
 }
 
-/** A firm recorded only as a provider becomes a customer too (same record, no copy). */
-export async function ensureCustomerRole(client: Client & { roles?: string[] }): Promise<void> {
+/** A firm recorded only as a provider becomes a customer too — only on the admin's explicit choice. */
+export async function ensureCustomerRole(client: Client & { roles?: string[] | null }): Promise<void> {
   const supabase = getAdminClient();
   if (!supabase || !Array.isArray(client.roles) || client.roles.includes('customer')) return;
   await supabase.from('clients').update({ roles: [...client.roles, 'customer'] }).eq('id', client.id);
 }
 
+const leadTable = (lead: Pick<Lead, 'type'>) => (lead.type === 'contact' ? 'contact_submissions' : 'checkup_submissions');
+const leadKind = (lead: Pick<Lead, 'type'>) => (lead.type === 'contact' ? 'iletişim formu' : 'Check-Up');
+
+function leadText(lead: Lead): string {
+  return lead.type === 'contact'
+    ? lead.message
+    : `Digital Check-Up skoru: ${lead.score ?? '–'}/100\n` + lead.answers.map(([key, answer]) => `${key}: ${answer?.v ?? ''}`).join('\n');
+}
+
 /**
- * Lead → client (prospect) with the lead's message as the first note.
- * When the lead was already turned into a client, that client is returned
- * (`existing: true`) instead of creating a duplicate. When a client with the
- * same e-mail (or the same firm name) already exists — entered in CRM or in
- * Operasyon — the lead is attached to THAT record (`matched: true`): its
- * message becomes a note there and no second record is created.
+ * The admin chose an existing client for this lead: the lead keeps its own
+ * record, status and history and gets client_id (v18). A short activity on the
+ * client points at the lead; the lead is not copied, moved or deleted.
  */
-export async function clientFromLead(lead: Lead): Promise<(Client & { existing?: boolean; matched?: boolean }) | null> {
+export async function linkLeadToClient(lead: Lead, client: Client & { roles?: string[] | null }): Promise<{ ok: boolean; error?: string }> {
+  const supabase = getAdminClient();
+  if (!supabase) return { ok: false, error: 'Supabase yapılandırılmamış.' };
+  if (lead.clientId && lead.clientId !== client.id) return { ok: false, error: 'Bu lead başka bir müşteriye bağlı; önce o bağlantıyı kaldırın.' };
+  const { error } = await supabase.from(leadTable(lead)).update({ client_id: client.id }).eq('id', lead.id);
+  if (error) return { ok: false, error: /client_id/.test(error.message) ? 'Lead bağlantısı için upgrade-v18-operations.sql gerekli.' : error.message };
+  await ensureCustomerRole(client);
+  await addActivity({ client_id: client.id, kind: 'note', body: `Lead bağlandı (${leadKind(lead)}, ${lead.name || lead.email}${lead.email ? ` · ${lead.email}` : ''}, ${lead.createdAt.slice(0, 10)}). Başvurunun kendisi Leadler sayfasında duruyor.` });
+  return { ok: true };
+}
+
+/** Removes only the link; the lead and the client stay. */
+export async function unlinkLead(lead: Pick<Lead, 'id' | 'type'>): Promise<boolean> {
+  const supabase = getAdminClient();
+  if (!supabase) return false;
+  const { error } = await supabase.from(leadTable(lead)).update({ client_id: null }).eq('id', lead.id);
+  return !error;
+}
+
+/**
+ * Lead → NEW client (prospect) with the lead's message as the first note; the
+ * lead is linked to it (client_id) and stays as it is. When the lead already
+ * has a client, that one is returned (`existing: true`). Choosing between a
+ * new client and an existing candidate is the caller's job (see
+ * loadClientCandidates) — this never attaches a lead to a look-alike.
+ */
+export async function clientFromLead(lead: Lead): Promise<(Client & { existing?: boolean }) | null> {
   const found = await findClientForLead(lead);
   if (found) return { ...found, existing: true };
-  const firstNote =
-    lead.type === 'contact'
-      ? lead.message
-      : `Digital Check-Up skoru: ${lead.score ?? '–'}/100\n` + lead.answers.map(([key, answer]) => `${key}: ${answer?.v ?? ''}`).join('\n');
-  const match = await findMatchingClient(lead.company || lead.name, lead.email);
-  if (match) {
-    await ensureCustomerRole(match);
-    await addActivity({ client_id: match.id, kind: 'note', body: `Yeni talep (${lead.type === 'contact' ? 'iletişim formu' : 'Check-Up'}, ${lead.name}${lead.email ? ` · ${lead.email}` : ''}):\n${firstNote}` });
-    return { ...match, existing: true, matched: true };
-  }
   const client = await saveClient({
     name: lead.company || lead.name,
     contact_name: lead.name,
@@ -243,7 +259,10 @@ export async function clientFromLead(lead: Lead): Promise<(Client & { existing?:
     source_id: lead.id,
   });
   if (!client) return null;
-  if (firstNote.trim()) await addActivity({ client_id: client.id, kind: 'note', body: `İlk talep (${lead.type === 'contact' ? 'iletişim formu' : 'Check-Up'}):\n${firstNote}` });
+  const supabase = getAdminClient();
+  if (supabase) await supabase.from(leadTable(lead)).update({ client_id: client.id }).eq('id', lead.id); // ignored before v18
+  const first = leadText(lead);
+  if (first.trim()) await addActivity({ client_id: client.id, kind: 'note', body: `İlk talep (${leadKind(lead)}):\n${first}` });
   return client;
 }
 

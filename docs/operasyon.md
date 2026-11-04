@@ -10,8 +10,9 @@
 - **Müşteriler ve firmalar:** kayıt için yalnızca ad gerekir.
   - Bireysel ya da firma; bir firma hem müşteri hem sağlayıcı olabilir.
   - Detay sekmeleri: Özet, Kişiler, Projeler, Hizmetler, Finans, Lisanslar, Belgeler, İşlem geçmişi.
-  - Lead bağlantısı başvuruyu kopyalamaz ve silmez. CRM (fırsatlar, aktiviteler) eski ekranda kalır; aradaki bağlantı detayda.
-  - **Tek müşteri kaydı:** CRM (Kokpit → "CRM · fırsatlar") ve bu ekran aynı `clients` tablosunu kullanır; ayrı bir müşteri listesi yoktur. CRM'de aynı adla (büyük/küçük harf farkı gözetmeden) yeni müşteri açılmak istenirse mevcut kayıt açılır; yalnız sağlayıcı olan bir firmaya müşteri rolü eklenir. "Müşteri yap" ile dönüştürülen bir lead, e-postası bir müşteride ya da kişide, veya firma adı bir kayıtta varsa o kayda not olarak eklenir; ikinci kayıt açılmaz.
+  - CRM (fırsatlar, aktiviteler) eski ekranda kalır; iki ekran birbirine bağlantı verir.
+  - **Tek müşteri kaynağı, zorunlu birleştirme yok:** CRM (Kokpit → "CRM · fırsatlar") ve bu ekran aynı `clients` tablosunu kullanır; ayrı bir müşteri listesi yoktur. Aynı ya da benzer ad tek başına aynı müşteri demek değildir: CRM'de yeni müşteri açarken veya bir lead'i "Müşteri yap" ile dönüştürürken benzer kayıtlar (aynı e-posta, kişinin e-postası, benzer firma/kişi adı) gerekçesiyle **aday** olarak gösterilir; yönetici mevcut kaydı seçer ya da yeni müşteri oluşturur. E-posta ile firma bilgisi farklı kayıtları gösteriyorsa aday "Dikkat" notuyla gelir; hiçbir durumda kendiliğinden bağlanmaz. Yalnız sağlayıcı olan bir firma, ancak yönetici onu seçerse müşteri rolü alır.
+  - **Lead bağlantısı:** lead kendi kaydı, durumu ve geçmişiyle Leadler'de kalır; müşteriye yalnızca `client_id` ile bağlanır (bir müşterinin birden çok lead'i olabilir). Bağlantı kaldırılınca lead silinmez. Müşteri silinirse lead kalır (bağ boşalır).
 - **Hizmetler ve varlıklar:** kayıt için yalnızca ad ve tür gerekir; kalan alanlar açılır bölümlerde.
   - Bir hizmet birden çok müşteriye ya da projeye bağlanabilir (ortak sunucu tek kayıttır).
   - Hizmet durumu, tahsilat, sağlayıcı ödemesi ve yenileme ayrı gösterilir.
@@ -40,7 +41,7 @@
 
 ## Veri geçişi sırası (onaydan sonra)
 1. **Yedek / ön kontrol:** salt okunur `checks/preflight.sql`. `is_admin()` ve `audit_row()` mevcut mu?
-2. **`supabase/upgrade-v18-operations.sql`:** yalnızca ekleme yapar. `clients` tablosuna sütun ekler (mevcut satırlar firma ve müşteri olarak kalır), yeni tablolar ve özel `ops-docs` deposu oluşturur. Tekrar çalıştırılabilir. Eski uygulama yeni alanları okumadığı için önce veritabanı hazırlanabilir.
+2. **`supabase/upgrade-v18-operations.sql`:** yalnızca ekleme yapar. `clients` tablosuna sütun ekler (mevcut satırlar firma ve müşteri olarak kalır), lead tablolarına boş `client_id` bağlantı sütunu ekler (mevcut leadler değişmez), yeni tablolar ve özel `ops-docs` deposu oluşturur. Tekrar çalıştırılabilir. Eski uygulama yeni alanları okumadığı için önce veritabanı hazırlanabilir.
 3. **Merge → production dağıtımı:** `vercel.json`'daki yeni cron (`/api/cron/ops`) ile gelir.
 4. **Kontrol:** Operasyon sayfaları açılıyor mu, sayfaların boş durumları doğru mu? Cron'u elle tetiklemeyin; ilk planlı çalışmada yalnızca ekip özeti gider.
 
