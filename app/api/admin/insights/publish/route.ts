@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
-import { DRAFT_BUCKET, PUBLIC_BUCKET } from '@/lib/ai/images';
-import { collectImageRefs, replaceImageRefs } from '@/lib/insightImages';
+import { finalizePublishRecord, imagePatch, insertPublishSnapshot, markSnapshotNotPublished, recordMediaUrls, resolveImages, withMediaUrls } from '@/lib/insightPublishServer';
 import { countSourceMarkers } from '@/lib/ai/sourceText';
 
 /**
@@ -10,11 +9,12 @@ import { countSourceMarkers } from '@/lib/ai/sourceText';
  * The ONLY place an article becomes public. AI actions never call it.
  *  - publish:   status PUBLISHED, publish_at = now
  *  - schedule:  status SCHEDULED, publish_at = the given future time
- *  - unpublish: status DRAFT (already-public image copies stay at their URLs)
- * Before publishing/scheduling, the images the article uses (selected cover,
- * its 1200×630 crop and every yoca-image: reference in the body) are copied
- * from the private draft bucket to the public "insights" bucket and the
- * references are replaced with public URLs. A snapshot revision is stored.
+ *  - unpublish: status DRAFT (its images stop being served: /media/insights)
+ * The images the article uses (selected cover, its 1200×630 crop and every
+ * yoca-image: reference in the body) stay in the private bucket; the
+ * published row refers to them as /media/insights/<id>.<ext>, which serves a
+ * file only while a visible version uses it. Nothing is copied, so a failed
+ * publish leaves nothing public. A snapshot revision is stored.
  * The article row is updated with the admin's own session (audit log actor).
  * A translation made from a source article (v15 source_insight_id) needs
  * language_reviewed = true before it can be published or scheduled.
@@ -23,8 +23,6 @@ import { countSourceMarkers } from '@/lib/ai/sourceText';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-
-type Row = { bucket: string; path: string; id: string; public_url: string | null; group_id: string | null; selected: boolean; crop: string | null; parent_id: string | null; alt_text: string };
 
 export async function POST(request: NextRequest) {
   const admin = await requireAdmin(request);
@@ -63,47 +61,29 @@ export async function POST(request: NextRequest) {
     publishAt = new Date(at).toISOString();
   }
 
-  // Images to promote: body references + selected cover + its social crop.
-  const refs = collectImageRefs(a.body_md);
-  const { data: groupImages } = await service.from('insight_images').select('id, bucket, path, public_url, group_id, selected, crop, parent_id, alt_text').eq('group_id', a.group_id);
-  const images = (groupImages ?? []) as Row[];
-  const cover = images.find((img) => img.selected) ?? null;
-  const og = cover ? images.find((img) => img.parent_id === cover.id && img.crop === '1200x630') ?? null : null;
-  const wanted = new Map<string, Row>();
-  for (const img of images) if (refs.includes(img.id) || img.id === cover?.id || img.id === og?.id) wanted.set(img.id, img);
-  const missing = refs.filter((id) => !wanted.has(id));
-  if (missing.length) return NextResponse.json({ ok: false, error: `Metinde bulunamayan görsel referansı var (${missing.length}). Görseli yeniden ekleyin.` }, { status: 422 });
-
-  const urls: Record<string, string> = {};
-  for (const img of Array.from(wanted.values())) {
-    if (img.public_url) {
-      urls[img.id] = img.public_url;
-      continue;
-    }
-    const dl = await service.storage.from(img.bucket || DRAFT_BUCKET).download(img.path);
-    if (dl.error || !dl.data) return NextResponse.json({ ok: false, error: 'Bir görsel okunamadı; yayın yapılmadı.' }, { status: 500 });
-    const ext = img.path.split('.').pop() || 'png';
-    const publicPath = `${a.group_id}/${img.id}.${ext}`;
-    const up = await service.storage.from(PUBLIC_BUCKET).upload(publicPath, Buffer.from(await dl.data.arrayBuffer()), { contentType: ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg', upsert: true });
-    if (up.error) return NextResponse.json({ ok: false, error: `Görsel yayına kopyalanamadı: ${up.error.message}` }, { status: 500 });
-    const url = service.storage.from(PUBLIC_BUCKET).getPublicUrl(publicPath).data.publicUrl;
-    urls[img.id] = url;
-    await service.from('insight_images').update({ public_url: url }).eq('id', img.id);
-  }
-
-  const nextBody = replaceImageRefs(a.body_md, urls);
-  await service.from('insight_revisions').insert({ insight_id: a.id, title: a.title, excerpt: a.excerpt, body_md: a.body_md, reason: action === 'publish' ? 'Yayın öncesi' : 'Zamanlama öncesi', kind: 'publish', created_by: admin.email ?? admin.id });
+  // Images: media URLs only (nothing is copied or made public here).
+  const by = admin.email ?? admin.id;
+  const resolved = await resolveImages(service, a.group_id, a.body_md);
+  if (!resolved.ok) return NextResponse.json({ ok: false, error: resolved.error }, { status: 422 });
+  const revisionId = await insertPublishSnapshot(service, a, action === 'publish' ? 'Yayın öncesi' : 'Zamanlama öncesi', by);
+  const urls = resolved.urls;
+  const nextBody = withMediaUrls(a.body_md, urls);
   const patch: Record<string, unknown> = {
     body_md: nextBody,
     status: action === 'publish' ? 'PUBLISHED' : 'SCHEDULED',
     publish_at: publishAt,
+    ...imagePatch(resolved, a),
   };
-  if (cover && urls[cover.id]) {
-    patch.cover_url = urls[cover.id];
-    if (!a.cover_alt) patch.cover_alt = cover.alt_text || null;
+  const { data: updated, error } = await asUser.from('insights').update(patch).eq('id', a.id).eq('updated_at', a.updated_at).select('*').maybeSingle();
+  if (error || !updated) {
+    // The row did not change, so none of its images is served.
+    await markSnapshotNotPublished(service, revisionId, error?.message ?? 'güncellenemedi');
+    return NextResponse.json({ ok: false, error: error?.message ?? 'İçerik bu arada başka bir yerde değişti ya da yetki yok; yayın yapılmadı. Sayfayı yenileyip tekrar deneyin.' }, { status: error ? 500 : 409 });
   }
-  if (og && urls[og.id] && !a.og_image) patch.og_image = urls[og.id];
-  const { data: updated, error } = await asUser.from('insights').update(patch).eq('id', a.id).select('id, status, publish_at, updated_at').maybeSingle();
-  if (error || !updated) return NextResponse.json({ ok: false, error: error?.message ?? 'Güncellenemedi (yetki?).' }, { status: 500 });
-  return NextResponse.json({ ok: true, insight: updated, promoted: Object.keys(urls).length });
+  await recordMediaUrls(service, resolved, updated as Record<string, unknown>);
+  // Fingerprint of what is public now: a later bulk publish leaves an unchanged version alone.
+  if (action === 'publish') await finalizePublishRecord(service, revisionId, updated as Record<string, unknown>, { outcome: 'published', by });
+  else await finalizePublishRecord(service, revisionId, updated as Record<string, unknown>, { by });
+  const u = updated as { id: string; status: string; publish_at: string; updated_at: string };
+  return NextResponse.json({ ok: true, insight: { id: u.id, status: u.status, publish_at: u.publish_at, updated_at: u.updated_at }, promoted: Object.keys(urls).length });
 }

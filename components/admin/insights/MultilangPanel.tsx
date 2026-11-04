@@ -26,7 +26,7 @@ import DiffView from '@/components/admin/insights/DiffView';
 
 const PATTERN_LABEL = Object.fromEntries(SLOP_PATTERNS.map((p) => [p.id, p.label]));
 const NAME: Record<string, string> = Object.fromEntries(INSIGHT_LOCALES.map((l) => [l.code, l.label]));
-const storeKey = (id: string) => `yoca-multilang:${id}`;
+const storeKey = (id: string, only = '') => `yoca-multilang:${id}${only ? `:${only}` : ''}`;
 
 type JobStatus = 'translate' | 'check' | 'ready' | 'error' | 'saved';
 export interface LangJob {
@@ -61,6 +61,8 @@ interface Props {
   setBusy: (v: string | null) => void;
   onRun: (r: AiRunInfo) => void;
   onSave: (items: Array<{ locale: Locale; translation: Translation }>, fingerprint: string) => Promise<Record<string, string>>;
+  /** Only these languages (a missing language tab: "Çeviri oluştur"). */
+  onlyLocales?: Locale[];
 }
 
 interface AiInfo {
@@ -70,8 +72,9 @@ interface AiInfo {
   budget: number | null;
 }
 
-export default function MultilangPanel({ article, dirty, siblings, preset, busy, setBusy, onRun, onSave }: Props) {
-  const targets = useMemo(() => targetLocales(article.locale), [article.locale]);
+export default function MultilangPanel({ article, dirty, siblings, preset, busy, setBusy, onRun, onSave, onlyLocales }: Props) {
+  const onlyKey = onlyLocales?.join(',') ?? '';
+  const targets = useMemo(() => (onlyLocales?.length ? targetLocales(article.locale).filter((l) => onlyLocales.includes(l)) : targetLocales(article.locale)), [article.locale, onlyKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [jobs, setJobs] = useState<Partial<Record<Locale, LangJob>>>({});
   const [active, setActive] = useState<Locale>(targets[0]);
   const [info, setInfo] = useState<AiInfo | null>(null);
@@ -109,7 +112,7 @@ export default function MultilangPanel({ article, dirty, siblings, preset, busy,
   useEffect(() => {
     if (!article.id) return;
     try {
-      const raw = window.localStorage.getItem(storeKey(article.id));
+      const raw = window.localStorage.getItem(storeKey(article.id, onlyKey));
       if (!raw) return;
       const parsed = JSON.parse(raw) as { fingerprint: string; jobs: Partial<Record<Locale, LangJob>> };
       const restored = Object.fromEntries(Object.entries(parsed.jobs).map(([l, j]) => [l, j && (j.status === 'translate' || j.status === 'check') ? { ...j, status: 'error', error: 'İşlem yarıda kaldı (sayfa kapandı). Yeniden deneyin.' } : j])) as Partial<Record<Locale, LangJob>>;
@@ -125,8 +128,8 @@ export default function MultilangPanel({ article, dirty, siblings, preset, busy,
       .then((fingerprint) => {
         try {
           const open = Object.values(next).some((j) => j && j.status !== 'saved');
-          if (open) window.localStorage.setItem(storeKey(article.id as string), JSON.stringify({ fingerprint, jobs: next }));
-          else window.localStorage.removeItem(storeKey(article.id as string));
+          if (open) window.localStorage.setItem(storeKey(article.id as string, onlyKey), JSON.stringify({ fingerprint, jobs: next }));
+          else window.localStorage.removeItem(storeKey(article.id as string, onlyKey));
         } catch { /* quota / private mode */ }
       })
       .catch(() => undefined);
@@ -249,14 +252,14 @@ export default function MultilangPanel({ article, dirty, siblings, preset, busy,
 
   return (
     <div className="grid gap-3 text-[13px]">
-      <p className="text-muted">Kaynak dil: <strong className="text-white">{NAME[article.locale]}</strong>. Tek düğmeyle {targets.map((l) => NAME[l]).join(', ')} hazırlanır: tüm alanlar (SEO, OG, SSS, etiketler, kapak metni, slug) çevrilir, her dilde yazım kalıpları incelenir ve en az değişiklikle düzenleme önerilir. Kaydedene kadar hiçbir şey yazılmaz; kaydedilenler taslaktır.</p>
+      <p className="text-muted">Kaynak dil: <strong className="text-white">{NAME[article.locale]}</strong>. {onlyLocales?.length ? 'Yalnızca' : 'Tek düğmeyle'} {targets.map((l) => NAME[l]).join(', ')} hazırlanır: tüm alanlar (SEO, OG, SSS, etiketler, kapak metni, slug) çevrilir, her dilde yazım kalıpları incelenir ve en az değişiklikle düzenleme önerilir. Kaydedene kadar hiçbir şey yazılmaz; kaydedilenler taslaktır.</p>
       <div className="grid gap-1 border border-line p-2 text-[12px]">
         <p>Tahmini maliyet: <strong className="text-white">{estimate === null ? 'bilinmiyor (modelin fiyatı tabloda yok — istek engellenir)' : `~$${estimate.toFixed(3)}`}</strong> <span className="text-subtle">· {targets.length} dil × 3 istek · {info?.model ?? '…'}</span></p>
         {info?.spent !== null && info?.spent !== undefined && info.budget ? <p className="text-subtle">Bu ay tahmini: ${info.spent.toFixed(3)} / eşik ${info.budget}</p> : null}
         {overBudget && <p className="font-bold text-yellow-300">Bu işlemle aylık tahmini kullanım eşiği aşılabilir. Eşik aşılırsa sonraki yapay zekâ istekleri durur (eşik kesin bir harcama sınırı değildir).</p>}
       </div>
       {blocked && <p className="text-[12px] text-yellow-300">{!article.id ? 'Önce yazıyı kaydedin.' : dirty ? 'Önce kaydedin; çeviri kaydedilmiş metinden yapılır.' : 'Başlık ve gövde dolu olmalı.'}</p>}
-      <button type="button" className="admin-btn-primary w-fit" disabled={!!busy || blocked || estimate === null} onClick={() => runAll()}>Tüm dilleri oluştur</button>
+      <button type="button" className="admin-btn-primary w-fit" disabled={!!busy || blocked || estimate === null} onClick={() => runAll()}>{onlyLocales?.length ? `${targets.map((l) => NAME[l]).join(', ')} çevirisini oluştur` : 'Tüm dilleri oluştur'}</button>
       {restoredStale && <p className="text-[12px] text-yellow-300">Bu tarayıcıda kaydedilmemiş çeviriler bulundu, ancak kaynak metin o zamandan beri değişti. Yeniden oluşturmanız önerilir.</p>}
 
       {Object.keys(jobs).length > 0 && (

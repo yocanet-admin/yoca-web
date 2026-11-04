@@ -1,6 +1,12 @@
 import InsightEditor from '@/components/admin/insights/InsightEditor';
+import InsightWorkspace from '@/components/admin/insights/InsightWorkspace';
 
-/** Yoca Admin — İçerik düzenleyici (id = 'new' yeni içerik). */
+/**
+ * Yoca Admin — İçerik düzenleyici.
+ * 'new' → a new article (single editor; after the first save it opens as a workspace).
+ * <id>  → the article of that row, all languages in tabs (InsightWorkspace).
+ */
 export default function AdminInsightEditorPage({ params }: { params: { id: string } }) {
-  return <InsightEditor id={params.id} />;
+  if (params.id === 'new') return <InsightEditor id="new" />;
+  return <InsightWorkspace id={params.id} />;
 }
