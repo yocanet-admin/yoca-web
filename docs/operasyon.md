@@ -30,7 +30,10 @@
   - müşteri bildirimlerinin genel anahtarı (varsayılan kapalı);
   - lisans yetkileri (işlem başına).
 
-## Bildirimler (`/api/cron/ops`, her gün 09:00 ve 15:00 İstanbul)
+## Bildirimler (`/api/cron/ops`)
+
+**İlk yayında kapalı.** `vercel.json`'da bu görev için zamanlama yok; hatırlatma ve günlük özet otomatik çalışmaz, kimseye mesaj gitmez. Alıcılar ve tekrar gönderim koruması production'da doğrulandıktan sonra açmak için `vercel.json` `crons` listesine `{ "path": "/api/cron/ops", "schedule": "0 6,12 * * *" }` (09:00 ve 15:00 İstanbul) eklenir. Aşağıdaki kurallar o zaman geçerlidir.
+
 - `CRON_SECRET` ile yetkilendirilir.
 - Her hatırlatmanın tekil bir anahtarı vardır ve gönderimden önce `ops_notifications`'a yazılarak sahiplenilir. Tekrarlı ya da eşzamanlı bir çağrı ikinci mesaj üretmez.
 - Ekibe günde tek bir özet gider. Kesintiden sonra yalnızca en acil kaçırılmış hatırlatma gönderilir; daha eskileri "atlandı" olarak kaydedilir.
@@ -42,8 +45,8 @@
 ## Veri geçişi sırası (onaydan sonra)
 1. **Yedek / ön kontrol:** salt okunur `checks/preflight.sql`. `is_admin()` ve `audit_row()` mevcut mu?
 2. **`supabase/upgrade-v18-operations.sql`:** yalnızca ekleme yapar. `clients` tablosuna sütun ekler (mevcut satırlar firma ve müşteri olarak kalır), lead tablolarına boş `client_id` bağlantı sütunu ekler (mevcut leadler değişmez), yeni tablolar ve özel `ops-docs` deposu oluşturur. Tekrar çalıştırılabilir. Eski uygulama yeni alanları okumadığı için önce veritabanı hazırlanabilir.
-3. **Merge → production dağıtımı:** `vercel.json`'daki yeni cron (`/api/cron/ops`) ile gelir.
-4. **Kontrol:** Operasyon sayfaları açılıyor mu, sayfaların boş durumları doğru mu? Cron'u elle tetiklemeyin; ilk planlı çalışmada yalnızca ekip özeti gider.
+3. **Merge → production dağıtımı:** Operasyon bildirim görevi bu sürümde zamanlanmaz (yukarıya bakın).
+4. **Kontrol:** Operasyon sayfaları açılıyor mu, sayfaların boş durumları doğru mu? Cron Jobs listesinde `/api/cron/ops` olmamalı.
 
 ## Mevcut verilere etkisi
 Mevcut satırlarda hiçbir veri değişmez. CRM ekranı aynı çalışır. Operasyon kaydına bağlı bir müşteri silinmek istenirse veritabanı silmeyi reddeder (bağlı geçmiş var); arşivleme kullanılır.
