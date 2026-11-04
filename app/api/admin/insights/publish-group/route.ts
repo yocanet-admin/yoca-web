@@ -18,7 +18,7 @@ import {
   type BulkOutcome,
   type GroupMember,
 } from '@/lib/insightGroup';
-import { findImages, findPendingByKey, findPublishByKey, finalizePublishRecord, imagePatch, insertPublishSnapshot, lastPublishedFingerprint, markSnapshotNotPublished, promoteImages, recordedFirstPublish, withPublicUrls } from '@/lib/insightPublishServer';
+import { findImages, findPendingByKey, findPublishByKey, finalizePublishRecord, imagePatch, insertPublishSnapshot, lastPublishedFingerprint, markSnapshotNotPublished, recordedFirstPublish, recordStaged, releaseImages, releaseStaleAttempt, stageImages, verifyPublishedImages, withPublicUrls } from '@/lib/insightPublishServer';
 
 /**
  * Yoca — publish several language versions of ONE article at once (admin only).
@@ -61,6 +61,8 @@ interface ItemIn {
   expectedUpdatedAt?: string;
   changes?: unknown;
   confirmReview?: boolean;
+  /** The content the admin confirmed the language check for (fingerprint from the dry run). */
+  reviewFingerprint?: string;
   /** Published before fingerprints were stored: the admin chose to publish it again anyway. */
   forceUpdate?: boolean;
 }
@@ -76,6 +78,8 @@ export interface ItemResult {
   changed: boolean | null;
   needsReview: boolean;
   reviewSet?: boolean;
+  /** Fingerprint of the content as it would be published (dry run → confirmation). */
+  fingerprint?: string;
   publishAt?: string | null;
   updatedAt?: string;
   replay?: boolean;
@@ -134,6 +138,8 @@ export async function POST(request: NextRequest) {
         await finalizePublishRecord(service!, pending.id, article, { requestKey, outcome, by });
         return { ...base, mode: outcome === 'updated' ? 'update' : 'publish', outcome, changed: outcome === 'updated', publishAt: article.publish_at, updatedAt: article.updated_at, replay: true };
       }
+      // …or it stopped before its update: undo the public copies it had made, then go on normally.
+      if (pending) await releaseStaleAttempt(service!, article.group_id, pending.id);
     }
 
     // 2. Group and concurrency.
@@ -147,14 +153,19 @@ export async function POST(request: NextRequest) {
     const changes = diffChanges(article, sanitizeChanges(item.changes));
     const merged = { ...article, ...changes } as Article;
 
-    // 4. Language check confirmed in the dialog.
+    // 4. Language check: the editor's current state counts (a withdrawn check is
+    // withdrawn); giving it again is the dialog's explicit confirmation, bound to
+    // exactly the content that is published (fingerprint of the dry run).
     const isTranslation = Boolean(article.source_insight_id);
-    const needsReview = isTranslation && !article.language_reviewed;
-    const reviewSet = needsReview && item.confirmReview === true;
+    const needsReview = isTranslation && !merged.language_reviewed;
+    const contentFingerprint = await publicFingerprint(merged);
+    const reviewSet = needsReview && item.confirmReview === true && item.reviewFingerprint === contentFingerprint;
+    const reviewStale = needsReview && item.confirmReview === true && !reviewSet;
     if (reviewSet) merged.language_reviewed = true;
 
     // 5. Checks.
     const blockers = publishBlockers(merged);
+    if (reviewStale && !dryRun) blockers.push({ code: 'language_review', text: 'Dil kontrolü onayı, onaylanan metinle eşleşmiyor (metin onaydan sonra değişti). Ekranı yeniden açıp güncel metni onaylayın.' });
     const tooLong = oversizedFields(changes);
     if (tooLong.length) blockers.push({ code: 'body', text: `Çok uzun alan: ${tooLong.join(', ')}. Kısaltın; metin kesilerek kaydedilmez.` });
     const slug = String(merged.slug ?? '').trim();
@@ -183,7 +194,7 @@ export async function POST(request: NextRequest) {
     }
     const mode: BulkMode = item.forceUpdate === true && changed === null ? 'update' : bulkMode(article.status, changed);
     if (article.status === 'SCHEDULED') warnings.push(`Zamanlanmıştı (${article.publish_at ?? '—'}); şimdi yayımlanır.`);
-    const verdict: ItemResult = { ...base, title: String(merged.title || article.title), mode, blockers, warnings, changed, needsReview, reviewSet };
+    const verdict: ItemResult = { ...base, title: String(merged.title || article.title), mode, blockers, warnings, changed, needsReview, reviewSet, fingerprint: contentFingerprint };
     if (dryRun) return verdict;
     if (blockers.length) return fail(verdict, blockers);
     if (mode === 'unchanged') return { ...verdict, outcome: 'unchanged', publishAt: article.publish_at, updatedAt: article.updated_at };
@@ -196,10 +207,14 @@ export async function POST(request: NextRequest) {
       if (done?.outcome) return { ...verdict, outcome: done.outcome, replay: true };
       return fail(verdict, [{ code: 'conflict', text: 'Bu dil tam o sırada başka bir yerde değişti; yayımlanmadı, görsel kopyalanmadı. Yenileyip tekrar deneyin.' }]);
     }
-    const promoted = await promoteImages(service!, article.group_id, String(merged.body_md));
-    if (!promoted.ok) return fail(verdict, [{ code: 'image', text: promoted.error ?? 'Görseller yayına kopyalanamadı.' }]);
     const plannedOutcome: BulkOutcome = mode === 'update' ? 'updated' : 'published';
     const revisionId = await insertPublishSnapshot(service!, article, mode === 'update' ? 'Toplu güncelleme öncesi' : 'Toplu yayın öncesi', by, { requestKey, outcome: plannedOutcome as 'published' | 'updated' });
+    const promoted = await stageImages(service!, article.group_id, String(merged.body_md));
+    if (!promoted.ok) {
+      await markSnapshotNotPublished(service!, revisionId, promoted.error ?? 'görsel');
+      return fail(verdict, [{ code: 'image', text: `${promoted.error ?? 'Görseller yayına kopyalanamadı.'} Yayımlanmadı; hiçbir görsel açıkta bırakılmadı.` }]);
+    }
+    await recordStaged(service!, revisionId, requestKey, plannedOutcome as 'published' | 'updated', promoted.created);
     const now = new Date().toISOString();
     // First publication: the earliest recorded one, else the current publish time.
     const recorded = mode === 'update' ? await recordedFirstPublish(service!, article.id) : null;
@@ -213,11 +228,14 @@ export async function POST(request: NextRequest) {
       publish_at: publishAt,
       ...imagePatch(promoted, merged),
       ...(reviewSet ? { language_reviewed: true, language_reviewed_at: now, language_reviewed_by: by } : {}),
+      ...((changes as Record<string, unknown>).language_reviewed === false && !reviewSet ? { language_reviewed: false, language_reviewed_at: null, language_reviewed_by: null } : {}),
     };
     if ('body_md' in changes) patch.reading_minutes = readingMinutes(String(changes.body_md));
     const { data: updated, error } = await asUser!.from('insights').update(patch).eq('id', article.id).eq('updated_at', article.updated_at).select('*');
     const row = (updated ?? [])[0] as Record<string, unknown> | undefined;
     if (error || !row) {
+      // Not published: the public copies THIS attempt made go away again (unless a public version uses them).
+      await releaseImages(service!, article.group_id, promoted.created);
       // Lost a race (double click / second tab): maybe the other request was this same one.
       for (let i = 0; i < 3; i += 1) {
         await new Promise((r) => setTimeout(r, 300));
@@ -231,8 +249,9 @@ export async function POST(request: NextRequest) {
       return fail(verdict, [{ code: 'conflict', text: error ? `Kaydedilemedi: ${error.message}` : 'Bu dil tam o sırada başka bir yerde değişti; yayımlanmadı. Yenileyip tekrar deneyin.' }]);
     }
     const outcome: BulkOutcome = plannedOutcome;
+    await verifyPublishedImages(service!, article.group_id, String(row.body_md ?? ''));
     // 8. What is public now, for "unchanged" next time and for retries.
-    await finalizePublishRecord(service!, revisionId, row, { requestKey, outcome, by, firstPublishedAt: firstPublishedAt ?? null });
+    await finalizePublishRecord(service!, revisionId, row, { requestKey, outcome, by, firstPublishedAt: firstPublishedAt ?? null, ...(reviewSet ? { review: { by, at: now, fingerprint: contentFingerprint } } : {}) });
     return { ...verdict, outcome, publishAt: String(row.publish_at ?? ''), updatedAt: String(row.updated_at ?? '') };
   }
 

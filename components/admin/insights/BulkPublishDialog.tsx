@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { adminFetch, slugify } from '@/lib/insightsAdmin';
-import { EDITABLE_FIELDS, editableFields, LANG_STATE_LABEL, langState, LOCALE_NAME, OUTCOME_LABEL, type Blocker, type BulkMode, type BulkOutcome, type GroupLocale } from '@/lib/insightGroup';
+import { editableFields, LANG_STATE_LABEL, langState, LOCALE_NAME, OUTCOME_LABEL, type Blocker, type BulkMode, type BulkOutcome, type GroupLocale } from '@/lib/insightGroup';
 import type { InsightRow } from '@/types';
 import type { EditorState } from '@/components/admin/insights/InsightEditor';
 
@@ -34,6 +34,7 @@ export interface BulkResultItem {
   changed: boolean | null;
   needsReview: boolean;
   reviewSet?: boolean;
+  fingerprint?: string;
   publishAt?: string | null;
   replay?: boolean;
 }
@@ -51,14 +52,9 @@ interface Props {
   onFinished: (results: BulkResultItem[]) => void;
 }
 
-const IGNORED = new Set(['id', 'created_at', 'updated_at', 'reading_minutes', ...EDITABLE_FIELDS]);
-const FIELD_NAME: Record<string, string> = { language_reviewed: 'dil kontrolü işareti', language_reviewed_at: 'dil kontrolü işareti', language_reviewed_by: 'dil kontrolü işareti', status: 'çalışma durumu', publish_at: 'yayın zamanı', locale: 'dil' };
-/** Unsaved edits the bulk publish cannot save (only the language's own "Kaydet" can). Pure. */
-function unsupportedEdits(ed: EditorState | null): string[] {
-  if (!ed?.dirty || !ed.base) return [];
-  const row = ed.row as unknown as Record<string, unknown>, base = ed.base as unknown as Record<string, unknown>;
-  const keys = Object.keys(row).filter((k) => !IGNORED.has(k) && JSON.stringify(row[k] ?? null) !== JSON.stringify(base[k] ?? null));
-  return Array.from(new Set(keys.map((k) => FIELD_NAME[k] ?? k)));
+/** The editor's unsaved "Çalışma durumu" choice: publishing sets the version to "Yayında" instead. */
+function statusEdited(ed: EditorState | null): boolean {
+  return Boolean(ed?.dirty && ed.base && ed.row.status !== ed.base.status);
 }
 
 const MODE_LABEL: Record<BulkMode, string> = { publish: 'Yayımla', update: 'Güncelle', unchanged: 'Değişiklik yok' };
@@ -109,8 +105,7 @@ export default function BulkPublishDialog({ groupId, languages: given, onClose, 
   const hard = (v: BulkResultItem) => v.blockers.filter((b) => b.code !== 'language_review');
   const needsConfirm = (v: BulkResultItem) => v.blockers.some((b) => b.code === 'language_review');
   const unknownPublished = (v: BulkResultItem) => v.mode === 'unchanged' && v.changed === null;
-  const blockedLocal = (id: string) => unsupportedEdits(languages.find((l) => l.member?.id === id)?.editor ?? null);
-  const selectable = (v: BulkResultItem | undefined) => Boolean(v && hard(v).length === 0 && !blockedLocal(v.insightId).length && (v.mode !== 'unchanged' || unknownPublished(v)));
+  const selectable = (v: BulkResultItem | undefined) => Boolean(v && hard(v).length === 0 && (v.mode !== 'unchanged' || unknownPublished(v)));
   const isReady = (v: BulkResultItem | undefined) => Boolean(v && selectable(v) && !needsConfirm(v) && !unknownPublished(v));
 
   const toggle = (id: string) => setSelected((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -126,7 +121,9 @@ export default function BulkPublishDialog({ groupId, languages: given, onClose, 
     const body = payload ?? items.filter((i) => selected.has(i.insightId)).map(({ locale: _l, ...i }) => {
       void _l;
       const v = verdicts?.[i.insightId];
-      return { ...i, confirmReview: Boolean(v && needsConfirm(v) && reviewConfirmed), forceUpdate: Boolean(v && unknownPublished(v)) };
+      const confirm = Boolean(v && needsConfirm(v) && reviewConfirmed);
+      // The confirmation is bound to the exact text checked in this dialog.
+      return { ...i, confirmReview: confirm, reviewFingerprint: confirm ? v?.fingerprint : undefined, forceUpdate: Boolean(v && unknownPublished(v)) };
     });
     setSentItems(body);
     setRunning(true);
@@ -191,8 +188,9 @@ export default function BulkPublishDialog({ groupId, languages: given, onClose, 
                       {v?.mode && (canPick || v.mode === 'unchanged') && <span className={`px-1.5 py-0.5 text-[11px] font-bold ${v.mode === 'unchanged' ? 'text-subtle' : 'bg-white text-black'}`}>{unknownPublished(v) ? 'Güncelle (karşılaştırılamıyor)' : MODE_LABEL[v.mode]}</span>}
                     </div>
                     {!l.member && <p className="ps-7 text-[12px] text-subtle">Bu dilde sürüm yok. Önce o dilin sekmesinde “Çeviri oluştur”.</p>}
-                    {l.editor?.dirty && !unsupportedEdits(l.editor).length && <p className="ps-7 text-[12px] text-yellow-200">Kaydedilmemiş düzenleme var; seçerseniz bu işlemle kaydedilir.</p>}
-                    {unsupportedEdits(l.editor).length > 0 && <p className="ps-7 text-[12px] text-red-300">✕ Kaydedilmemiş {unsupportedEdits(l.editor).join(', ')} değişikliği var; bu ekran onu kaydedemez. Önce bu dili kendi “Kaydet” düğmesiyle kaydedin.</p>}
+                    {l.editor?.dirty && <p className="ps-7 text-[12px] text-yellow-200">Kaydedilmemiş düzenleme var; seçerseniz bu işlemle kaydedilir.</p>}
+                    {l.editor && l.editor.base?.language_reviewed && l.editor.row.language_reviewed === false && <p className="ps-7 text-[12px] text-yellow-200">Editörde dil kontrolü kaldırıldı; bu dil, aşağıda yeniden onaylanmadan yayımlanmaz.</p>}
+                    {statusEdited(l.editor) && <p className="ps-7 text-[12px] text-subtle">Editördeki çalışma durumu seçimi kaydedilmedi; yayımlanırsa durum “Yayında” olur.</p>}
                     {v && v.mode === 'unchanged' && !unknownPublished(v) && <p className="ps-7 text-[12px] text-subtle">Yayındaki metin değişmedi; tekrar yayımlanmaz.</p>}
                     {v && unknownPublished(v) && <p className="ps-7 text-[12px] text-subtle">Bu sürüm, değişiklik takibinden önce yayımlanmış; yayındakiyle karşılaştırılamıyor. Seçerseniz yeniden kaydedilip güncellenir.</p>}
                     {v && v.mode === 'update' && <p className="ps-7 text-[12px] text-muted">Yayında · {v.changed ? 'değişiklik var' : ''} · ilk yayın {fmt(l.member?.publish_at)}</p>}

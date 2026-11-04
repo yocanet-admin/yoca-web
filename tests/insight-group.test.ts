@@ -108,6 +108,9 @@ test('filters keep language and state', () => {
 test('changes from the browser: only whitelisted fields, never status or language check', () => {
   const clean = sanitizeChanges({ title: 'Yeni', status: 'PUBLISHED', publish_at: 'now', language_reviewed: true, group_id: 'x', locale: 'en', source_insight_id: null, tags: ['a', 'b'], faq: [{ q: 1 }], cta_type: 'hack', featured: 'yes' });
   assert.deepEqual(clean, { title: 'Yeni', tags: ['a', 'b'] });
+  // The language check can be withdrawn from the editor, never given.
+  assert.deepEqual(sanitizeChanges({ language_reviewed: false }), { language_reviewed: false });
+  assert.deepEqual(sanitizeChanges({ language_reviewed: true }), {});
   // Values are never cut or rewritten; too long is reported instead.
   assert.equal((sanitizeChanges({ cover_alt: '' }) as { cover_alt: string }).cover_alt, '');
   assert.deepEqual(oversizedFields(sanitizeChanges({ title: 'x'.repeat(501), excerpt: 'ok' })), ['title']);

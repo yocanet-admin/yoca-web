@@ -196,6 +196,9 @@ export function sanitizeChanges(input: unknown): Partial<Record<EditableField, u
   const out: Partial<Record<EditableField, unknown>> = {};
   if (!input || typeof input !== 'object') return out;
   const src = input as Record<string, unknown>;
+  // The language check can be withdrawn from the editor, never given: giving
+  // it is the explicit confirmation in the publish dialog (confirmReview).
+  if (src.language_reviewed === false) (out as Record<string, unknown>).language_reviewed = false;
   for (const key of EDITABLE_FIELDS) {
     if (!(key in src)) continue;
     const v = src[key];
@@ -241,6 +244,8 @@ export function diffChanges(stored: Record<string, unknown>, changes: Partial<Re
 export function editableFields(row: Record<string, unknown>): Partial<Record<EditableField, unknown>> {
   const out: Partial<Record<EditableField, unknown>> = {};
   for (const key of EDITABLE_FIELDS) if (key in row) out[key] = row[key];
+  // A withdrawn language check travels with the editor's text (see sanitizeChanges).
+  if (row.language_reviewed === false) (out as Record<string, unknown>).language_reviewed = false;
   return out;
 }
 

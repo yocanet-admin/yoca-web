@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
-import { finalizePublishRecord, imagePatch, insertPublishSnapshot, markSnapshotNotPublished, promoteImages, withPublicUrls } from '@/lib/insightPublishServer';
+import { finalizePublishRecord, imagePatch, insertPublishSnapshot, markSnapshotNotPublished, recordStaged, releaseImages, stageImages, verifyPublishedImages, withPublicUrls } from '@/lib/insightPublishServer';
 import { countSourceMarkers } from '@/lib/ai/sourceText';
 
 /**
@@ -61,24 +61,30 @@ export async function POST(request: NextRequest) {
   }
 
   // Images to promote: body references + selected cover + its social crop.
-  const promoted = await promoteImages(service, a.group_id, a.body_md);
-  if (!promoted.ok) return NextResponse.json({ ok: false, error: promoted.error }, { status: promoted.error?.startsWith('Metinde') ? 422 : 500 });
-  const urls = promoted.urls;
-
-  const nextBody = withPublicUrls(a.body_md, urls);
   const by = admin.email ?? admin.id;
   const revisionId = await insertPublishSnapshot(service, a, action === 'publish' ? 'Yayın öncesi' : 'Zamanlama öncesi', by);
+  const promoted = await stageImages(service, a.group_id, a.body_md);
+  if (!promoted.ok) {
+    await markSnapshotNotPublished(service, revisionId, promoted.error ?? 'görsel');
+    return NextResponse.json({ ok: false, error: promoted.error }, { status: promoted.error?.startsWith('Metinde') ? 422 : 500 });
+  }
+  await recordStaged(service, revisionId, undefined, undefined, promoted.created);
+  const urls = promoted.urls;
+  const nextBody = withPublicUrls(a.body_md, urls);
   const patch: Record<string, unknown> = {
     body_md: nextBody,
     status: action === 'publish' ? 'PUBLISHED' : 'SCHEDULED',
     publish_at: publishAt,
     ...imagePatch(promoted, a),
   };
-  const { data: updated, error } = await asUser.from('insights').update(patch).eq('id', a.id).select('*').maybeSingle();
+  const { data: updated, error } = await asUser.from('insights').update(patch).eq('id', a.id).eq('updated_at', a.updated_at).select('*').maybeSingle();
   if (error || !updated) {
+    // Nothing became public: the copies this attempt made are removed again.
+    await releaseImages(service, a.group_id, promoted.created);
     await markSnapshotNotPublished(service, revisionId, error?.message ?? 'güncellenemedi');
-    return NextResponse.json({ ok: false, error: error?.message ?? 'Güncellenemedi (yetki?).' }, { status: 500 });
+    return NextResponse.json({ ok: false, error: error?.message ?? 'İçerik bu arada başka bir yerde değişti ya da yetki yok; yayın yapılmadı. Sayfayı yenileyip tekrar deneyin.' }, { status: error ? 500 : 409 });
   }
+  await verifyPublishedImages(service, a.group_id, nextBody);
   // Fingerprint of what is public now: a later bulk publish leaves an unchanged version alone.
   if (action === 'publish') await finalizePublishRecord(service, revisionId, updated as Record<string, unknown>, { outcome: 'published', by });
   else await finalizePublishRecord(service, revisionId, updated as Record<string, unknown>, { by });
