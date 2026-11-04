@@ -222,6 +222,11 @@ function LeadsInner() {
   const makeClient = async (lead: Lead) => {
     const client = await clientFromLead(lead);
     if (!client) return say('Müşteri oluşturulamadı — CRM tabloları (SQL v8) kurulu mu?');
+    if (client.matched) {
+      if (lead.status === 'new') await change(lead, { status: 'contacted' });
+      say(`Aynı e-posta ya da firma adıyla kayıtlı müşteri bulundu (${client.name}) — yeni kayıt açılmadı, talep o kayda not olarak eklendi.`);
+      return router.push(`/admin/clients?id=${client.id}`);
+    }
     if (client.existing) {
       say('Bu lead zaten müşteri — mevcut kayıt açılıyor.');
       return router.push(`/admin/clients?id=${client.id}`);

@@ -33,6 +33,8 @@ import {
   type Currency,
   type Deal,
   type DealStage,
+  ensureCustomerRole,
+  findMatchingClient,
 } from '@/lib/cockpit/crm';
 
 /**
@@ -112,6 +114,18 @@ function ClientsInner() {
     }
     setNewBusy(true);
     setNewError('');
+    // The same table as Operasyon → Müşteriler ve firmalar: a firm entered there
+    // (also one that is only a provider) is reused, never entered twice.
+    const match = await findMatchingClient(name);
+    if (match) {
+      await ensureCustomerRole(match);
+      setNewBusy(false);
+      setCreating(false);
+      say(`${match.name} zaten kayıtlı (Operasyon'da girilmiş) — aynı kayıt açıldı, yeni kayıt oluşturulmadı.`);
+      await reload();
+      select(match.id);
+      return;
+    }
     const client = await saveClient({ name, status: 'prospect', source_type: 'manual' });
     setNewBusy(false);
     if (!client) {
@@ -129,7 +143,7 @@ function ClientsInner() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Müşteriler</h1>
-          <p className="mt-1.5 text-[14px] text-muted">Adaylar, aktif müşteriler, fırsatlar ve yapılacaklar.</p>
+          <p className="mt-1.5 text-[14px] text-muted">Adaylar, aktif müşteriler, fırsatlar ve yapılacaklar. Kayıtlar Operasyon → <Link href="/admin/ops/clients" className="underline">Müşteriler ve firmalar</Link> ile aynıdır; bir firma iki yere ayrı ayrı girilmez.</p>
         </div>
         <div className="flex items-center gap-3">
           {flash && <span role="status" className="text-[13px] font-bold text-yoca-lime">{flash}</span>}
@@ -319,6 +333,8 @@ function ClientDetail({
       <Card
         title="Müşteri"
         action={
+          <span className="flex items-center gap-3">
+          <Link href={`/admin/ops/clients/${client.id}`} className="text-[12px] font-bold text-muted hover:text-yoca-lime">Operasyon kaydı →</Link>
           <button
             type="button"
             onClick={async () => {
@@ -328,6 +344,7 @@ function ClientDetail({
           >
             Sil
           </button>
+          </span>
         }
       >
         <div className="grid gap-3 sm:grid-cols-2">

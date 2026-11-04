@@ -11,6 +11,7 @@
   - Bireysel ya da firma; bir firma hem müşteri hem sağlayıcı olabilir.
   - Detay sekmeleri: Özet, Kişiler, Projeler, Hizmetler, Finans, Lisanslar, Belgeler, İşlem geçmişi.
   - Lead bağlantısı başvuruyu kopyalamaz ve silmez. CRM (fırsatlar, aktiviteler) eski ekranda kalır; aradaki bağlantı detayda.
+  - **Tek müşteri kaydı:** CRM (Kokpit → "CRM · fırsatlar") ve bu ekran aynı `clients` tablosunu kullanır; ayrı bir müşteri listesi yoktur. CRM'de aynı adla (büyük/küçük harf farkı gözetmeden) yeni müşteri açılmak istenirse mevcut kayıt açılır; yalnız sağlayıcı olan bir firmaya müşteri rolü eklenir. "Müşteri yap" ile dönüştürülen bir lead, e-postası bir müşteride ya da kişide, veya firma adı bir kayıtta varsa o kayda not olarak eklenir; ikinci kayıt açılmaz.
 - **Hizmetler ve varlıklar:** kayıt için yalnızca ad ve tür gerekir; kalan alanlar açılır bölümlerde.
   - Bir hizmet birden çok müşteriye ya da projeye bağlanabilir (ortak sunucu tek kayıttır).
   - Hizmet durumu, tahsilat, sağlayıcı ödemesi ve yenileme ayrı gösterilir.
