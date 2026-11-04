@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseServiceRole } from '@/lib/supabase';
 import { SITE } from '@/lib/notifyTemplates';
-import { articleUrl, asLocale, chunk, NEWSLETTER_LOCALES, pickVersion, TEST_VALID_MS, unsubscribeUrl, type PublishedVersion } from '@/lib/newsletter/core';
+import { articleUrl, asLocale, chunk, NEWSLETTER_LOCALES, pickVersion, sanitizeCopy, TEST_VALID_MS, unsubscribeUrl, type EmailCopy, type NewsletterLocale, type PublishedVersion } from '@/lib/newsletter/core';
 import { issueEmail } from '@/lib/newsletter/template';
 import { mailerReady, sendBatch, sendOne, type OutgoingEmail } from '@/lib/newsletter/mailer';
 
@@ -11,6 +11,9 @@ import { mailerReady, sendBatch, sendOne, type OutgoingEmail } from '@/lib/newsl
  * GET                 subscribers + recent sends (panel page)
  * GET ?groupId=…      what one article's send looks like: active subscribers
  *                     per language, published versions, the send record
+ * POST { action: 'save_copy', insightId, copy }  e-mail text per language
+ *                     (subject, preview line, teaser). Saving clears the test,
+ *                     so the next send needs a fresh test with the new text.
  * POST { action: 'test', insightId }  every published language version to
  *                     the signed-in admin's own address ("[Deneme]")
  * POST { action: 'send', insightId }  to every active subscriber, each in
@@ -66,7 +69,7 @@ export async function GET(request: NextRequest) {
       publishedVersions(db, groupId),
       db.from('newsletter_sends').select('*').eq('group_id', groupId).maybeSingle(),
     ]);
-    return NextResponse.json({ ok: true, mailer: mailerReady(), counts: c, versions: versions.map((v) => v.locale), send: send.data ?? null });
+    return NextResponse.json({ ok: true, mailer: mailerReady(), counts: c, versions: versions.map((v) => v.locale), published: versions.map((v) => ({ id: v.id, locale: v.locale, title: v.title, excerpt: v.excerpt })), send: send.data ?? null });
   }
 
   const [c, subs, sends] = await Promise.all([
@@ -86,7 +89,7 @@ export async function POST(request: NextRequest) {
   if (!db) return NextResponse.json({ ok: false, error: 'Sunucu anahtarı yok.' }, { status: 503 });
   if (!mailerReady()) return NextResponse.json({ ok: false, error: 'E-posta gönderimi kurulu değil (RESEND_API_KEY).' }, { status: 503 });
 
-  const body = (await request.json().catch(() => ({}))) as { action?: string; insightId?: string };
+  const body = (await request.json().catch(() => ({}))) as { action?: string; insightId?: string; copy?: unknown };
   if (!/^[0-9a-f-]{36}$/.test(String(body.insightId ?? ''))) return NextResponse.json({ ok: false, error: 'insightId gerekli.' }, { status: 400 });
   const groupId = await groupOf(db, String(body.insightId));
   if (!groupId) return NextResponse.json({ ok: false, error: 'İçerik bulunamadı.' }, { status: 404 });
@@ -95,14 +98,27 @@ export async function POST(request: NextRequest) {
   const site = process.env.VERCEL_ENV === 'production' ? SITE : request.nextUrl.origin;
 
   const { data: existing } = await db.from('newsletter_sends').select('*').eq('group_id', groupId).maybeSingle();
-  let send = existing as { id: string; status: string; test_sent_at: string | null; recipients: number } | null;
+  let send = existing as { id: string; status: string; test_sent_at: string | null; recipients: number; copy?: unknown } | null;
+  const copy = sanitizeCopy(send?.copy);
+  const copyFor = (l: NewsletterLocale): EmailCopy | null => copy[l] ?? null;
+
+  if (body.action === 'save_copy') {
+    if (send && send.status !== 'draft') return NextResponse.json({ ok: false, error: 'Gönderim başladıktan sonra e-posta metni değiştirilemez.' }, { status: 409 });
+    const next = sanitizeCopy((body as { copy?: unknown }).copy);
+    const now = new Date().toISOString();
+    const res = send
+      ? await db.from('newsletter_sends').update({ copy: next, test_sent_at: null, test_sent_to: null, updated_at: now }).eq('id', send.id)
+      : await db.from('newsletter_sends').insert({ group_id: groupId, insight_id: body.insightId, status: 'draft', copy: next, created_by: admin.email ?? admin.id });
+    if (res.error) return NextResponse.json({ ok: false, error: res.error.message.includes('copy') ? 'v17 SQL çalıştırılmalı (newsletter_sends.copy).' : res.error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, copy: next });
+  }
 
   if (body.action === 'test') {
     const to = admin.email;
     if (!to) return NextResponse.json({ ok: false, error: 'Hesabınızın e-posta adresi okunamadı.' }, { status: 400 });
     const results: string[] = [];
     for (const v of versions) {
-      const mail = issueEmail({ locale: v.locale, version: v, url: articleUrl(site, v), unsubscribeUrl: unsubscribeUrl(site, '0'.repeat(48)), test: true });
+      const mail = issueEmail({ locale: v.locale, version: v, url: articleUrl(site, v), unsubscribeUrl: unsubscribeUrl(site, '0'.repeat(48)), copy: copyFor(v.locale), test: true });
       const r = await sendOne({ to, ...mail });
       results.push(`${v.locale.toUpperCase()}: ${r.ok ? 'gönderildi' : r.error}`);
     }
@@ -160,7 +176,7 @@ export async function POST(request: NextRequest) {
     const mails: OutgoingEmail[] = live.map((r) => {
       const v = pickVersion(asLocale(r.locale), versions) as PublishedVersion;
       const unsub = unsubscribeUrl(site, r.subscriber!.unsubscribe_token);
-      return { to: r.subscriber!.email, ...issueEmail({ locale: asLocale(r.locale), version: v, url: articleUrl(site, v), unsubscribeUrl: unsub }), unsubscribeUrl: unsub };
+      return { to: r.subscriber!.email, ...issueEmail({ locale: asLocale(r.locale), version: v, url: articleUrl(site, v), unsubscribeUrl: unsub, copy: copyFor(v.locale) }), unsubscribeUrl: unsub };
     });
     const results = await sendBatch(mails, `nl-${send.id}-${live[0].id}-${live[live.length - 1].id}`);
     const now = new Date().toISOString();

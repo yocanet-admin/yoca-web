@@ -1,7 +1,7 @@
 import { esc, SITE } from '@/lib/notifyTemplates';
 import { COMPANY } from '@/lib/company';
 import { newsletterCopy } from '@/lib/newsletter/copy';
-import type { NewsletterLocale, PublishedVersion } from '@/lib/newsletter/core';
+import { teaserParagraphs, type EmailCopy, type NewsletterLocale, type PublishedVersion } from '@/lib/newsletter/core';
 
 /**
  * Yoca — newsletter e-mails (server only).
@@ -59,7 +59,8 @@ function button(label: string, href: string, rtl: boolean): string {
 
 function footer(locale: NewsletterLocale, unsubscribe?: string): string {
   const t = newsletterCopy(locale).issue;
-  const unsub = unsubscribe ? ` <a href="${esc(unsubscribe)}" style="color:${C.muted};text-decoration:underline;">${esc(t.unsubscribe)}</a>` : '';
+  // Both links open the preferences page (language choice + leave); one-click leave is the List-Unsubscribe header.
+  const unsub = unsubscribe ? ` <a href="${esc(unsubscribe)}" style="color:${C.muted};text-decoration:underline;">${esc(t.preferences)}</a> · <a href="${esc(unsubscribe)}" style="color:${C.muted};text-decoration:underline;">${esc(t.unsubscribe)}</a>` : '';
   return `${esc(t.why)}${unsub}<br><span dir="ltr">${esc(COMPANY.legalName)} · ${esc(COMPANY.address.line)} · <a href="${SITE}/${locale}" style="color:${C.muted};text-decoration:none;">${esc(t.site)}</a></span>`;
 }
 
@@ -77,8 +78,11 @@ ${button(t.button, url, rtl)}
   return { subject: t.subject, html, text };
 }
 
-export function issueEmail(opts: { locale: NewsletterLocale; version: PublishedVersion; url: string; unsubscribeUrl: string; test?: boolean }): { subject: string; html: string; text: string } {
+export function issueEmail(opts: { locale: NewsletterLocale; version: PublishedVersion; url: string; unsubscribeUrl: string; copy?: EmailCopy | null; test?: boolean }): { subject: string; html: string; text: string } {
   const { version: v } = opts;
+  // E-mail text written for the newsletter (OpenAI suggestion, edited by the admin); else title/excerpt.
+  const paragraphs = opts.copy?.teaser ? teaserParagraphs(opts.copy.teaser) : [v.excerpt];
+  const preheader = (opts.copy?.preheader || v.excerpt).slice(0, 160);
   // The text follows the article's language (it may be a fallback language);
   // the footer follows the subscriber's language.
   const t = newsletterCopy(v.locale).issue;
@@ -91,11 +95,11 @@ export function issueEmail(opts: { locale: NewsletterLocale; version: PublishedV
   const body = `${cover}<div style="padding:28px 28px 32px 28px;" dir="${dir}">
 <p style="margin:0 0 12px 0;font:700 11px/1.4 ${FONT};letter-spacing:0.6px;color:${C.ink};"><span style="display:inline-block;width:9px;height:9px;background:${C.lime};margin:0 8px;vertical-align:0;"></span>${esc(t.kicker)}</p>
 <h1 style="margin:0 0 12px 0;font:800 26px/1.22 ${FONT};letter-spacing:-0.4px;color:${C.ink};">${esc(v.title)}</h1>
-<p style="margin:0 0 16px 0;font:400 16px/1.65 ${FONT};color:${C.muted};">${esc(v.excerpt)}</p>
+${paragraphs.map((p) => `<p style="margin:0 0 14px 0;font:400 16px/1.65 ${FONT};color:${C.muted};">${esc(p)}</p>`).join('')}
 ${meta}${button(t.read, opts.url, rtl)}
 </div>`;
-  const subject = `${opts.test ? '[Deneme] ' : ''}${v.title}`;
-  const html = shell({ locale: v.locale, title: v.title, preheader: v.excerpt.slice(0, 140), body, footer: footer(v.locale, opts.unsubscribeUrl) });
-  const text = `${t.kicker}\n\n${v.title}\n\n${v.excerpt}\n\n${t.read}: ${opts.url}\n\n—\n${t.why}\n${t.unsubscribe}: ${opts.unsubscribeUrl}\n${COMPANY.legalName} · ${COMPANY.address.line}`;
+  const subject = `${opts.test ? '[Deneme] ' : ''}${opts.copy?.subject || v.title}`;
+  const html = shell({ locale: v.locale, title: v.title, preheader, body, footer: footer(v.locale, opts.unsubscribeUrl) });
+  const text = `${t.kicker}\n\n${v.title}\n\n${paragraphs.join('\n\n')}\n\n${t.read}: ${opts.url}\n\n—\n${t.why}\n${t.unsubscribe}: ${opts.unsubscribeUrl}\n${COMPANY.legalName} · ${COMPANY.address.line}`;
   return { subject, html, text };
 }

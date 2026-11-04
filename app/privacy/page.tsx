@@ -139,7 +139,7 @@ export default async function PrivacyPage() {
               </ul>
               <h3 className="font-extrabold text-white">Insights bülteni</h3>
               <ul className="list-disc ps-5">
-                <li>E-posta adresiniz (zorunlu) ve kayıt olduğunuz sayfanın dili (bülteni hangi dilde alacağınızı belirler)</li>
+                <li>E-posta adresiniz (zorunlu) ve seçtiğiniz bülten dili (başlangıçta kayıt olduğunuz sayfanın dili; her e-postadaki “Dil tercihi” bağlantısıyla değiştirilebilir)</li>
                 <li>Onay kaydı: kutunun yanında gösterilen metnin kendisi, işaretlediğiniz zaman, formun yeri (Insights sayfası veya altbilgi) ve IP adresinizin tek yönlü SHA-256 özeti (IP adresinin kendisi saklanmaz)</li>
                 <li>Abonelik durumu (onay bekliyor, aktif, ayrıldı) ile kayıt, onay ve ayrılma zamanları</li>
                 <li>Onay bağlantısının tek yönlü özeti (7 gün geçerli; onaylanınca silinir) ve size özel bir ayrılma anahtarı (her e-postadaki “Bültenden ayrıl” bağlantısı için)</li>

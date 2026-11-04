@@ -1,12 +1,14 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import type { NewsletterCopy } from '@/lib/newsletter/copy';
+import { LANGUAGE_NAMES, type NewsletterCopy } from '@/lib/newsletter/copy';
 
 /**
  * Yoca — newsletter sign-up (double opt-in). E-mail + an explicit consent
  * box (never pre-ticked). The server answers the same way for new and
  * existing addresses; the visitor is told to confirm from their inbox.
+ * The newsletter language starts as the page language and can be changed
+ * here (and later from the preferences link in every e-mail).
  */
 
 interface Props {
@@ -20,6 +22,7 @@ interface Props {
 export default function NewsletterForm({ locale, copy, privacyHref, source, variant = 'panel' }: Props) {
   const openedAt = useRef(Date.now());
   const [email, setEmail] = useState('');
+  const [listLocale, setListLocale] = useState(locale);
   const [consent, setConsent] = useState(false);
   const [website, setWebsite] = useState('');
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
@@ -37,7 +40,7 @@ export default function NewsletterForm({ locale, copy, privacyHref, source, vari
       const res = await fetch('/api/newsletter/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, locale, consent, website, elapsed: Date.now() - openedAt.current, source }),
+        body: JSON.stringify({ email, locale, listLocale, consent, website, elapsed: Date.now() - openedAt.current, source }),
       });
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; error?: string };
       if (res.ok && json.ok) { setState('done'); setMessage(json.message ?? copy.success); setEmail(''); }
@@ -71,6 +74,16 @@ export default function NewsletterForm({ locale, copy, privacyHref, source, vari
               dir="ltr"
               className="min-h-[46px] flex-1 rounded-sm border border-line bg-surface-deep px-4 text-[15px] text-white placeholder:text-subtle focus:border-yoca-lime focus:outline-none"
             />
+            <label htmlFor={`${id}-lang`} className="sr-only">{copy.langLabel}</label>
+            <select
+              id={`${id}-lang`}
+              value={listLocale}
+              onChange={(e) => setListLocale(e.target.value)}
+              title={copy.langLabel}
+              className="min-h-[46px] rounded-sm border border-line bg-surface-deep px-3 text-[14px] text-white focus:border-yoca-lime focus:outline-none"
+            >
+              {Object.entries(LANGUAGE_NAMES).map(([code, name]) => <option key={code} value={code} lang={code}>{name}</option>)}
+            </select>
             <button type="submit" disabled={state === 'sending'} className="btn-primary min-h-[46px] justify-center !px-6 disabled:opacity-60">
               {state === 'sending' ? copy.sending : copy.submit}
             </button>

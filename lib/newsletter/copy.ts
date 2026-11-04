@@ -22,6 +22,7 @@ export interface NewsletterCopy {
     errorConsent: string;
     errorGeneric: string;
     tooMany: string;
+    langLabel: string;
   };
   page: {
     metaTitle: string;
@@ -30,11 +31,12 @@ export interface NewsletterCopy {
     invalid: { title: string; body: string };
     expired: { title: string; body: string };
     unsubscribePrompt: { title: string; body: string; button: string };
+    prefs: { title: string; body: string; save: string; saved: string; leave: string };
     working: string;
     back: string;
   };
   confirmEmail: { subject: string; preheader: string; heading: string; body: string; button: string; ignore: string };
-  issue: { kicker: string; read: string; minRead: string; why: string; unsubscribe: string; site: string };
+  issue: { kicker: string; read: string; minRead: string; why: string; unsubscribe: string; preferences: string; site: string };
 }
 
 export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
@@ -53,6 +55,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       errorConsent: 'Devam etmek için onay kutusunu işaretleyin.',
       errorGeneric: 'Şu an kaydedilemedi. Lütfen biraz sonra tekrar deneyin.',
       tooMany: 'Kısa sürede çok fazla deneme yapıldı. Lütfen biraz sonra tekrar deneyin.',
+      langLabel: 'Bülten dili',
     },
     page: {
       metaTitle: 'Bülten | Yoca',
@@ -62,6 +65,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       expired: { title: 'Bağlantının süresi doldu', body: 'Onay bağlantıları 7 gün geçerlidir. Formdan yeniden abone olursanız yeni bir bağlantı göndeririz.' },
       unsubscribePrompt: { title: 'Bültenden ayrılmak istiyor musunuz?', body: 'Onaylarsanız bu adrese Yoca Insights e-postası gönderilmez.', button: 'Bültenden ayrıl' },
       working: 'İşleniyor…',
+      prefs: { title: 'Bülten tercihleri', body: 'Bülteni hangi dilde alacağınızı seçebilir ya da bültenden ayrılabilirsiniz.', save: 'Dili kaydet', saved: 'Kaydedildi. Sonraki e-postalar bu dilde gelir (yazının bu dildeki sürümü yayındaysa).', leave: 'Bültenden ayrılmak' },
       back: 'Insights’a dön',
     },
     confirmEmail: {
@@ -78,6 +82,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       minRead: 'dk okuma',
       why: 'Bu e-postayı yoca.net üzerinden Yoca Insights bültenine abone olduğunuz için alıyorsunuz.',
       unsubscribe: 'Bültenden ayrıl',
+      preferences: 'Dil tercihi',
       site: 'yoca.net',
     },
   },
@@ -96,6 +101,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       errorConsent: 'Please tick the consent box to continue.',
       errorGeneric: 'We could not save this right now. Please try again shortly.',
       tooMany: 'Too many attempts. Please try again later.',
+      langLabel: 'Newsletter language',
     },
     page: {
       metaTitle: 'Newsletter | Yoca',
@@ -105,6 +111,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       expired: { title: 'This link has expired', body: 'Confirmation links are valid for 7 days. Subscribe again and we will send a new one.' },
       unsubscribePrompt: { title: 'Unsubscribe from the newsletter?', body: 'If you confirm, this address will no longer receive Yoca Insights e-mails.', button: 'Unsubscribe' },
       working: 'Working…',
+      prefs: { title: 'Newsletter preferences', body: 'Choose the language you receive the newsletter in, or unsubscribe.', save: 'Save language', saved: 'Saved. Future e-mails come in this language (when the article is published in it).', leave: 'Unsubscribe' },
       back: 'Back to Insights',
     },
     confirmEmail: {
@@ -121,6 +128,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       minRead: 'min read',
       why: 'You are receiving this e-mail because you subscribed to the Yoca Insights newsletter on yoca.net.',
       unsubscribe: 'Unsubscribe',
+      preferences: 'Language preference',
       site: 'yoca.net',
     },
   },
@@ -139,6 +147,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       errorConsent: 'Davam etmək üçün razılıq qutusunu işarələyin.',
       errorGeneric: 'Hazırda yadda saxlamaq mümkün olmadı. Bir az sonra yenidən cəhd edin.',
       tooMany: 'Qısa müddətdə çox cəhd edildi. Bir az sonra yenidən cəhd edin.',
+      langLabel: 'Bülleten dili',
     },
     page: {
       metaTitle: 'Bülleten | Yoca',
@@ -148,6 +157,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       expired: { title: 'Keçidin müddəti bitib', body: 'Təsdiq keçidləri 7 gün etibarlıdır. Yenidən abunə olsanız, yeni keçid göndərəcəyik.' },
       unsubscribePrompt: { title: 'Bülletendən çıxmaq istəyirsiniz?', body: 'Təsdiqləsəniz, bu ünvana Yoca Insights e-poçtu göndərilməyəcək.', button: 'Abunəlikdən çıx' },
       working: 'İcra olunur…',
+      prefs: { title: 'Bülleten seçimləri', body: 'Bülleteni hansı dildə alacağınızı seçə və ya abunəlikdən çıxa bilərsiniz.', save: 'Dili yadda saxla', saved: 'Yadda saxlanıldı. Növbəti e-poçtlar bu dildə gələcək (yazı bu dildə dərc olunubsa).', leave: 'Abunəlikdən çıxmaq' },
       back: 'Insights-a qayıt',
     },
     confirmEmail: {
@@ -164,6 +174,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       minRead: 'dəq oxu',
       why: 'Bu e-poçtu yoca.net saytında Yoca Insights bülletenə abunə olduğunuz üçün alırsınız.',
       unsubscribe: 'Abunəlikdən çıx',
+      preferences: 'Dil seçimi',
       site: 'yoca.net',
     },
   },
@@ -182,6 +193,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       errorConsent: 'يرجى تحديد مربع الموافقة للمتابعة.',
       errorGeneric: 'تعذّر الحفظ الآن. يرجى المحاولة بعد قليل.',
       tooMany: 'محاولات كثيرة في وقت قصير. يرجى المحاولة لاحقًا.',
+      langLabel: 'لغة النشرة',
     },
     page: {
       metaTitle: 'النشرة البريدية | Yoca',
@@ -191,6 +203,7 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       expired: { title: 'انتهت صلاحية الرابط', body: 'روابط التأكيد صالحة لمدة 7 أيام. اشترك مجددًا وسنرسل لك رابطًا جديدًا.' },
       unsubscribePrompt: { title: 'هل تريد إلغاء الاشتراك في النشرة؟', body: 'عند التأكيد لن تصل رسائل Yoca Insights إلى هذا العنوان.', button: 'إلغاء الاشتراك' },
       working: 'جارٍ التنفيذ…',
+      prefs: { title: 'تفضيلات النشرة', body: 'اختر اللغة التي تصلك بها النشرة، أو ألغِ اشتراكك.', save: 'حفظ اللغة', saved: 'تم الحفظ. ستصلك الرسائل القادمة بهذه اللغة (إذا نُشر المقال بها).', leave: 'إلغاء الاشتراك' },
       back: 'العودة إلى Insights',
     },
     confirmEmail: {
@@ -207,10 +220,14 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       minRead: 'دقائق قراءة',
       why: 'تصلك هذه الرسالة لأنك اشتركت في نشرة Yoca Insights عبر yoca.net.',
       unsubscribe: 'إلغاء الاشتراك',
+      preferences: 'تفضيل اللغة',
       site: 'yoca.net',
     },
   },
 };
+
+/** Language names in their own language (newsletter language choice). */
+export const LANGUAGE_NAMES: Record<Locale, string> = { tr: 'Türkçe', en: 'English', az: 'Azərbaycanca', ar: 'العربية' };
 
 export function newsletterCopy(locale: string): NewsletterCopy {
   return NEWSLETTER_COPY[(locale in NEWSLETTER_COPY ? locale : 'en') as Locale];

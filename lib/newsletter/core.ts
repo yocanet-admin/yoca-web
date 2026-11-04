@@ -68,6 +68,32 @@ export function pickVersion(locale: NewsletterLocale, versions: PublishedVersion
   );
 }
 
+/** Admin-written e-mail text for one language (newsletter_sends.copy[locale]). */
+export interface EmailCopy {
+  subject?: string;
+  preheader?: string;
+  teaser?: string;
+}
+
+/** Only known keys, trimmed and capped. Pure. */
+export function sanitizeCopy(input: unknown): Partial<Record<NewsletterLocale, EmailCopy>> {
+  const out: Partial<Record<NewsletterLocale, EmailCopy>> = {};
+  if (!input || typeof input !== 'object') return out;
+  for (const l of NEWSLETTER_LOCALES) {
+    const c = (input as Record<string, unknown>)[l] as Record<string, unknown> | undefined;
+    if (!c || typeof c !== 'object') continue;
+    const s = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+    const entry = { subject: s(c.subject, 120), preheader: s(c.preheader, 200), teaser: s(c.teaser, 1400) };
+    if (entry.subject || entry.preheader || entry.teaser) out[l] = entry;
+  }
+  return out;
+}
+
+/** Teaser → paragraphs (blank line separated). */
+export function teaserParagraphs(teaser: string): string[] {
+  return teaser.split(/\n\s*\n/).map((p) => p.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+}
+
 export function articleUrl(site: string, v: Pick<PublishedVersion, 'locale' | 'slug'>): string {
   const params = new URLSearchParams({ utm_source: 'newsletter', utm_medium: 'email', utm_campaign: `insights-${v.slug}`.slice(0, 100) });
   return `${site}/${v.locale}/insights/${encodeURIComponent(v.slug)}?${params.toString()}`;

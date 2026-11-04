@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { adminFetch } from '@/lib/insightsAdmin';
+import EmailCopyEditor, { type PublishedRef } from '@/components/admin/insights/EmailCopyEditor';
 
 /**
  * Yoca Admin — "Bülten" box on a published article.
@@ -10,6 +11,8 @@ import { adminFetch } from '@/lib/insightsAdmin';
  * 2. "Bültene gönder": to every active subscriber, in their language
  *    (EN, otherwise the source article, when their language is not
  *    published). Possible once per article, within 24 h of a test.
+ * The e-mail text (subject, preview line, teaser) is written per language
+ * in EmailCopyEditor (OpenAI suggests, the admin edits).
  * Publishing never sends e-mail by itself.
  */
 
@@ -21,11 +24,13 @@ interface SendRow {
   sent: number;
   failed: number;
   finished_at: string | null;
+  copy?: Record<string, { subject?: string; preheader?: string; teaser?: string }>;
 }
 interface Info {
   mailer: boolean;
   counts: { active: Record<string, number>; pending: number; unsubscribed: number };
   versions: string[];
+  published: PublishedRef[];
   send: SendRow | null;
 }
 
@@ -86,6 +91,7 @@ export default function NewsletterBox({ insightId, groupId, dirty }: { insightId
       ) : (
         <>
           <p className="text-[12px] text-subtle">Yayındaki diller: {info.versions.map((l) => l.toUpperCase()).join(', ') || '—'}. Her abone kendi dilindeki sürümü alır.</p>
+          <EmailCopyEditor insightId={insightId} published={info.published ?? []} saved={info.send?.copy ?? {}} locked={status === 'sending' || status === 'partial'} onSaved={load} />
           <div className="flex flex-wrap gap-2">
             <button type="button" className={small} disabled={!!busy || dirty || !info.mailer} onClick={test}>Bana deneme gönder</button>
             <button type="button" className="admin-btn-primary !px-3 !py-1 !text-[12px]" disabled={!!busy || dirty || !info.mailer || !testOk || active === 0} onClick={send} title={!testOk ? 'Önce son 24 saat içinde kendinize deneme gönderin.' : undefined}>

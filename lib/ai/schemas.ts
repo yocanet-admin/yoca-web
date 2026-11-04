@@ -356,3 +356,31 @@ export function validateCoverBrief(v: unknown): v is CoverBrief {
   const d = v as Partial<CoverBrief>;
   return !!d && isString(d.brief, 2000) && ['photo', 'illustration', 'diagram'].includes(String(d.approach)) && isString(d.alt, 400);
 }
+
+// ── Newsletter e-mail copy ──────────────────────────────────────
+export const EmailTeaserSchema = {
+  name: 'email_teaser',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['subject', 'preheader', 'teaser', 'notes'],
+    properties: { subject: str, preheader: str, teaser: str, notes: str },
+  },
+};
+export interface EmailTeaser {
+  subject: string;
+  preheader: string;
+  teaser: string;
+  /** Short note for the editor (Turkish): which hook was used. */
+  notes: string;
+}
+export function validateEmailTeaser(v: unknown): v is EmailTeaser {
+  const d = v as Partial<EmailTeaser>;
+  return (
+    !!d &&
+    isString(d.subject, 120) && d.subject.trim().length > 0 &&
+    isString(d.preheader, 200) &&
+    isString(d.teaser, 1400) && d.teaser.trim().length > 0 &&
+    isString(d.notes, 400)
+  );
+}

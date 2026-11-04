@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { articleUrl, asLocale, chunk, confirmUrl, hashToken, isTokenShape, maskEmail, newToken, normalizeEmail, pickVersion, unsubscribeUrl, type PublishedVersion } from '../lib/newsletter/core';
+import { articleUrl, asLocale, chunk, confirmUrl, hashToken, isTokenShape, maskEmail, newToken, normalizeEmail, pickVersion, sanitizeCopy, teaserParagraphs, unsubscribeUrl, type PublishedVersion } from '../lib/newsletter/core';
 import { NEWSLETTER_COPY } from '../lib/newsletter/copy';
 import { confirmEmail, issueEmail } from '../lib/newsletter/template';
 
@@ -85,4 +85,27 @@ test('Arabic e-mail is right-to-left; confirm e-mail has the link', () => {
   const c = confirmEmail('az', 'https://yoca.net/api/newsletter/confirm?token=' + 'd'.repeat(48));
   assert.ok(c.html.includes('d'.repeat(48)) && c.text.includes('d'.repeat(48)));
   assert.equal(c.subject, NEWSLETTER_COPY.az.confirmEmail.subject);
+});
+
+test('e-mail copy: sanitised per language; teaser paragraphs', () => {
+  const c = sanitizeCopy({ tr: { subject: '  Konu ', preheader: 'Ön', teaser: 'A\nB\n\nC', extra: 'x' }, xx: { subject: 'no' }, en: { subject: '', preheader: '', teaser: '' }, az: 'bad' });
+  assert.deepEqual(Object.keys(c), ['tr']);
+  assert.equal(c.tr?.subject, 'Konu');
+  assert.equal((c.tr as Record<string, unknown>).extra, undefined);
+  assert.deepEqual(teaserParagraphs('İlk satır\ndevamı\n\n\nİkinci paragraf'), ['İlk satır devamı', 'İkinci paragraf']);
+  assert.deepEqual(sanitizeCopy(null), {});
+});
+
+test('issue e-mail uses the written copy (subject, preview, teaser) and escapes it', () => {
+  const unsub = unsubscribeUrl('https://yoca.net', 'e'.repeat(48));
+  const mail = issueEmail({ locale: 'tr', version: v('tr'), url: 'https://yoca.net/tr/insights/x', unsubscribeUrl: unsub, copy: { subject: 'Formunuz müşteri kaçırıyor olabilir', preheader: 'Üç alan, bir karar', teaser: 'Birinci <i>paragraf</i>.\n\nİkinci paragraf.' } });
+  assert.equal(mail.subject, 'Formunuz müşteri kaçırıyor olabilir');
+  assert.ok(mail.html.includes('Üç alan, bir karar'), 'preheader');
+  assert.ok(mail.html.includes('Birinci &lt;i&gt;paragraf&lt;/i&gt;.') && mail.html.includes('İkinci paragraf.'));
+  assert.ok(!mail.html.includes('Excerpt &lt;b&gt;'), 'teaser replaces excerpt');
+  assert.ok(mail.html.includes('Title tr'), 'title stays as heading');
+  assert.ok(mail.html.includes('Dil tercihi') && mail.html.includes('Bültenden ayrıl'), 'preferences + leave links');
+  assert.ok(mail.text.includes('İkinci paragraf.'));
+  const fallback = issueEmail({ locale: 'tr', version: v('tr'), url: 'https://yoca.net/x', unsubscribeUrl: unsub, copy: null });
+  assert.equal(fallback.subject, 'Title tr');
 });

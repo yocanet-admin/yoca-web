@@ -22,6 +22,8 @@ export const dynamic = 'force-dynamic';
 interface Body {
   email?: string;
   locale?: string;
+  /** Newsletter language (defaults to the page language). */
+  listLocale?: string;
   consent?: boolean;
   website?: string; // honeypot
   elapsed?: number;
@@ -36,6 +38,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
   const locale = asLocale(body.locale);
+  const listLocale = body.listLocale ? asLocale(body.listLocale) : locale;
   const t = newsletterCopy(locale).form;
   const ip = clientIp(request.headers);
 
@@ -76,7 +79,7 @@ export async function POST(request: NextRequest) {
   const now = new Date();
   const fields = {
     email,
-    locale,
+    locale: listLocale,
     status: 'pending',
     confirm_token_hash: hashToken(token),
     confirm_expires_at: new Date(now.getTime() + CONFIRM_TTL_MS).toISOString(),
@@ -100,7 +103,7 @@ export async function POST(request: NextRequest) {
 
   // Production links always point at yoca.net (never at a Host header value).
   const site = process.env.VERCEL_ENV === 'production' ? SITE : request.nextUrl.origin;
-  const mail = confirmEmail(locale, confirmUrl(site, token));
+  const mail = confirmEmail(listLocale, confirmUrl(site, token));
   const sent = await sendOne({ to: email, ...mail });
   if (!sent.ok) {
     console.error('newsletter: confirmation e-mail failed', sent.error);
