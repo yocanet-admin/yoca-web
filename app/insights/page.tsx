@@ -5,6 +5,8 @@ import SiteFooter from '@/components/SiteFooter';
 import PageIntro from '@/components/ui/PageIntro';
 import CtaSection from '@/components/sections/CtaSection';
 import InsightCard from '@/components/insights/InsightCard';
+import NewsletterForm from '@/components/newsletter/NewsletterForm';
+import { newsletterCopy } from '@/lib/newsletter/copy';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { buildMetadata, breadcrumbSchema, getRequestContext, jsonLdString } from '@/lib/seo';
@@ -36,6 +38,8 @@ export default async function InsightsPage({ searchParams }: PageProps) {
     category ? Promise.resolve(null) : getFeaturedInsight(ctx.locale),
     listInsights(ctx.locale, { category, page }),
   ]);
+  // Like the contact and Check-Up forms, the sign-up links to the notice in every state.
+  const privacyHref = `${base}/privacy`;
   const items = list.items.filter((item) => item.id !== featured?.id);
   const totalPages = Math.max(1, Math.ceil(list.total / INSIGHTS_PAGE_SIZE));
   const hasAny = Boolean(featured) || items.length > 0;
@@ -111,6 +115,12 @@ export default async function InsightsPage({ searchParams }: PageProps) {
                 )}
               </div>
             )}
+          </div>
+        </section>
+
+        <section className="relative z-[7] bg-surface-deep pb-16 lg:pb-20" aria-label={newsletterCopy(ctx.locale).form.heading}>
+          <div className="container-y">
+            <NewsletterForm locale={ctx.locale} copy={newsletterCopy(ctx.locale).form} privacyHref={privacyHref} source="insights" />
           </div>
         </section>
 

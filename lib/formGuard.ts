@@ -35,7 +35,7 @@ export function clientIp(headers: Headers): string {
 }
 
 /** True when this IP has used up its submissions for this form in the current window. */
-export async function rateLimited(form: 'contact' | 'checkup', ip: string): Promise<boolean> {
+export async function rateLimited(form: 'contact' | 'checkup' | 'newsletter', ip: string): Promise<boolean> {
   const key = createHash('sha256').update(`${form}:${ip}`).digest('hex');
   const service = getSupabaseServiceRole();
   if (service) {

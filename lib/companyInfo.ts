@@ -36,6 +36,9 @@ export interface CompanyInfo {
   legalBasisCheckup: string;
   retentionContact: string;
   retentionCheckup: string;
+  /** v16 newsletter (Insights bülteni). */
+  legalBasisNewsletter: string;
+  retentionNewsletter: string;
   transferAssessment: string;
   legalReviewDone: boolean;
   legalReviewNote: string;
@@ -61,6 +64,8 @@ export const DEFAULT_COMPANY: CompanyInfo = {
   legalBasisCheckup: '',
   retentionContact: '',
   retentionCheckup: '',
+  legalBasisNewsletter: '',
+  retentionNewsletter: '',
   transferAssessment: '',
   legalReviewDone: false,
   legalReviewNote: '',
@@ -69,7 +74,7 @@ export const DEFAULT_COMPANY: CompanyInfo = {
 const TEXT_FIELDS: Array<[keyof CompanyInfo, number]> = [
   ['controllerName', 200], ['officialAddress', 400], ['siteAddress', 200], ['generalEmail', 200], ['dataRequestChannel', 400], ['kep', 200],
   ['mersis', 40], ['tradeRegistry', 120], ['taxOffice', 120], ['taxNumber', 40], ['noticeVersion', 40], ['noticeUpdatedAt', 10],
-  ['legalBasisContact', 2000], ['legalBasisCheckup', 2000], ['retentionContact', 2000], ['retentionCheckup', 2000], ['transferAssessment', 3000], ['legalReviewNote', 2000],
+  ['legalBasisContact', 2000], ['legalBasisCheckup', 2000], ['retentionContact', 2000], ['retentionCheckup', 2000], ['legalBasisNewsletter', 2000], ['retentionNewsletter', 2000], ['transferAssessment', 3000], ['legalReviewNote', 2000],
 ];
 
 export function sanitizeCompany(input: Partial<CompanyInfo> | null | undefined): CompanyInfo {
@@ -98,6 +103,8 @@ export function missingForNotice(c: CompanyInfo): string[] {
   if (!c.legalBasisCheckup) missing.push('Hukuki sebep — Check-Up');
   if (!c.retentionContact) missing.push('Saklama süresi — iletişim formu');
   if (!c.retentionCheckup) missing.push('Saklama süresi — Check-Up');
+  if (!c.legalBasisNewsletter) missing.push('Hukuki sebep — Insights bülteni');
+  if (!c.retentionNewsletter) missing.push('Saklama süresi — Insights bülteni');
   if (!c.transferAssessment) missing.push('Yurt dışına aktarım değerlendirmesi');
   if (!c.legalReviewDone) missing.push('Hukuki inceleme onayı');
   return missing;

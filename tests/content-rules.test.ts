@@ -176,7 +176,7 @@ test('company: only known facts prefilled; site address is not the legal address
 test('kvkk: final only when flag ON and nothing missing (default draft)', () => {
   const complete = sanitizeCompany({
     ...DEFAULT_COMPANY, controllerName: 'X', controllerType: 'person', officialAddress: 'A', dataRequestChannel: 'B', noticeVersion: '1.0', noticeUpdatedAt: '2026-11-03',
-    legalBasisContact: 'L', legalBasisCheckup: 'L', retentionContact: 'R', retentionCheckup: 'R', transferAssessment: 'T', legalReviewDone: true,
+    legalBasisContact: 'L', legalBasisCheckup: 'L', retentionContact: 'R', retentionCheckup: 'R', legalBasisNewsletter: 'L', retentionNewsletter: 'R', transferAssessment: 'T', legalReviewDone: true,
   });
   assert.equal(missingForNotice(complete).length, 0);
   assert.equal(noticeIsFinal(complete, DEFAULT_KVKK_PUBLISH), false);

@@ -32,6 +32,7 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
       { href: '/admin/content', label: 'Metinler', icon: '¶' },
       { href: '/admin/work', label: 'Work / Projeler', icon: '▣' },
       { href: '/admin/insights', label: 'İçerik / Insights', icon: '✎' },
+      { href: '/admin/newsletter', label: 'Bülten', icon: '❏' },
       { href: '/admin/team', label: 'Ekip', icon: '◉' },
       { href: '/admin/signature', label: 'İmza', icon: '✦' },
     ],

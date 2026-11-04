@@ -7,6 +7,7 @@ import type { FetchedSource } from '@/lib/ai/sources';
 import {
   ArticleDraftSchema,
   CoverBriefSchema,
+  EmailTeaserSchema,
   FaqSchema,
   RepurposeSchema,
   RewriteSchema,
@@ -18,6 +19,7 @@ import {
   TopicIdeasSchema,
   TranslationSchema,
   validateCoverBrief,
+  validateEmailTeaser,
   validateDraft,
   validateSourceCheck,
   validateStyleEdit,
@@ -25,6 +27,7 @@ import {
   validateTranslation,
   type ArticleDraft,
   type CoverBrief,
+  type EmailTeaser,
   type SeoPack,
   type SourceClaim,
   type StyleFinding,
@@ -377,4 +380,37 @@ export async function webResearch(model: string, topic: string, locale: string):
     if (citations.length >= 10) break;
   }
   return { ...res, data: { digest: String(res.data ?? '').slice(0, 6000), citations } };
+}
+
+/**
+ * Newsletter e-mail copy for one language version: a subject line, a
+ * preview line and a short teaser with a hook that makes the reader want to
+ * open the article. Only what the article says; no clickbait.
+ */
+export async function emailTeaser(model: string, article: { title: string; excerpt: string; body: string }, locale: string): Promise<OpenAIResult<EmailTeaser>> {
+  const res = await callOpenAI<EmailTeaser>({
+    model,
+    system: YOCA_EDITORIAL_SYSTEM,
+    user: `Write the newsletter e-mail copy for this Yoca Insight, in ${lang(locale)}. Its only job: make a busy reader open the e-mail and click "read the article". The article itself is not sent; the e-mail is a door to it.
+
+Return:
+- subject: max 60 characters. Concrete and specific: name the reader's situation, the mistake the article helps avoid, or its most useful finding. Not the same sentence as the title. No clickbait ("you won't believe", "the secret", "everything changes"), no false urgency, no ALL CAPS, no emoji, no exclamation mark. A question only if the article really answers it.
+- preheader: max 100 characters. The line shown after the subject in the inbox: adds a second reason to open; does not repeat the subject.
+- teaser: 45–90 words, two short paragraphs separated by one blank line, plain text (no Markdown, no lists, no links). Paragraph 1 opens with a hook taken FROM the article: a concrete situation the reader recognises, a common mistake, or a specific point the article makes that runs against habit. Paragraph 2 says plainly what the reader will get from reading (two or three concrete things the article covers). Do not end with a question, a summary line or a slogan; the button below says "read the article".
+- notes: one short sentence in Turkish for the editor: which hook you used and from which part of the article.
+
+Rules: use only claims, numbers and examples that are in the article; leave out anything marked [KAYNAK GEREKLİ]; promise no results; no invented clients or cases. Follow the no-ai-slop rules in your instructions for ${lang(locale)}: no empty openers, no "not X but Y" constructions, no puffery, no filler.
+
+Title: ${article.title}
+Excerpt: ${article.excerpt}
+
+${fence('TEXT', article.body.slice(0, 30_000))}`,
+    schema: EmailTeaserSchema,
+    maxOutputTokens: 1200,
+  });
+  if (!validateEmailTeaser(res.data)) throw new OpenAIError('E-posta metni doğrulamadan geçmedi.', 502, 'invalid_output', res.requestId);
+  res.data.subject = res.data.subject.trim().slice(0, 90);
+  res.data.preheader = res.data.preheader.trim().slice(0, 140);
+  res.data.teaser = res.data.teaser.trim().replace(/\n{3,}/g, '\n\n');
+  return res;
 }

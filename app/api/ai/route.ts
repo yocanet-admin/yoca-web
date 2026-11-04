@@ -8,6 +8,7 @@ import { finishRun, startRun } from '@/lib/ai/runs';
 import { fetchSources, type FetchedSource } from '@/lib/ai/sources';
 import {
   coverBrief,
+  emailTeaser,
   faqPack,
   generateDraft,
   repurpose,
@@ -55,7 +56,7 @@ function rateLimited(userId: string): boolean {
 }
 
 const LOCALES = new Set(['en', 'tr', 'az', 'ar']);
-const TEXT_ACTIONS = new Set(['ideas', 'research', 'draft', 'rewrite', 'titles', 'source_check', 'style_review', 'style_edit', 'seo', 'translate', 'faq', 'repurpose', 'cover_brief']);
+const TEXT_ACTIONS = new Set(['ideas', 'research', 'draft', 'rewrite', 'titles', 'source_check', 'style_review', 'style_edit', 'seo', 'translate', 'faq', 'repurpose', 'cover_brief', 'email_teaser']);
 const IMAGE_ACTIONS = new Set(['image_generate', 'image_edit']);
 
 type Payload = Record<string, unknown>;
@@ -206,6 +207,16 @@ export async function POST(request: NextRequest) {
         if (!body.trim()) throw new OpenAIError('Kontrol edilecek metin yok.', 400, 'bad_request');
         const fetched = await fetchSources(urls(payload.sourceUrls));
         result = take(await sourceCheck(model, body, locale, fetched, str(payload.notes, cap / 2)));
+        break;
+      }
+      case 'email_teaser': {
+        // Reads the article version itself (server side), so the panel sends only its id.
+        const svc = getSupabaseServiceRole();
+        if (!svc || !insightId) throw new OpenAIError('Yazı bulunamadı.', 400, 'bad_request');
+        const { data: row } = await svc.from('insights').select('title, excerpt, body_md, locale').eq('id', insightId).maybeSingle();
+        const a = row as { title: string; excerpt: string; body_md: string; locale: string } | null;
+        if (!a || !a.body_md?.trim()) throw new OpenAIError('Yazının metni yok.', 400, 'bad_request');
+        result = take(await emailTeaser(model, { title: a.title, excerpt: a.excerpt, body: a.body_md.slice(0, cap) }, a.locale || locale));
         break;
       }
       case 'seo':

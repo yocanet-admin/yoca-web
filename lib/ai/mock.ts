@@ -126,6 +126,8 @@ export function mockStructured(schemaName: string, input: string): unknown {
       return { brief: 'Siyah zemin üzerinde kırık beyaz bir randevu kartı ve tek yeşil çizgi; yazı yok.', approach: 'photo', alt: 'Siyah zeminde kırık beyaz kart ve yeşil çizgi.' };
     case 'faq_pack':
       return { faq: [] };
+    case 'email_teaser':
+      return { subject: 'Mock konu satırı', preheader: 'Mock önizleme', teaser: 'Mock kanca paragrafı.\n\nMock ikinci paragraf.', notes: 'mock' };
     case 'lead_summary':
       return { ozet: 'Mock özet', ihtiyaclar: [], butce: 'belirtilmemiş', aciliyet: 'orta', uygunluk: 3, uygunluk_nedeni: 'mock', spam_olasiligi: 'düşük', sonraki_adim: 'mock', sorular: [] };
     case 'lead_reply':
