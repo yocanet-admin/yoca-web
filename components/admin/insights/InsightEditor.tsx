@@ -18,7 +18,8 @@ import {
 } from '@/lib/insightsAdmin';
 import { readingMinutes } from '@/lib/markdown';
 import type { ArticleDraft, Translation } from '@/lib/ai/schemas';
-import { sourceFingerprint, uniqueSlug, asciiSlug, type TranslatableFields } from '@/lib/ai/translateHelpers';
+import { sourceFingerprint, type TranslatableFields } from '@/lib/ai/translateHelpers';
+import { saveTranslationsToGroup } from '@/lib/insightTranslations';
 import type { SiblingInfo } from '@/components/admin/insights/MultilangPanel';
 import type { InsightCategoryRow, InsightRow, InsightSource, Locale } from '@/types';
 import StudioPanel from '@/components/admin/insights/StudioPanel';
@@ -41,6 +42,13 @@ import type { StudioImage } from '@/components/admin/insights/ImageStudio';
  * of the source text, so a changed source shows "kaynak değişti". A
  * translation needs "Dil kontrolü yapıldı" before it can be published;
  * "Tüm dilleri yayınla" publishes the source and its checked translations.
+ *
+ * Embedded (InsightWorkspace): one editor per language tab of the same
+ * article. The workspace keeps every opened editor mounted, so switching
+ * tabs never drops unsaved edits; the editor reports its current text and
+ * dirty state (onState) so the shared "Yayınla" dialog can save + publish
+ * the selected languages, and reloads itself when the workspace asks
+ * (reloadToken, after that dialog published this language).
  */
 
 type RevisionRow = { id: string; created_at: string; reason: string | null; title: string; excerpt: string; body_md: string; kind?: string | null; created_by?: string | null };
@@ -57,11 +65,28 @@ const translatable = (r: Pick<EditableInsight, keyof TranslatableFields>): Trans
   og_title: r.og_title, og_description: r.og_description, faq: r.faq ?? [], tags: r.tags ?? [], cover_alt: r.cover_alt, cover_caption: r.cover_caption,
 });
 
-interface Props {
-  id: string; // 'new' or uuid
+export interface EditorState {
+  id: string;
+  locale: Locale;
+  row: EditableInsight;
+  /** The version as stored when it was loaded/saved last (to tell what is unsaved). */
+  base: EditableInsight | null;
+  dirty: boolean;
+  loadedUpdatedAt: string | null;
 }
 
-export default function InsightEditor({ id }: Props) {
+interface Props {
+  id: string; // 'new' or uuid
+  /** Inside InsightWorkspace (language tabs of one article). */
+  embedded?: boolean;
+  onState?: (state: EditorState) => void;
+  /** Changing it reloads this version from the database (after a bulk publish). */
+  reloadToken?: number;
+  /** Rows of the group were created or changed here (translations saved, published…). */
+  onGroupChanged?: () => void;
+}
+
+export default function InsightEditor({ id, embedded = false, onState, reloadToken = 0, onGroupChanged }: Props) {
   const supabase = getAdminClient();
   const router = useRouter();
   const [row, setRow] = useState<EditableInsight | null>(null);
@@ -177,6 +202,36 @@ export default function InsightEditor({ id }: Props) {
     return () => window.removeEventListener('beforeunload', handler);
   }, [dirty]);
 
+  // Workspace: the stored version (taken whenever a load/save sets a new base).
+  const [base, setBase] = useState<EditableInsight | null>(null);
+  useEffect(() => {
+    if (row && loadedUpdatedAt) setBase(row);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedUpdatedAt]);
+
+  // Workspace: current text + dirty state of this language.
+  useEffect(() => {
+    if (row?.id && onState) onState({ id: row.id, locale: row.locale, row, base, dirty, loadedUpdatedAt });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row, base, dirty, loadedUpdatedAt]);
+
+  // Workspace: this language was just saved + published by the shared dialog → show the stored version.
+  useEffect(() => {
+    if (!reloadToken || !supabase || !row?.id) return;
+    (async () => {
+      const { data } = await supabase.from('insights').select('*').eq('id', row.id as string).single();
+      if (!data) return;
+      const r = data as InsightRow;
+      setRow(r);
+      setLoadedUpdatedAt(r.updated_at);
+      setDirty(false);
+      setUndoStack([]);
+      try { window.localStorage.removeItem(localKey(r.id)); } catch { /* ignore */ }
+      await Promise.all([loadSiblings(r.group_id), loadRevisions(r.id), loadImages(r.group_id)]);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadToken]);
+
   const save = async (force = false): Promise<string | null> => {
     if (!supabase || !row) return null;
     if (!row.title.trim()) { flash('Başlık gerekli.'); return null; }
@@ -207,6 +262,7 @@ export default function InsightEditor({ id }: Props) {
       router.replace(`/admin/insights/${savedId}`);
     }
     setSaving(false); setDirty(false); flash('Kaydedildi.');
+    onGroupChanged?.();
     return savedId;
   };
 
@@ -282,6 +338,7 @@ export default function InsightEditor({ id }: Props) {
     await loadImages(row.group_id);
     await loadRevisions(row.id);
     flash(action === 'publish' ? 'Yayınlandı.' : action === 'schedule' ? 'Zamanlandı.' : 'Taslağa alındı.');
+    onGroupChanged?.();
   };
 
   const replaceSelection = async (text: string) => {
@@ -310,68 +367,10 @@ export default function InsightEditor({ id }: Props) {
    * Returns a note per locale; a note starting with "!" is an error.
    */
   const saveTranslations = async (items: Array<{ locale: Locale; translation: Translation }>, fingerprint: string): Promise<Record<string, string>> => {
-    const out: Record<string, string> = {};
     if (!supabase || !row?.id) return Object.fromEntries(items.map((i) => [i.locale, '!Önce kaynak yazıyı kaydedin.']));
-    const { data: fresh } = await supabase.from('insights').select('id,locale,slug,status,title,excerpt,body_md').eq('group_id', row.group_id);
-    const group = (fresh ?? []) as Array<Pick<InsightRow, 'id' | 'locale' | 'slug' | 'status' | 'title' | 'excerpt' | 'body_md'>>;
-    for (const { locale, translation: t } of items) {
-      const fields = {
-        title: t.title.trim(),
-        excerpt: t.excerpt.trim(),
-        body_md: t.body,
-        seo_title: t.seoTitle.trim() || null,
-        meta_description: t.metaDescription.trim() || null,
-        og_title: t.ogTitle.trim() || null,
-        og_description: t.ogDescription.trim() || null,
-        faq: t.faq.filter((f) => f.q.trim() && f.a.trim()),
-        tags: t.tags.map((x) => x.trim()).filter(Boolean),
-        cover_alt: t.coverAlt.trim() || row.cover_alt,
-        cover_caption: t.coverCaption.trim() || row.cover_caption,
-        source_insight_id: row.id,
-        source_hash: fingerprint,
-        language_reviewed: false,
-        language_reviewed_at: null,
-        language_reviewed_by: null,
-        reading_minutes: readingMinutes(t.body),
-      };
-      const existing = group.find((g) => g.locale === locale && g.id !== row.id);
-      if (existing && (existing.status === 'PUBLISHED' || existing.status === 'SCHEDULED')) {
-        const ok = await saveRevision(existing.id, { title: fields.title, excerpt: fields.excerpt, body_md: fields.body_md }, 'Çok dilli çeviri önerisi (yayındaki metin değiştirilmedi)', 'ai_proposal');
-        out[locale] = ok ? 'Bu dil yayında; yayındaki metin değiştirilmedi. Yeni çeviri o yazının sürüm geçmişine öneri olarak kaydedildi.' : '!Yayındaki çeviriye öneri kaydedilemedi.';
-        continue;
-      }
-      if (existing) {
-        await saveRevision(existing.id, existing, 'Çok dilli güncelleme öncesi');
-        const { error } = await supabase.from('insights').update(fields).eq('id', existing.id);
-        out[locale] = error ? `!Kaydedilemedi: ${error.message}` : 'Mevcut taslak güncellendi (önceki metin sürüm geçmişinde).';
-        continue;
-      }
-      const base = asciiSlug(t.slug) || asciiSlug(t.title) || `${slugify(row.slug || row.title)}-${locale}`;
-      const { data: taken } = await supabase.from('insights').select('slug').eq('locale', locale).like('slug', `${base}%`);
-      let slug = uniqueSlug(base, ((taken ?? []) as Array<{ slug: string }>).map((x) => x.slug), `${slugify(row.slug)}-${locale}`);
-      const payload = () => toPayload({
-        ...emptyInsight(locale, row.group_id),
-        ...fields,
-        slug,
-        category_key: row.category_key,
-        author_name: row.author_name,
-        author_role: row.author_role,
-        related_service: row.related_service,
-        related_product: row.related_product,
-        cta_type: row.cta_type,
-        cover_url: row.cover_url,
-        og_image: row.og_image,
-        sources: row.sources,
-        status: 'DRAFT',
-      });
-      let ins = await supabase.from('insights').insert(payload()).select('id').single();
-      if (ins.error?.code === '23505') {
-        slug = `${base}-${Date.now().toString(36)}`;
-        ins = await supabase.from('insights').insert(payload()).select('id').single();
-      }
-      out[locale] = ins.error ? `!Kaydedilemedi: ${ins.error.message}` : `Yeni taslak oluşturuldu (/${locale}/insights/${slug}).`;
-    }
+    const out = await saveTranslationsToGroup(supabase, row as EditableInsight & { id: string }, items, fingerprint);
     await loadSiblings(row.group_id);
+    onGroupChanged?.();
     return out;
   };
 
@@ -467,7 +466,11 @@ export default function InsightEditor({ id }: Props) {
             <div className="admin-card grid gap-4">
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_140px]">
                 <label className={label}>Başlık<input value={row.title} onChange={(e) => { update({ title: e.target.value, ...(slugTouched ? {} : { slug: slugify(e.target.value) }) }); }} dir={row.locale === 'ar' ? 'rtl' : 'ltr'} className={`${field} !text-[18px] !font-bold`} /></label>
-                <label className={label}>Dil<select value={row.locale} onChange={(e) => update({ locale: e.target.value as Locale })} className={field}>{INSIGHT_LOCALES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</select></label>
+                {embedded && row.id ? (
+                  <div className={label}>Dil<span className={`${field} !text-white`}>{INSIGHT_LOCALES.find((l) => l.code === row.locale)?.label ?? row.locale}</span></div>
+                ) : (
+                  <label className={label}>Dil<select value={row.locale} onChange={(e) => update({ locale: e.target.value as Locale })} className={field}>{INSIGHT_LOCALES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</select></label>
+                )}
               </div>
               <label className={label}>Slug (URL)<input value={row.slug} onChange={(e) => { setSlugTouched(true); update({ slug: e.target.value }); }} onBlur={() => update({ slug: slugify(row.slug || row.title) })} className={field} /></label>
               <label className={label}>Özet (giriş)<textarea value={row.excerpt} onChange={(e) => update({ excerpt: e.target.value })} rows={2} dir={row.locale === 'ar' ? 'rtl' : 'ltr'} className={field} /></label>
@@ -531,7 +534,7 @@ export default function InsightEditor({ id }: Props) {
                     <label className={label}>Zamanla (yerel saat)<input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className={field} /></label>
                     <button type="button" className="admin-btn" disabled={publishing || dirty || !scheduleAt} onClick={() => publishAction('schedule')}>Zamanla</button>
                     {(row.status === 'PUBLISHED' || row.status === 'SCHEDULED') && <button type="button" className="admin-btn" disabled={publishing || dirty} onClick={() => publishAction('unpublish')}>Yayından kaldır</button>}
-                    {!row.source_insight_id && siblings.some((s) => s.source_insight_id === row.id) && <button type="button" className="admin-btn" disabled={publishing || dirty} onClick={publishAll} title="Kaynak yazıyı ve dil kontrolü işaretlenmiş çevirileri yayınlar">Tüm dilleri yayınla</button>}
+                    {!embedded && !row.source_insight_id && siblings.some((s) => s.source_insight_id === row.id) && <button type="button" className="admin-btn" disabled={publishing || dirty} onClick={publishAll} title="Kaynak yazıyı ve dil kontrolü işaretlenmiş çevirileri yayınlar">Tüm dilleri yayınla</button>}
                   </div>
                 )}
                 {row.source_insight_id && (
@@ -548,6 +551,9 @@ export default function InsightEditor({ id }: Props) {
                 <label className={label}>İlgili ürün<select value={row.related_product ?? ''} onChange={(e) => update({ related_product: e.target.value || null })} className={field}><option value="">—</option>{PRODUCTS.map((s) => <option key={s}>{s}</option>)}</select></label>
                 <label className={label}>CTA<select value={row.cta_type} onChange={(e) => update({ cta_type: e.target.value as EditableInsight['cta_type'] })} className={field}><option value="none">Yok</option><option value="contact">İletişim</option><option value="checkup">Dijital Check-Up</option><option value="service">İlgili hizmet</option><option value="product">İlgili ürün</option></select></label>
               </div>
+              {embedded ? (
+                <p className="border-t border-line pt-4 text-[12px] text-subtle">Diğer diller üstteki dil sekmelerinde. Birden fazla dili birlikte yayımlamak için üstteki “Yayınla” düğmesini kullanın; bu bölümdeki düğmeler yalnızca bu dili etkiler.</p>
+              ) : (
               <div className="border-t border-line pt-4">
                 <p className="text-[13px] font-semibold text-muted">Çeviriler (aynı grup)</p>
                 <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
@@ -567,6 +573,7 @@ export default function InsightEditor({ id }: Props) {
                 </div>
                 <p className="mt-2 text-[12px] text-subtle">{row.source_insight_id ? 'Bu yazı bir çeviri; diğer diller kaynak yazıdan oluşturulur.' : 'Diğer dilleri İçerik stüdyosundaki “Diller” adımında “Tüm dilleri oluştur” ile hazırlayın; kaydedilenler taslaktır. “kaynak değişti” yazan çeviri, bu metnin eski hâlinden yapılmıştır.'}</p>
               </div>
+              )}
             </div>
           )}
 
