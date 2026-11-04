@@ -119,7 +119,7 @@ export default async function SiteFooter({ t }: SiteFooterProps) {
         {/* ── Newsletter (double opt-in) ─────────────────────────── */}
         <div className="border-b border-line py-10">
           <div className="max-w-[720px]">
-            <NewsletterForm locale={ctx.locale} copy={newsletterCopy(ctx.locale).form} privacyHref={noticeFinal ? `${base}/privacy` : null} source="footer" variant="footer" />
+            <NewsletterForm locale={ctx.locale} copy={newsletterCopy(ctx.locale).form} privacyHref={`${base}/privacy`} source="footer" variant="footer" />
           </div>
         </div>
 

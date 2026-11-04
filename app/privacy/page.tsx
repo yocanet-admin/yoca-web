@@ -11,11 +11,13 @@ import { missingForNotice, noticeIsFinal } from '@/lib/companyInfo';
 import { integrations } from '@/lib/cockpit/settings';
 
 /**
- * Yoca — Aydınlatma Metni (KVKK) for the contact and Check-Up forms.
+ * Yoca — Aydınlatma Metni (KVKK) for the contact and Check-Up forms and the
+ * Insights newsletter.
  *
  * Generated from Şirket bilgileri (admin) + what the code ACTUALLY collects
- * and where it sends it (app/api/contact, app/api/checkup, lib/formGuard,
- * lib/spam, lib/notify, audit triggers, Vercel Analytics, lead AI). Legal
+ * and where it sends it (app/api/contact, app/api/checkup, app/api/newsletter,
+ * lib/newsletter, lib/formGuard, lib/spam, lib/notify, audit triggers, Vercel
+ * Analytics, lead AI). Legal
  * basis, retention and cross-border transfer are shown only when filled in
  * after legal review; until then "hukuki inceleme ile doğrulanacak" is shown.
  * Recipients / transfers are listed from the real infrastructure in the code
@@ -27,9 +29,10 @@ import { integrations } from '@/lib/cockpit/settings';
  * sitemap and is not linked from the footer. The line under the contact and
  * Check-Up forms links here in every state.
  *
- * Deliberately NOT part of this notice: an explicit-consent (açık rıza) box or
- * a commercial electronic message (ticari ileti) permission. Those are
- * separate owner / legal decisions; no box is pre-ticked or merged with it.
+ * The contact and Check-Up forms collect no consent. The newsletter form has
+ * its own unticked consent box (e-mail newsletter permission); its legal
+ * basis (açık rıza / ticari elektronik ileti onayı, İYS) is filled in by the
+ * owner after legal review, like the other legal fields.
  * Turkish first; other locales show the Turkish draft with a note.
  */
 
@@ -46,7 +49,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const t = getDict(ctx.locale);
   const [company, flag] = await Promise.all([getCompanyInfo(), getKvkkPublish()]);
   const draft = !noticeIsFinal(company, flag);
-  const meta = buildMetadata({ ctx, path: '/privacy', title: `${t.legal.noticeTitle} | Yoca`, description: 'İletişim ve Dijital Check-Up formlarında paylaşılan kişisel verilerin işlenmesine ilişkin aydınlatma metni.' });
+  const meta = buildMetadata({ ctx, path: '/privacy', title: `${t.legal.noticeTitle} | Yoca`, description: 'İletişim formu, Dijital Check-Up ve Insights bülteni ile paylaşılan kişisel verilerin işlenmesine ilişkin aydınlatma metni.' });
   return draft ? { ...meta, robots: { index: false, follow: true } } : meta;
 }
 
@@ -89,7 +92,7 @@ export default async function PrivacyPage() {
     <>
       <SiteHeader t={t} path="/privacy" />
       <main id="main">
-        <PageIntro eyebrow="KVKK" title={t.legal.noticeTitle} sub="İletişim formu ve Dijital Check-Up formu" compact />
+        <PageIntro eyebrow="KVKK" title={t.legal.noticeTitle} sub="İletişim formu, Dijital Check-Up formu ve Insights bülteni" compact />
         <div className="container-y relative z-[7] max-w-4xl pb-20">
           {draft && (
             <div role="note" className="mb-6 rounded-md border border-amber-400/60 bg-amber-400/10 px-5 py-4 text-[15px] text-amber-100">
@@ -116,7 +119,9 @@ export default async function PrivacyPage() {
             </Section>
 
             <Section n={2} title="Bu metnin kapsamı">
-              <p>Bu metin {c.website} üzerindeki <b>İletişim formu</b> ve <b>Dijital Check-Up formu</b> ile paylaştığınız kişisel verileri kapsar. Sitede ayrıca bir onay kutusu yoktur: bu metin bilgilendirme amaçlıdır. Ticari elektronik ileti (pazarlama e-postası) izni bu formlarda <b>toplanmaz</b>.</p>
+              <p>Bu metin {c.website} üzerindeki <b>İletişim formu</b>, <b>Dijital Check-Up formu</b> ve <b>Insights bülteni</b> kayıt formu ile paylaştığınız kişisel verileri kapsar.</p>
+              <p>İletişim ve Check-Up formlarında onay kutusu yoktur; bu formlarda ticari elektronik ileti (pazarlama e-postası) izni <b>toplanmaz</b> ve bu formlarla verdiğiniz adrese bülten gönderilmez.</p>
+              <p>Insights bülteni ayrı bir formdur (Insights sayfasında ve sitenin altbilgisinde). Orada, önceden işaretlenmemiş bir kutuyu kendiniz işaretleyerek yeni Insights yazılarının e-postayla gönderilmesini kabul edersiniz. Kayıt, e-postanıza gelen onay bağlantısına tıkladığınızda tamamlanır; onaylanmayan adrese bülten gönderilmez. Her bülten e-postasındaki bağlantıyla istediğiniz an ayrılabilirsiniz.</p>
             </Section>
 
             <Section n={3} title="Hangi verileri işliyoruz">
@@ -132,6 +137,14 @@ export default async function PrivacyPage() {
                 <li>Ad soyad, e-posta adresi (zorunlu), şirket veya marka adı ve telefon numarası (isteğe bağlı), site dili</li>
                 <li>Sunucunun yanıtlardan hesapladığı 0–100 arası bir iç değerlendirme puanı (size gösterilmez, yalnızca ekibimizin panelinde görünür)</li>
               </ul>
+              <h3 className="font-extrabold text-white">Insights bülteni</h3>
+              <ul className="list-disc ps-5">
+                <li>E-posta adresiniz (zorunlu) ve kayıt olduğunuz sayfanın dili (bülteni hangi dilde alacağınızı belirler)</li>
+                <li>Onay kaydı: kutunun yanında gösterilen metnin kendisi, işaretlediğiniz zaman, formun yeri (Insights sayfası veya altbilgi) ve IP adresinizin tek yönlü SHA-256 özeti (IP adresinin kendisi saklanmaz)</li>
+                <li>Abonelik durumu (onay bekliyor, aktif, ayrıldı) ile kayıt, onay ve ayrılma zamanları</li>
+                <li>Onay bağlantısının tek yönlü özeti (7 gün geçerli; onaylanınca silinir) ve size özel bir ayrılma anahtarı (her e-postadaki “Bültenden ayrıl” bağlantısı için)</li>
+                <li>Gönderim kayıtları: hangi yazının size hangi tarihte gönderildiği, e-posta sağlayıcısının ileti numarası ve varsa gönderim hatası</li>
+              </ul>
               <h3 className="font-extrabold text-white">Teknik veriler</h3>
               <ul className="list-disc ps-5">
                 <li>IP adresiniz yalnızca kötüye kullanımı sınırlamak için (aynı form için saatte en fazla 5 gönderim) kullanılır ve açık hâliyle saklanmaz: “form türü + IP” bilgisinin tek yönlü SHA-256 özeti, bir saatlik zaman dilimi ve bir sayaç tutulur. İki saatten eski sayaçlar, sonraki bir form gönderiminde otomatik silinir (ayrı bir zamanlanmış temizlik işi yoktur). Veritabanı fonksiyonu kurulu değilse sayaç yalnızca sunucu belleğinde geçici olarak tutulur.</li>
@@ -145,27 +158,29 @@ export default async function PrivacyPage() {
               <ul className="list-disc ps-5">
                 <li>İletişim formu: talebinizi okumak, değerlendirmek ve size e-postayla dönüş yapmak; gerekirse görüşme planlamak.</li>
                 <li>Check-Up: yanıtlarınızı inceleyip markanız, web siteniz ve pazarlama çalışmalarınız için öncelikleri ve önerilen adımları hazırlamak ve size e-postayla göndermek.</li>
+                <li>Insights bülteni: abonelik isteğinizi e-posta adresinizin size ait olduğunu doğrulayarak tamamlamak, yeni Insights yazılarını seçtiğiniz dilde e-postayla göndermek, ayrılma isteğinizi uygulamak ve onayınızın ne zaman, hangi metinle verildiğini gösterebilmek.</li>
                 <li>Teknik veriler: formların kötüye kullanımını, istenmeyen ve yinelenen gönderimleri önlemek; sitenin nasıl kullanıldığını toplu olarak ölçmek; yönetim işlemlerinin kaydını tutmak.</li>
               </ul>
             </Section>
 
             <Section n={5} title="Toplama yöntemi">
-              <p>Veriler, sitedeki formları doldurmanızla elektronik ortamda, şifreli bağlantı (HTTPS) üzerinden sunucumuza gönderilerek toplanır. Teknik veriler bu gönderim sırasında otomatik olarak oluşur.</p>
+              <p>Veriler, sitedeki formları doldurmanızla elektronik ortamda, şifreli bağlantı (HTTPS) üzerinden sunucumuza gönderilerek toplanır. Teknik veriler bu gönderim sırasında otomatik olarak oluşur. Bülten aboneliğinin onayı ve ayrılma, e-postalardaki bağlantılara tıklamanızla kaydedilir.</p>
             </Section>
 
             <Section n={6} title="Hukuki sebep">
               <dl>
                 <div className="grid gap-1 border-b border-line py-2"><dt className="text-[13px] font-bold text-subtle">İletişim formu</dt><dd>{c.legalBasisContact ? <span className="whitespace-pre-line">{c.legalBasisContact}</span> : LEGAL_REVIEW}</dd></div>
                 <div className="grid gap-1 border-b border-line py-2"><dt className="text-[13px] font-bold text-subtle">Dijital Check-Up</dt><dd>{c.legalBasisCheckup ? <span className="whitespace-pre-line">{c.legalBasisCheckup}</span> : LEGAL_REVIEW}</dd></div>
+                <div className="grid gap-1 border-b border-line py-2"><dt className="text-[13px] font-bold text-subtle">Insights bülteni</dt><dd>{c.legalBasisNewsletter ? <span className="whitespace-pre-line">{c.legalBasisNewsletter}</span> : LEGAL_REVIEW}</dd></div>
               </dl>
             </Section>
 
             <Section n={7} title="Verilerin aktarıldığı taraflar">
               <p>Site, kodunda aşağıdaki hizmet sağlayıcılarla çalışır; veriler yalnızca belirtilen iş için onlara ulaşır. Her birinin aktarım açısından durumu {TO_ASSESS}.</p>
               <ul className="list-disc ps-5">
-                <li><b>Supabase</b> — form başvurularının saklandığı veritabanı ve dosya depolama. Kurulum notu Frankfurt (eu-central) bölgesini önerir; projenin gerçek sunucu bölgesi bu metin için doğrulanmadı — {TO_ASSESS}.</li>
+                <li><b>Supabase</b> — form başvurularının ve bülten abonelik kayıtlarının saklandığı veritabanı ve dosya depolama. Kurulum notu Frankfurt (eu-central) bölgesini önerir; projenin gerçek sunucu bölgesi bu metin için doğrulanmadı — {TO_ASSESS}.</li>
                 <li><b>Vercel</b> — sitenin ve form sunucusunun barındırılması; çerezsiz site ölçümü. Bölge: {TO_ASSESS}.</li>
-                <li><b>Resend</b> — yeni başvurunun ekibimize e-postayla bildirilmesi (ad, e-posta, şirket, mesaj veya Check-Up özeti).{env.email ? '' : ' Şu anda yapılandırılmamış.'} Bildirim e-postasının ulaştığı posta kutusunun sağlayıcısı: {TODO}. Aktarım: {TO_ASSESS}.</li>
+                <li><b>Resend</b> — yeni başvurunun ekibimize e-postayla bildirilmesi (ad, e-posta, şirket, mesaj veya Check-Up özeti).{env.email ? '' : ' Şu anda yapılandırılmamış.'} Bildirim e-postasının ulaştığı posta kutusunun sağlayıcısı: {TODO}. Insights bülteninde onay e-postası ve yazı e-postaları da Resend ile gönderilir; Resend’e e-posta adresiniz, diliniz ve e-postanın içeriği (ayrılma bağlantısı dahil) ulaşır. Aktarım: {TO_ASSESS}.</li>
                 <li><b>Telegram</b> — yeni başvurunun ekibimizin Telegram sohbetine bildirilmesi.{env.telegram ? '' : ' Şu anda yapılandırılmamış.'} Aktarım: {TO_ASSESS}.</li>
                 <li><b>OpenAI</b> — başvurular OpenAI’ye otomatik olarak gönderilmez. Yalnızca bir yönetici panelde tek bir başvuru için “Özetle” veya “Yanıt taslağı”nı seçerse; ilk ad, şirket, dil ve mesaj/yanıtlar gönderilir. E-posta adresi ve telefon numarası gönderilmez; mesajın içindeki e-posta ve telefon numaraları maskelenir. Form verileri blog/içerik üretiminde kullanılmaz. İçerik editöründe OpenAI’ye yalnızca bir editörün açıkça gönderdiği yazı metni gider. Aktarım: {TO_ASSESS}.</li>
               </ul>
@@ -176,13 +191,15 @@ export default async function PrivacyPage() {
               <dl>
                 <div className="grid gap-1 border-b border-line py-2"><dt className="text-[13px] font-bold text-subtle">İletişim formu</dt><dd>{c.retentionContact ? <span className="whitespace-pre-line">{c.retentionContact}</span> : TO_DECIDE}</dd></div>
                 <div className="grid gap-1 border-b border-line py-2"><dt className="text-[13px] font-bold text-subtle">Dijital Check-Up</dt><dd>{c.retentionCheckup ? <span className="whitespace-pre-line">{c.retentionCheckup}</span> : TO_DECIDE}</dd></div>
+                <div className="grid gap-1 border-b border-line py-2"><dt className="text-[13px] font-bold text-subtle">Insights bülteni</dt><dd>{c.retentionNewsletter ? <span className="whitespace-pre-line">{c.retentionNewsletter}</span> : TO_DECIDE}</dd></div>
               </dl>
               <p>Saklama süreleri {TO_DECIDE}. Belirlenirken kullanılacak ölçüt: başvurunun cevaplanması ve olası iş ilişkisinin değerlendirilmesi için gereken süre ile yasal saklama yükümlülükleri.</p>
-              <p className="text-[13px] text-subtle">Bugün sitede başvuruları (contact_submissions, checkup_submissions), işlem geçmişini (audit_log) veya spam kayıtlarını (spam_log) belirli bir sürede otomatik silen bir işlem yoktur; bunlar yönetim panelinden elle silinir. Yalnızca hız sınırı sayaçları sonraki gönderimlerde silinir.</p>
+              <p className="text-[13px] text-subtle">Bugün sitede başvuruları (contact_submissions, checkup_submissions), işlem geçmişini (audit_log) veya spam kayıtlarını (spam_log) belirli bir sürede otomatik silen bir işlem yoktur; bunlar yönetim panelinden elle silinir. Yalnızca hız sınırı sayaçları sonraki gönderimlerde silinir. Bültenden ayrıldığınızda adresinize bir daha bülten gönderilmez; abonelik kaydı “ayrıldı” durumuyla, onay ve ayrılma zamanlarıyla birlikte kalır ve bugün otomatik olarak silinmez. Onaylanmayan kayıtlar da otomatik silinmez.</p>
             </Section>
 
             <Section n={9} title="Haklarınız (KVKK m.11)">
               <p>Kişisel verilerinizle ilgili olarak; işlenip işlenmediğini öğrenme, işlenmişse bilgi talep etme, işlenme amacını ve amacına uygun kullanılıp kullanılmadığını öğrenme, yurt içinde veya yurt dışında aktarıldığı üçüncü kişileri bilme, eksik veya yanlış işlenmişse düzeltilmesini isteme, KVKK m.7’deki şartlar çerçevesinde silinmesini veya yok edilmesini isteme, düzeltme/silme işlemlerinin aktarıldığı üçüncü kişilere bildirilmesini isteme, münhasıran otomatik sistemlerle analiz edilmesi sonucu aleyhinize bir sonucun ortaya çıkmasına itiraz etme ve kanuna aykırı işleme sebebiyle zarara uğramanız hâlinde zararın giderilmesini talep etme haklarına sahipsiniz.</p>
+              <p>Bülten için verdiğiniz onayı her bülten e-postasındaki “Bültenden ayrıl” bağlantısıyla istediğiniz an geri alabilirsiniz; ayrıca aşağıdaki başvuru yöntemiyle de isteyebilirsiniz.</p>
               <p><b>Başvuru yöntemi:</b> {c.dataRequestChannel ? <span className="whitespace-pre-line">{c.dataRequestChannel}</span> : TODO}</p>
             </Section>
 

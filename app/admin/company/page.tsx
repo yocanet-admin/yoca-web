@@ -64,6 +64,8 @@ const GROUPS: Array<{ title: string; fields: Array<{ key: TextKey; label: string
       { key: 'legalBasisCheckup', label: 'Hukuki sebep — Check-Up', multiline: true },
       { key: 'retentionContact', label: 'Saklama süresi — iletişim formu', multiline: true },
       { key: 'retentionCheckup', label: 'Saklama süresi — Check-Up', multiline: true },
+      { key: 'legalBasisNewsletter', label: 'Hukuki sebep — Insights bülteni (açık rıza / ticari ileti onayı, İYS)', multiline: true },
+      { key: 'retentionNewsletter', label: 'Saklama süresi — Insights bülteni (abonelik sürerken ve ayrıldıktan sonra)', multiline: true },
       { key: 'transferAssessment', label: 'Yurt dışına aktarım (KVKK m.9) değerlendirmesi ve dayanılan mekanizma', multiline: true },
       { key: 'legalReviewNote', label: 'İnceleme notu (kim, ne zaman)', multiline: true },
     ],
