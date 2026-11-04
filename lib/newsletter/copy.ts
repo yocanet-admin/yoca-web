@@ -36,7 +36,7 @@ export interface NewsletterCopy {
     back: string;
   };
   confirmEmail: { subject: string; preheader: string; heading: string; body: string; button: string; ignore: string };
-  issue: { kicker: string; read: string; minRead: string; why: string; unsubscribe: string; preferences: string; site: string };
+  issue: { kicker: string; read: string; minRead: string; why: string; unsubscribe: string; preferences: string; site: string; more: string; reply: string };
 }
 
 export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
@@ -83,6 +83,8 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       why: 'Bu e-postayı yoca.net üzerinden Yoca Insights bültenine abone olduğunuz için alıyorsunuz.',
       unsubscribe: 'Bültenden ayrıl',
       preferences: 'Dil tercihi',
+      more: 'Ayrıca okuyun',
+      reply: 'Sorunuz ya da yorumunuz varsa bu e-postayı yanıtlayın; yanıtınız ekibimize ulaşır.',
       site: 'yoca.net',
     },
   },
@@ -129,6 +131,8 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       why: 'You are receiving this e-mail because you subscribed to the Yoca Insights newsletter on yoca.net.',
       unsubscribe: 'Unsubscribe',
       preferences: 'Language preference',
+      more: 'Also on Yoca Insights',
+      reply: 'Questions or thoughts? Reply to this e-mail; it reaches our team.',
       site: 'yoca.net',
     },
   },
@@ -175,6 +179,8 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       why: 'Bu e-poçtu yoca.net saytında Yoca Insights bülletenə abunə olduğunuz üçün alırsınız.',
       unsubscribe: 'Abunəlikdən çıx',
       preferences: 'Dil seçimi',
+      more: 'Bunları da oxuyun',
+      reply: 'Sualınız və ya fikriniz varsa, bu e-poçtu cavablayın; cavabınız komandamıza çatır.',
       site: 'yoca.net',
     },
   },
@@ -221,6 +227,8 @@ export const NEWSLETTER_COPY: Record<Locale, NewsletterCopy> = {
       why: 'تصلك هذه الرسالة لأنك اشتركت في نشرة Yoca Insights عبر yoca.net.',
       unsubscribe: 'إلغاء الاشتراك',
       preferences: 'تفضيل اللغة',
+      more: 'اقرأ أيضًا',
+      reply: 'لديك سؤال أو تعليق؟ ردّ على هذه الرسالة وسيصل ردّك إلى فريقنا.',
       site: 'yoca.net',
     },
   },

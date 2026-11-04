@@ -3,6 +3,7 @@ import { DEPTH_TARGETS, LOCALE_NAMES, TONE_MODIFIERS, YOCA_EDITORIAL_SYSTEM } fr
 import { NO_AI_SLOP_DETECT, NO_AI_SLOP_EDIT, NO_AI_SLOP_EVAL, SLOP_PATTERN_IDS } from '@/lib/ai/prompts/no-ai-slop';
 import { fence, safeSourceUrl, unsupportedNumberSentences } from '@/lib/ai/sourceText';
 import { asciiSlug, localizeInternalLinks } from '@/lib/ai/translateHelpers';
+import { quoteInArticle } from '@/lib/newsletter/core';
 import type { FetchedSource } from '@/lib/ai/sources';
 import {
   ArticleDraftSchema,
@@ -397,6 +398,7 @@ Return:
 - subject: max 60 characters. Concrete and specific: name the reader's situation, the mistake the article helps avoid, or its most useful finding. Not the same sentence as the title. No clickbait ("you won't believe", "the secret", "everything changes"), no false urgency, no ALL CAPS, no emoji, no exclamation mark. A question only if the article really answers it.
 - preheader: max 100 characters. The line shown after the subject in the inbox: adds a second reason to open; does not repeat the subject.
 - teaser: 45–90 words, two short paragraphs separated by one blank line, plain text (no Markdown, no lists, no links). Paragraph 1 opens with a hook taken FROM the article: a concrete situation the reader recognises, a common mistake, or a specific point the article makes that runs against habit. Paragraph 2 says plainly what the reader will get from reading (two or three concrete things the article covers). Do not end with a question, a summary line or a slogan; the button below says "read the article".
+- quote: ONE sentence from the article body that makes a reader curious (a sharp observation or a concrete rule, max 200 characters), copied EXACTLY character for character from the text, without Markdown. Not the title, not the excerpt, not a sentence marked [KAYNAK GEREKLİ], not a sentence that only makes sense with the previous one. Must differ from the teaser. Return an empty string if no sentence works on its own.
 - notes: one short sentence in Turkish for the editor: which hook you used and from which part of the article.
 
 Rules: use only claims, numbers and examples that are in the article; leave out anything marked [KAYNAK GEREKLİ]; promise no results; no invented clients or cases. Follow the no-ai-slop rules in your instructions for ${lang(locale)}: no empty openers, no "not X but Y" constructions, no puffery, no filler.
@@ -412,5 +414,11 @@ ${fence('TEXT', article.body.slice(0, 30_000))}`,
   res.data.subject = res.data.subject.trim().slice(0, 90);
   res.data.preheader = res.data.preheader.trim().slice(0, 140);
   res.data.teaser = res.data.teaser.trim().replace(/\n{3,}/g, '\n\n');
+  // A quote that is not word for word in the article is dropped (never invented).
+  res.data.quote = (res.data.quote ?? '').trim();
+  if (res.data.quote && !quoteInArticle(res.data.quote, article.body)) {
+    res.data.quote = '';
+    res.data.notes = `${res.data.notes} (Önerilen alıntı yazıda birebir bulunamadığı için çıkarıldı.)`.trim();
+  }
   return res;
 }

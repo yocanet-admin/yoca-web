@@ -127,7 +127,7 @@ export function mockStructured(schemaName: string, input: string): unknown {
     case 'faq_pack':
       return { faq: [] };
     case 'email_teaser':
-      return { subject: 'Mock konu satırı', preheader: 'Mock önizleme', teaser: 'Mock kanca paragrafı.\n\nMock ikinci paragraf.', notes: 'mock' };
+      return { subject: 'Mock konu satırı', preheader: 'Mock önizleme', teaser: 'Mock kanca paragrafı.\n\nMock ikinci paragraf.', quote: '', notes: 'mock' };
     case 'lead_summary':
       return { ozet: 'Mock özet', ihtiyaclar: [], butce: 'belirtilmemiş', aciliyet: 'orta', uygunluk: 3, uygunluk_nedeni: 'mock', spam_olasiligi: 'düşük', sonraki_adim: 'mock', sorular: [] };
     case 'lead_reply':

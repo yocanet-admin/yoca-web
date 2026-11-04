@@ -51,6 +51,12 @@ export interface PublishedVersion {
   cover_alt: string | null;
   reading_minutes: number;
   source_insight_id?: string | null;
+  category_key?: string | null;
+  cta_type?: string | null;
+  related_service?: string | null;
+  related_product?: string | null;
+  /** Article text, used only to check that a quote really occurs in it. */
+  body_md?: string;
 }
 
 /**
@@ -73,6 +79,8 @@ export interface EmailCopy {
   subject?: string;
   preheader?: string;
   teaser?: string;
+  /** One sentence copied word for word from the article (checked). */
+  quote?: string;
 }
 
 /** Only known keys, trimmed and capped. Pure. */
@@ -83,8 +91,8 @@ export function sanitizeCopy(input: unknown): Partial<Record<NewsletterLocale, E
     const c = (input as Record<string, unknown>)[l] as Record<string, unknown> | undefined;
     if (!c || typeof c !== 'object') continue;
     const s = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
-    const entry = { subject: s(c.subject, 120), preheader: s(c.preheader, 200), teaser: s(c.teaser, 1400) };
-    if (entry.subject || entry.preheader || entry.teaser) out[l] = entry;
+    const entry = { subject: s(c.subject, 120), preheader: s(c.preheader, 200), teaser: s(c.teaser, 1400), quote: s(c.quote, 300) };
+    if (entry.subject || entry.preheader || entry.teaser || entry.quote) out[l] = entry;
   }
   return out;
 }
@@ -92,6 +100,31 @@ export function sanitizeCopy(input: unknown): Partial<Record<NewsletterLocale, E
 /** Teaser → paragraphs (blank line separated). */
 export function teaserParagraphs(teaser: string): string[] {
   return teaser.split(/\n\s*\n/).map((p) => p.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+}
+
+/** Markdown → plain words for comparing a quote with the article. Pure. */
+export function plainText(md: string): string {
+  return md
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`>#]/g, '')
+    .replace(/[“”«»"]/g, '"')
+    .replace(/[‘’']/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/** Does this quote occur word for word in the article (ignoring Markdown, quotes and spacing)? Pure. */
+export function quoteInArticle(quote: string, body: string): boolean {
+  const q = plainText(quote).replace(/^["']|["']$/g, '').replace(/[.…]+$/, '').trim();
+  return q.length >= 12 && plainText(body).includes(q);
+}
+
+/** Who sent the e-mail (footer). Official name + address once filled in Şirket bilgileri, else the site address. Pure. */
+export function senderLine(c: { controllerName?: string; officialAddress?: string; siteAddress?: string }, fallbackName: string, fallbackAddress: string): { name: string; address: string } {
+  if (c.controllerName?.trim() && c.officialAddress?.trim()) return { name: c.controllerName.trim(), address: c.officialAddress.trim().replace(/\s*\n\s*/g, ', ') };
+  return { name: fallbackName, address: (c.siteAddress?.trim() || fallbackAddress).replace(/\s*\n\s*/g, ', ') };
 }
 
 export function articleUrl(site: string, v: Pick<PublishedVersion, 'locale' | 'slug'>): string {

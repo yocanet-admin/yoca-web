@@ -9,14 +9,15 @@ import { adminFetch, callAi, type AiRunInfo } from '@/lib/insightsAdmin';
  * "OpenAI ile hazırla" suggests all languages at once (each in its own
  * language, from that version's text); the admin edits and saves. Saving
  * clears the test e-mail, so the next send needs a test with the new text.
- * Empty fields fall back to the article's title and excerpt.
+ * Empty fields fall back to the article's title and excerpt. The quote must
+ * occur word for word in the article (checked on save and on suggestion).
  */
 
-type Copy = { subject: string; preheader: string; teaser: string };
+type Copy = { subject: string; preheader: string; teaser: string; quote: string };
 export interface PublishedRef { id: string; locale: string; title: string; excerpt: string }
 
 const NAME: Record<string, string> = { tr: 'Türkçe', en: 'English', az: 'Azərbaycanca', ar: 'العربية' };
-const empty: Copy = { subject: '', preheader: '', teaser: '' };
+const empty: Copy = { subject: '', preheader: '', teaser: '', quote: '' };
 const words = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
 
 export default function EmailCopyEditor({ insightId, published, saved, locked, onSaved }: { insightId: string; published: PublishedRef[]; saved: Record<string, Partial<Copy>>; locked: boolean; onSaved: () => Promise<void> }) {
@@ -46,8 +47,8 @@ export default function EmailCopyEditor({ insightId, published, saved, locked, o
     const errors: string[] = [];
     await Promise.all(list.map(async (p) => {
       try {
-        const r = await callAi<{ subject: string; preheader: string; teaser: string; notes: string }>({ action: 'email_teaser', insightId: p.id, locale: p.locale, preset: 'economy' });
-        set(p.locale, { subject: r.result.subject, preheader: r.result.preheader, teaser: r.result.teaser });
+        const r = await callAi<{ subject: string; preheader: string; teaser: string; quote: string; notes: string }>({ action: 'email_teaser', insightId: p.id, locale: p.locale, preset: 'economy' });
+        set(p.locale, { subject: r.result.subject, preheader: r.result.preheader, teaser: r.result.teaser, quote: r.result.quote ?? '' });
         setNotes((n) => ({ ...n, [p.locale]: r.result.notes }));
         const run = r.run as AiRunInfo | undefined;
         if (run?.estCostUsd === null) unknown = true;
@@ -81,7 +82,7 @@ export default function EmailCopyEditor({ insightId, published, saved, locked, o
         <p className="text-[13px] font-bold text-white">E-posta metni</p>
         {!locked && <button type="button" className="admin-btn !px-2.5 !py-1 !text-[12px]" disabled={!!busy} onClick={() => suggest()}>OpenAI ile hazırla (tüm diller)</button>}
       </div>
-      <p className="text-[12px] text-subtle">Konu satırı, gelen kutusundaki önizleme satırı ve okuru yazıya çeken kısa bir giriş. Yalnızca yazıdaki bilgiler kullanılır; tık tuzağı yok. Boş bırakılırsa başlık ve özet kullanılır.</p>
+      <p className="text-[12px] text-subtle">Konu satırı, gelen kutusundaki önizleme satırı, okuru yazıya çeken kısa bir giriş ve yazıdan birebir bir alıntı. Yalnızca yazıdaki bilgiler kullanılır; tık tuzağı yok. Boş bırakılırsa başlık ve özet kullanılır. Kategori, “Ayrıca okuyun”, yazının CTA satırı ve gönderen bilgisi (Şirket bilgileri) kendiliğinden eklenir.</p>
       <div className="flex flex-wrap gap-1" role="tablist">
         {published.map((p) => (
           <button key={p.locale} type="button" role="tab" aria-selected={active === p.locale} onClick={() => setActive(p.locale)} className={`px-2.5 py-1 text-[12px] font-bold ${active === p.locale ? 'bg-yoca-lime text-black' : 'border border-line text-muted hover:text-white'}`}>
@@ -94,6 +95,7 @@ export default function EmailCopyEditor({ insightId, published, saved, locked, o
           <label className={label}>Konu satırı ({c.subject.length}/60)<input dir={dir} value={c.subject} disabled={locked} onChange={(e) => set(active, { subject: e.target.value })} placeholder={ref.title} className={field} /></label>
           <label className={label}>Önizleme satırı ({c.preheader.length}/100)<input dir={dir} value={c.preheader} disabled={locked} onChange={(e) => set(active, { preheader: e.target.value })} placeholder={ref.excerpt.slice(0, 100)} className={field} /></label>
           <label className={label}>Giriş metni ({words(c.teaser)} kelime; paragrafları boş satırla ayırın)<textarea dir={dir} value={c.teaser} disabled={locked} onChange={(e) => set(active, { teaser: e.target.value })} rows={6} placeholder={ref.excerpt} className={field} /></label>
+          <label className={label}>Alıntı (yazıdan birebir bir cümle; isteğe bağlı)<textarea dir={dir} value={c.quote} disabled={locked} onChange={(e) => set(active, { quote: e.target.value })} rows={2} placeholder="Boş bırakılırsa alıntı kutusu gösterilmez" className={field} /></label>
           {notes[active] && <p className="text-[11px] text-subtle">OpenAI notu: {notes[active]}</p>}
           {!locked && <button type="button" className="admin-btn w-fit !px-2 !py-0.5 !text-[11px]" disabled={!!busy} onClick={() => suggest(active)}>{NAME[active] ?? active} için yeniden öner</button>}
         </div>

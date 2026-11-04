@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseServiceRole } from '@/lib/supabase';
 import { SITE } from '@/lib/notifyTemplates';
-import { articleUrl, asLocale, chunk, NEWSLETTER_LOCALES, pickVersion, sanitizeCopy, TEST_VALID_MS, unsubscribeUrl, type EmailCopy, type NewsletterLocale, type PublishedVersion } from '@/lib/newsletter/core';
+import { articleUrl, asLocale, chunk, NEWSLETTER_LOCALES, pickVersion, quoteInArticle, sanitizeCopy, TEST_VALID_MS, unsubscribeUrl, type EmailCopy, type NewsletterLocale, type PublishedVersion } from '@/lib/newsletter/core';
+import { issueExtras } from '@/lib/newsletter/extras';
 import { issueEmail } from '@/lib/newsletter/template';
 import { mailerReady, sendBatch, sendOne, type OutgoingEmail } from '@/lib/newsletter/mailer';
 
@@ -30,7 +31,7 @@ export const maxDuration = 300;
 
 const BATCH = 50;
 const TIME_BUDGET_MS = 240_000;
-const VERSION_COLUMNS = 'id, locale, slug, title, excerpt, cover_url, cover_alt, reading_minutes, source_insight_id, group_id, status, publish_at';
+const VERSION_COLUMNS = 'id, locale, slug, title, excerpt, cover_url, cover_alt, reading_minutes, source_insight_id, group_id, status, publish_at, category_key, cta_type, related_service, related_product, body_md';
 
 type Db = NonNullable<ReturnType<typeof getSupabaseServiceRole>>;
 
@@ -101,10 +102,16 @@ export async function POST(request: NextRequest) {
   let send = existing as { id: string; status: string; test_sent_at: string | null; recipients: number; copy?: unknown } | null;
   const copy = sanitizeCopy(send?.copy);
   const copyFor = (l: NewsletterLocale): EmailCopy | null => copy[l] ?? null;
+  const extrasPromise = body.action === 'test' || body.action === 'send' ? issueExtras(db, groupId, versions, site) : Promise.resolve({} as Awaited<ReturnType<typeof issueExtras>>);
 
   if (body.action === 'save_copy') {
     if (send && send.status !== 'draft') return NextResponse.json({ ok: false, error: 'Gönderim başladıktan sonra e-posta metni değiştirilemez.' }, { status: 409 });
     const next = sanitizeCopy((body as { copy?: unknown }).copy);
+    // A quote must occur word for word in that language's article (no invented quotes).
+    const { data: rows } = await db.from('insights').select('locale, body_md').eq('group_id', groupId);
+    const bodies = Object.fromEntries(((rows ?? []) as Array<{ locale: string; body_md: string }>).map((r) => [r.locale, r.body_md ?? '']));
+    const badQuote = Object.entries(next).filter(([l, c]) => c?.quote && !quoteInArticle(c.quote, bodies[l] ?? '')).map(([l]) => l.toUpperCase());
+    if (badQuote.length) return NextResponse.json({ ok: false, error: `Alıntı yazıda birebir geçmiyor: ${badQuote.join(', ')}. Yazıdan aynen kopyalayın ya da alanı boşaltın.` }, { status: 422 });
     const now = new Date().toISOString();
     const res = send
       ? await db.from('newsletter_sends').update({ copy: next, test_sent_at: null, test_sent_to: null, updated_at: now }).eq('id', send.id)
@@ -117,8 +124,9 @@ export async function POST(request: NextRequest) {
     const to = admin.email;
     if (!to) return NextResponse.json({ ok: false, error: 'Hesabınızın e-posta adresi okunamadı.' }, { status: 400 });
     const results: string[] = [];
+    const extras = await extrasPromise;
     for (const v of versions) {
-      const mail = issueEmail({ locale: v.locale, version: v, url: articleUrl(site, v), unsubscribeUrl: unsubscribeUrl(site, '0'.repeat(48)), copy: copyFor(v.locale), test: true });
+      const mail = issueEmail({ locale: v.locale, version: v, url: articleUrl(site, v), unsubscribeUrl: unsubscribeUrl(site, '0'.repeat(48)), copy: copyFor(v.locale), test: true, ...extras[v.locale] });
       const r = await sendOne({ to, ...mail });
       results.push(`${v.locale.toUpperCase()}: ${r.ok ? 'gönderildi' : r.error}`);
     }
@@ -159,6 +167,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Deliver queued rows in batches until done or the time budget is used.
+  const extras = await extrasPromise;
   while (Date.now() - startedAt < TIME_BUDGET_MS) {
     const { data: queued } = await db
       .from('newsletter_deliveries')
@@ -176,7 +185,7 @@ export async function POST(request: NextRequest) {
     const mails: OutgoingEmail[] = live.map((r) => {
       const v = pickVersion(asLocale(r.locale), versions) as PublishedVersion;
       const unsub = unsubscribeUrl(site, r.subscriber!.unsubscribe_token);
-      return { to: r.subscriber!.email, ...issueEmail({ locale: asLocale(r.locale), version: v, url: articleUrl(site, v), unsubscribeUrl: unsub, copy: copyFor(v.locale) }), unsubscribeUrl: unsub };
+      return { to: r.subscriber!.email, ...issueEmail({ locale: asLocale(r.locale), version: v, url: articleUrl(site, v), unsubscribeUrl: unsub, copy: copyFor(v.locale), ...extras[v.locale] }), unsubscribeUrl: unsub };
     });
     const results = await sendBatch(mails, `nl-${send.id}-${live[0].id}-${live[live.length - 1].id}`);
     const now = new Date().toISOString();

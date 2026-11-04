@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { articleUrl, asLocale, chunk, confirmUrl, hashToken, isTokenShape, maskEmail, newToken, normalizeEmail, pickVersion, sanitizeCopy, teaserParagraphs, unsubscribeUrl, type PublishedVersion } from '../lib/newsletter/core';
+import { articleUrl, asLocale, chunk, confirmUrl, hashToken, isTokenShape, maskEmail, newToken, normalizeEmail, pickVersion, quoteInArticle, sanitizeCopy, senderLine, teaserParagraphs, unsubscribeUrl, type PublishedVersion } from '../lib/newsletter/core';
 import { NEWSLETTER_COPY } from '../lib/newsletter/copy';
 import { confirmEmail, issueEmail } from '../lib/newsletter/template';
 
@@ -108,4 +108,44 @@ test('issue e-mail uses the written copy (subject, preview, teaser) and escapes 
   assert.ok(mail.text.includes('İkinci paragraf.'));
   const fallback = issueEmail({ locale: 'tr', version: v('tr'), url: 'https://yoca.net/x', unsubscribeUrl: unsub, copy: null });
   assert.equal(fallback.subject, 'Title tr');
+});
+
+test('quote must be word for word in the article (Markdown, quotes and spacing ignored)', () => {
+  const body = '## Giriş\n\nFormu kısaltmak her zaman **daha iyi** sonuç vermez.  Ziyaretçi [ne olacağını](/tr/x) bilmek ister.';
+  assert.equal(quoteInArticle('Formu kısaltmak her zaman daha iyi sonuç vermez.', body), true);
+  assert.equal(quoteInArticle('“Ziyaretçi ne olacağını bilmek ister”', body), true);
+  assert.equal(quoteInArticle('Formu kısaltmak her zaman en iyi sonuç verir.', body), false, 'changed words');
+  assert.equal(quoteInArticle('kısa', body), false, 'too short to be a quote');
+});
+
+test('sender: official name + address once filled, else the site address', () => {
+  assert.deepEqual(senderLine({}, 'Yoca. Your Own Creative Agency', 'Bağdat Caddesi, No: 131 Kadıköy / İstanbul'), { name: 'Yoca. Your Own Creative Agency', address: 'Bağdat Caddesi, No: 131 Kadıköy / İstanbul' });
+  assert.deepEqual(senderLine({ siteAddress: 'Yeni adres\nİstanbul' }, 'Yoca', 'x'), { name: 'Yoca', address: 'Yeni adres, İstanbul' });
+  assert.deepEqual(senderLine({ controllerName: 'Örnek Ltd. Şti.', officialAddress: 'Resmî adres 1', siteAddress: 'Site' }, 'Yoca', 'x'), { name: 'Örnek Ltd. Şti.', address: 'Resmî adres 1' });
+  assert.equal(senderLine({ controllerName: 'Örnek', officialAddress: '' }, 'Yoca', 'x').name, 'Yoca', 'both needed');
+});
+
+test('issue e-mail extras: category, quote, CTA line, more articles, reply note, sender, dark mode', () => {
+  const mail = issueEmail({
+    locale: 'tr', version: v('tr'), url: 'https://yoca.net/tr/insights/x', unsubscribeUrl: unsubscribeUrl('https://yoca.net', 'f'.repeat(48)),
+    copy: { teaser: 'Bir.\n\nİki.', quote: 'Ziyaretçi <ne> olacağını bilmek ister.' },
+    category: 'Web ve dijital deneyim',
+    cta: { label: 'Proje başlatın', url: 'https://yoca.net/tr/contact?utm_source=newsletter' },
+    more: [{ title: 'Diğer yazı A', url: 'https://yoca.net/tr/insights/a' }, { title: 'Diğer yazı B', url: 'https://yoca.net/tr/insights/b' }, { title: 'C', url: 'https://yoca.net/tr/insights/c' }],
+    sender: { name: 'Örnek Ltd. Şti.', address: 'Resmî adres 1' },
+  });
+  assert.ok(mail.html.includes('· Web ve dijital deneyim'));
+  assert.ok(mail.html.includes('Ziyaretçi &lt;ne&gt; olacağını bilmek ister.'), 'quote escaped');
+  assert.ok(mail.html.indexOf('Bir.') < mail.html.indexOf('Ziyaretçi') && mail.html.indexOf('Ziyaretçi') < mail.html.indexOf('İki.'), 'quote after the first paragraph');
+  assert.ok(mail.html.includes('Proje başlatın'));
+  assert.ok(mail.html.includes('Ayrıca okuyun') && mail.html.includes('Diğer yazı B') && !mail.html.includes('>C <'), 'at most two more articles');
+  assert.ok(mail.html.includes('bu e-postayı yanıtlayın'));
+  assert.ok(mail.html.includes('Örnek Ltd. Şti. · Resmî adres 1') && !mail.html.includes('Bağdat'));
+  assert.ok(mail.html.includes('prefers-color-scheme: dark') && mail.html.includes('class="nl-card"'));
+  assert.ok(mail.text.includes('Ayrıca okuyun:') && mail.text.includes('Örnek Ltd. Şti.'));
+  const plain = issueEmail({ locale: 'en', version: v('en'), url: 'https://yoca.net/x', unsubscribeUrl: 'https://yoca.net/u' });
+  assert.ok(!plain.html.includes('Also on Yoca Insights') && !plain.html.includes('border-left:3px'), 'no empty extras');
+  assert.ok(plain.html.includes('Bağdat Caddesi'), 'default sender');
+  const ar = issueEmail({ locale: 'ar', version: v('ar'), url: 'https://yoca.net/ar/x', unsubscribeUrl: 'https://yoca.net/u', copy: { quote: 'اقتباس من المقال هنا' } });
+  assert.ok(ar.html.includes('border-right:3px'), 'RTL quote rule on the right');
 });

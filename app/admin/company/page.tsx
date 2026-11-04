@@ -36,6 +36,7 @@ const GROUPS: Array<{ title: string; fields: Array<{ key: TextKey; label: string
     fields: [
       { key: 'controllerName', label: 'Gerçek kişi adı soyadı veya tam ticaret unvanı', hint: '“Yoca” marka adıdır; resmî unvan değilse buraya yazmayın.' },
       { key: 'officialAddress', label: 'Resmî adres (tebligat / KVKK başvuru adresi)', hint: 'Sitede görünen adres otomatik olarak resmî adres sayılmaz.', multiline: true },
+      { key: 'siteAddress', label: 'Bülten e-postasında gösterilen adres', hint: 'Bülten e-postalarının altında “unvan · adres” olarak yer alır. Resmî unvan ve resmî adres doldurulduğunda e-postada onlar kullanılır. Sitenin altbilgisindeki adresi değiştirmez.' },
       { key: 'dataRequestChannel', label: 'Kişisel veri başvuru kanalı', hint: 'Ör. başvurunun gönderileceği e-posta, KEP veya posta adresi. Hukuki incelemeyle belirleyin.', multiline: true },
       { key: 'generalEmail', label: 'Genel iletişim e-postası' },
     ],
