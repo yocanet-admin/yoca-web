@@ -60,7 +60,7 @@ export default function LanguageMenu({ current, path, localePaths, ariaLabel }: 
         aria-controls={panelId}
         aria-label={ariaLabel}
         onClick={() => setOpen((value) => !value)}
-        className={`flex min-h-[38px] items-center gap-2 rounded-sm border px-3 text-[12px] font-bold tracking-wide transition-colors ${
+        className={`flex h-11 items-center gap-2 rounded-sm border px-3 min-[1120px]:h-10 text-[12px] font-bold tracking-wide transition-colors duration-200 ${
           open ? 'border-yoca-lime text-white' : 'border-line text-muted hover:border-yoca-lime/60 hover:text-white'
         }`}
       >

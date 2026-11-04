@@ -121,8 +121,8 @@ export default async function SiteHeader({ t, path = '/', localePaths }: SiteHea
                   <Link
                     href={item.url}
                     aria-current={isActive(item.logical) ? 'page' : undefined}
-                    className={`relative inline-block whitespace-nowrap rounded-sm px-3 py-2 text-[14px] font-semibold transition-colors min-[1280px]:px-4 ${
-                      isActive(item.logical) ? 'text-white' : 'text-muted hover:text-white'
+                    className={`relative inline-block whitespace-nowrap rounded-sm px-3 py-2 text-[14px] font-semibold transition-colors duration-200 min-[1280px]:px-4 ${
+                      isActive(item.logical) ? 'text-white' : 'nav-line text-muted hover:text-white min-[1280px]:after:inset-x-4'
                     }`}
                   >
                     {item.title}
@@ -143,7 +143,7 @@ export default async function SiteHeader({ t, path = '/', localePaths }: SiteHea
         <div className="flex items-center gap-2.5 min-[1280px]:gap-4">
           <Link
             href={`${base}/checkup`}
-            className="hidden items-center gap-2 whitespace-nowrap rounded-sm border border-line bg-white/[0.02] px-3 py-2 text-[13px] font-bold text-soft transition-colors hover:border-yoca-lime/60 hover:text-yoca-lime min-[1120px]:inline-flex min-[1280px]:px-3.5"
+            className="hidden h-10 items-center gap-2 whitespace-nowrap rounded-sm border border-line bg-white/[0.02] px-3 text-[13px] font-bold text-soft transition-colors duration-200 hover:border-yoca-lime/60 hover:text-yoca-lime min-[1120px]:inline-flex min-[1280px]:px-3.5"
           >
             <span aria-hidden="true" className="slant block h-2 w-2.5 flex-none bg-yoca-lime" />
             <span className="hidden min-[1280px]:inline">{t.nav.checkup}</span>
@@ -154,7 +154,7 @@ export default async function SiteHeader({ t, path = '/', localePaths }: SiteHea
           </div>
           <Link
             href={`${base}/contact`}
-            className="btn-primary hidden shrink-0 whitespace-nowrap !px-5 min-[1120px]:inline-flex min-[1280px]:!px-7"
+            className="btn-primary hidden h-10 !min-h-10 shrink-0 whitespace-nowrap !px-5 !py-0 !text-[14px] min-[1120px]:inline-flex min-[1280px]:!px-6"
           >
             {t.hero.primaryCta}
           </Link>

@@ -41,6 +41,19 @@ function toSentences(text: string): string[] {
   return out.filter(Boolean);
 }
 
+/** Lime underline on the word itself only — trailing punctuation ("markaya,") stays plain. */
+function Emphasis({ word, core }: { word: string; core: string }) {
+  const start = word.indexOf(core);
+  if (!core || start < 0) return <span className="underline decoration-yoca-lime decoration-[0.05em] underline-offset-[0.12em]">{word}</span>;
+  return (
+    <>
+      {word.slice(0, start)}
+      <span className="underline decoration-yoca-lime decoration-[0.05em] underline-offset-[0.12em]">{core}</span>
+      {word.slice(start + core.length)}
+    </>
+  );
+}
+
 export default function SplitWords({
   text,
   emphasis = [],
@@ -87,11 +100,7 @@ export default function SplitWords({
         <span key={index}>
           <span className="inline-block overflow-hidden align-bottom pb-[0.3em] -mb-[0.3em] pt-[0.12em] -mt-[0.12em] pe-[0.08em] -me-[0.08em]">
             <motion.span variants={wordVariants} custom={index} className="inline-block">
-              {isEmphasis(word) ? (
-                <span className="underline decoration-yoca-lime decoration-[0.045em] underline-offset-[0.06em]">{word}</span>
-              ) : (
-                word
-              )}
+              {isEmphasis(word) ? <Emphasis word={word} core={core(word)} /> : word}
             </motion.span>
           </span>
           {index < words.length - 1 ? (multi && words[index + 1].sentence !== sentence ? <br /> : ' ') : ''}

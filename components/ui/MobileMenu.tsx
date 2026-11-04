@@ -67,7 +67,7 @@ export default function MobileMenu({ items, cta, secondaryCta, locale, path, loc
         aria-expanded={open}
         aria-label={open ? 'Close menu' : 'Open menu'}
         onClick={() => setOpen((value) => !value)}
-        className="relative z-[120] flex h-12 w-12 flex-col items-center justify-center gap-[5px] rounded-sm border border-line bg-surface"
+        className="relative z-[120] flex h-11 w-11 flex-col items-center justify-center gap-[5px] rounded-sm border border-line bg-surface"
       >
         <span
           className={`h-[2px] w-[18px] bg-white transition-transform duration-200 ${

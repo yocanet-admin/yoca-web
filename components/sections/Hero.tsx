@@ -2,12 +2,11 @@
 
 import Link from 'next/link';
 import { useRef } from 'react';
-import { motion, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform } from 'framer-motion';
+import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion';
 import HeroSymbol from '@/components/ui/HeroSymbol';
 import SplitWords from '@/components/ui/SplitWords';
-import Magnetic from '@/components/ui/Magnetic';
 import type { Dict } from '@/lib/i18n';
-import { DUR, EASE_YOCA, MOTION } from '@/lib/motion';
+import { DUR, EASE_YOCA } from '@/lib/motion';
 
 /**
  * Yoca — homepage hero.
@@ -30,39 +29,25 @@ interface HeroProps {
 export default function Hero({ t, base, rail = [] }: HeroProps) {
   const prefersReducedMotion = useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
-  // Scroll parallax: the mark drifts up and leans as the hero leaves the viewport.
+  // Scroll: the mark drifts up a little as the hero leaves — no rotation, no
+  // pointer-driven grid (both were decorative and competed with the type).
   const { scrollYProgress } = useScroll({ target: sectionRef, offset: ['start start', 'end start'] });
-  const markY = useTransform(scrollYProgress, [0, 1], [0, -120]);
-  const markRotate = useTransform(scrollYProgress, [0, 1], [0, -4.83]);
-  const copyY = useTransform(scrollYProgress, [0, 1], [0, 60]);
-  // Pointer displacement of the structural grid — architectural, max ~10px.
-  const gx = useMotionValue(0);
-  const gy = useMotionValue(0);
-  const gridX = useSpring(gx, { stiffness: 60, damping: 20 });
-  const gridY = useSpring(gy, { stiffness: 60, damping: 20 });
-  const onPointer = (event: React.PointerEvent) => {
-    if (prefersReducedMotion || event.pointerType !== 'mouse') return;
-    const nx = event.clientX / window.innerWidth - 0.5;
-    const ny = event.clientY / window.innerHeight - 0.5;
-    gx.set(-nx * MOTION.pointer.max * 2);
-    gy.set(-ny * MOTION.pointer.max * 2);
-  };
+  const markY = useTransform(scrollYProgress, [0, 1], [0, -72]);
 
+  // One short, ordered intro (~0.9 s in total): eyebrow → title → copy → actions → rail.
   const item = (delay: number) => ({
-    initial: { opacity: prefersReducedMotion ? 1 : 0, y: prefersReducedMotion ? 0 : 22 },
+    initial: { opacity: prefersReducedMotion ? 1 : 0, y: prefersReducedMotion ? 0 : 16 },
     animate: { opacity: 1, y: 0 },
-    transition: { duration: DUR.slow, delay, ease: EASE_YOCA },
+    transition: { duration: DUR.reveal, delay, ease: EASE_YOCA },
   });
 
   return (
-    <section ref={sectionRef} onPointerMove={onPointer} className="relative z-[7] flex min-h-[100svh] flex-col overflow-hidden bg-surface-deep pt-28 lg:min-h-[92svh] lg:pt-32">
-      {/* Grid lines backdrop — fades toward the rail */}
-      <motion.div
+    <section ref={sectionRef} className="relative z-[7] flex flex-col overflow-hidden bg-surface-deep pt-24 lg:min-h-[92svh] lg:pt-32">
+      {/* Grid lines backdrop — static, fades toward the rail */}
+      <div
         aria-hidden="true"
-        className="absolute -inset-4 opacity-50"
+        className="absolute inset-0 opacity-50"
         style={{
-          x: gridX,
-          y: gridY,
           backgroundImage:
             'linear-gradient(#1A1E26 1px, transparent 1px), linear-gradient(90deg, #1A1E26 1px, transparent 1px)',
           backgroundSize: '72px 72px',
@@ -71,48 +56,50 @@ export default function Hero({ t, base, rail = [] }: HeroProps) {
         }}
       />
 
-      <div className="container-y relative grid flex-1 items-center gap-10 py-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-8 lg:py-8">
-        <motion.div style={{ y: prefersReducedMotion ? 0 : copyY }} className="relative z-10">
+      <div className="container-y relative grid flex-1 items-center gap-12 py-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-8 lg:py-10">
+        <div className="relative z-10">
           <motion.p {...item(0)} className="eyebrow">
             {t.eyebrow}
           </motion.p>
-          <motion.h1
-            {...item(0.1)}
-            className="mt-6 max-w-[16ch] text-[clamp(38px,5vw,76px)] font-extrabold leading-[1.04] tracking-[-0.03em]"
-          >
-            <SplitWords text={t.title} emphasis={t.emphasis} trigger="load" delay={0.15} />
-          </motion.h1>
+          <h1 className="mt-6 max-w-[16ch] text-[clamp(38px,5vw,76px)] font-extrabold leading-[1.02] tracking-[-0.035em] rtl:leading-[1.25]">
+            <SplitWords text={t.title} emphasis={t.emphasis} trigger="load" delay={0.08} stagger={0.035} />
+          </h1>
           <motion.p
-            {...item(0.2)}
-            className="mt-7 max-w-[52ch] text-[16px] leading-relaxed text-muted lg:text-[18px]"
+            {...item(0.28)}
+            className="mt-7 max-w-[44ch] text-[16px] leading-[1.65] text-muted lg:text-[18px]"
           >
             {t.description}
           </motion.p>
-          <motion.div {...item(0.3)} className="mt-9 flex flex-wrap gap-3.5">
-            <Magnetic>
-              <Link href={`${base}/contact`} className="btn-primary px-8 py-4 text-base">
-                {t.primaryCta}
-              </Link>
-            </Magnetic>
-            <Link href={`${base}/checkup`} className="btn-ghost px-8 py-4 text-base">
-              {t.secondaryCta}
+          <motion.div {...item(0.36)} className="mt-9 grid gap-3 sm:flex sm:flex-wrap">
+            <Link href={`${base}/contact`} className="btn-primary h-[52px] px-7 text-base">
+              <span className="roll">
+                <span>{t.primaryCta}</span>
+                <span aria-hidden="true">{t.primaryCta}</span>
+              </span>
+              <span aria-hidden="true" className="icon-arrow">→</span>
+            </Link>
+            <Link href={`${base}/checkup`} className="btn-ghost h-[52px] px-7 text-base">
+              <span className="roll">
+                <span>{t.secondaryCta}</span>
+                <span aria-hidden="true">{t.secondaryCta}</span>
+              </span>
             </Link>
           </motion.div>
-        </motion.div>
+        </div>
 
-        {/* The mark — allowed to run past the container edge on wide screens */}
+        {/* The mark — sits inside the container (no clash with the viewport edge); smaller on phones */}
         <motion.div
-          {...item(0.15)}
-          className="relative max-lg:mx-auto max-lg:w-[min(70vw,340px)] lg:-me-[6vw] lg:justify-self-end lg:w-[min(38vw,560px)]"
+          {...item(0.12)}
+          className="relative max-lg:ms-auto max-lg:w-[min(48vw,220px)] lg:justify-self-end lg:w-[min(33vw,470px)]"
         >
-          <motion.div style={{ y: prefersReducedMotion ? 0 : markY, rotate: prefersReducedMotion ? 0 : markRotate }}>
+          <motion.div style={{ y: prefersReducedMotion ? 0 : markY }}>
             <HeroSymbol />
           </motion.div>
         </motion.div>
       </div>
 
       {/* Bottom rail: index line · system order · scroll hint */}
-      <motion.div {...item(0.45)} className="container-y relative">
+      <motion.div {...item(0.44)} className="container-y relative">
         <div className="module-rule" />
         <div className="flex flex-wrap items-center justify-between gap-x-10 gap-y-4 py-6">
           {rail.length > 0 && (
@@ -132,7 +119,7 @@ export default function Hero({ t, base, rail = [] }: HeroProps) {
             <motion.span
               className="block h-full w-full bg-yoca-lime"
               animate={prefersReducedMotion ? undefined : { y: ['-100%', '100%'] }}
-              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut', repeatDelay: 0.6 }}
+              transition={{ duration: 1.6, repeat: 2, ease: 'easeInOut', repeatDelay: 0.8, delay: 1 }}
             />
           </span>
         </div>
