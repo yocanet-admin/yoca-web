@@ -75,16 +75,25 @@ export function sourceFingerprintText(row: TranslatableFields): string {
   return JSON.stringify([
     row.title.trim(),
     row.excerpt.trim(),
-    row.body_md.trim(),
+    normalizeImageRefs(row.body_md).trim(),
     (row.seo_title ?? '').trim(),
     (row.meta_description ?? '').trim(),
     (row.og_title ?? '').trim(),
     (row.og_description ?? '').trim(),
     (row.faq ?? []).map((f) => [f.q.trim(), f.a.trim()]),
     (row.tags ?? []).map((t) => t.trim()),
-    (row.cover_alt ?? '').trim(),
-    (row.cover_caption ?? '').trim(),
   ]);
+}
+
+/**
+ * Publishing changes the text without anybody editing it: image references
+ * (yoca-image:<id>) become public URLs, and an empty cover alt text is filled
+ * from the image. Neither is a change a translator has to follow, so the
+ * fingerprint reads image references as their id and leaves out cover
+ * alt/caption (those are still translated, just not compared). Pure.
+ */
+export function normalizeImageRefs(body: string): string {
+  return body.replace(/\]\((?:yoca-image:|https?:\/\/[^)\s]*\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\.(?:png|jpe?g|webp))?\)/gi, '](img:$1)');
 }
 
 /** SHA-256 hex of the fingerprint text (WebCrypto: browser and Node ≥ 19). */

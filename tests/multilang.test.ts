@@ -62,10 +62,18 @@ test('source fingerprint changes when any translated field changes', async () =>
   const a = await sourceFingerprint(src);
   assert.match(a, /^[0-9a-f]{64}$/);
   assert.equal(a, await sourceFingerprint({ ...src, title: ' Randevu formu ' }), 'trim is ignored');
-  for (const patch of [{ body_md: src.body_md + '!' }, { meta_description: 'Başka' }, { faq: [] }, { tags: ['x'] }, { cover_alt: 'Y' }] as Array<Partial<TranslatableFields>>) {
+  for (const patch of [{ body_md: src.body_md + '!' }, { meta_description: 'Başka' }, { faq: [] }, { tags: ['x'] }] as Array<Partial<TranslatableFields>>) {
     assert.notEqual(await sourceFingerprint({ ...src, ...patch }), a, JSON.stringify(patch));
   }
   assert.ok(sourceFingerprintText(src).startsWith('["Randevu formu"'));
+});
+
+test('publishing does not make translations stale (image URLs, filled cover alt)', async () => {
+  const id = '0b6a1f7e-4c2d-4e8a-9f10-1234567890ab';
+  const draft = { ...src, body_md: `Metin\n\n![Diyagram](yoca-image:${id})\n`, cover_alt: null };
+  const published = { ...draft, body_md: `Metin\n\n![Diyagram](https://x.supabase.co/storage/v1/object/public/insights/g/${id}.png)\n`, cover_alt: 'Diyagram: üç yol bir karta bağlanıyor' };
+  assert.equal(await sourceFingerprint(published), await sourceFingerprint(draft));
+  assert.notEqual(await sourceFingerprint({ ...draft, body_md: draft.body_md.replace('Diyagram', 'Şema') }), await sourceFingerprint(draft), 'alt text in the body still counts');
 });
 
 test('cost estimate: grows with languages; null without a price', () => {
