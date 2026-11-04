@@ -502,7 +502,7 @@ export default function InsightEditor({ id, embedded = false, onState, reloadTok
                   ) : (
                     <p className="mt-2 grid aspect-[16/10] place-items-center border border-dashed border-line text-[12px] text-subtle">Yok</p>
                   )}
-                  <p className="mt-1 text-[11px] text-subtle">{selectedCover ? (selectedCover.public_url ? 'Seçili kapak · yayında' : 'Seçili kapak · taslak (yayında kopyalanır)') : 'Kapak yüklemek/üretmek için stüdyoda “Görsel” adımı.'}</p>
+                  <p className="mt-1 text-[11px] text-subtle">{selectedCover ? (selectedCover.public_url ? 'Seçili kapak · yayında' : 'Seçili kapak · taslak (yalnız yayımlanınca görünür)') : 'Kapak yüklemek/üretmek için stüdyoda “Görsel” adımı.'}</p>
                   {row.cover_url && <button type="button" onClick={() => update({ cover_url: null })} className="admin-btn mt-2 !px-2.5 !py-1 !text-[12px]">Yayındaki kapak adresini kaldır</button>}
                 </div>
                 <div className="grid gap-3">
@@ -543,7 +543,7 @@ export default function InsightEditor({ id, embedded = false, onState, reloadTok
                     <p className="text-[12px] text-subtle">Bu yazı {sourceState ? `${sourceState.locale.toUpperCase()} kaynaktan` : 'kaynak yazıdan'} yapay zekâ ile çevrildi. {INSIGHT_LOCALES.find((l) => l.code === row.locale)?.label} bilen biri metni okuyup işaretlemeden (ve kaydetmeden) yayınlanamaz.{row.language_reviewed && row.language_reviewed_by ? ` İşaretleyen: ${row.language_reviewed_by}${row.language_reviewed_at ? ` · ${new Date(row.language_reviewed_at).toLocaleString('tr-TR')}` : ''}.` : ''}</p>
                   </div>
                 )}
-                <p className="text-[12px] text-subtle">Yayın kaydedilmiş sürümle yapılır; kullanılan taslak görseller o anda herkese açık depoya kopyalanır. Metinde [KAYNAK GEREKLİ] kaldıysa yayın engellenir. Zamanlanmış içerik saatinden önce görünmez. Yapay zekâ işlemleri hiçbir zaman yayınlamaz.</p>
+                <p className="text-[12px] text-subtle">Yayın kaydedilmiş sürümle yapılır; kullanılan görseller özel depoda kalır ve yalnız yayındaki bir sürüm onları kullandığı sürece ziyaretçiye gösterilir. Metinde [KAYNAK GEREKLİ] kaldıysa yayın engellenir. Zamanlanmış içerik saatinden önce görünmez. Yapay zekâ işlemleri hiçbir zaman yayınlamaz.</p>
                 {row.publish_at && <p className="text-[12px] text-subtle">Kayıtlı yayın zamanı: {new Date(row.publish_at).toLocaleString('tr-TR')} ({isoToLocalInput(row.publish_at)})</p>}
               </div>
               <div className="grid gap-3 border-t border-line pt-4 sm:grid-cols-3">

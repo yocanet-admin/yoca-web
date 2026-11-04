@@ -194,7 +194,7 @@ export default function ImageStudio(props: Props) {
   const field = 'admin-input !text-[13px]';
   return (
     <div className="grid gap-3 text-[13px]">
-      <p className="text-[12px] text-muted">Görseller özel (herkese kapalı) depoda tutulur; “Yayınla” denince kullanılanlar yayına kopyalanır. Yapay zekâ görselleri müşteri işi, ekip fotoğrafı ya da kanıt olarak sunulmaz; başlık sonradan gerçek yazı tipiyle eklenir. Yapay zekâ görsellerine ve kırpımlarına Yoca logosu sağ alt köşeye sunucuda, gerçek logo dosyasından eklenir (model logo çizmez); düzenleme ve kırpma logosuz asıl görselden yapılır.</p>
+      <p className="text-[12px] text-muted">Görseller özel (herkese kapalı) depoda tutulur; herkese açık bir kopya oluşturulmaz; ziyaretçi bir görseli yalnız yayındaki bir sürüm onu kullandığı sürece görür. Yapay zekâ görselleri müşteri işi, ekip fotoğrafı ya da kanıt olarak sunulmaz; başlık sonradan gerçek yazı tipiyle eklenir. Yapay zekâ görsellerine ve kırpımlarına Yoca logosu sağ alt köşeye sunucuda, gerçek logo dosyasından eklenir (model logo çizmez); düzenleme ve kırpma logosuz asıl görselden yapılır.</p>
       <div className="grid gap-2 border border-line p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="font-bold text-white">Kapak özeti</p>

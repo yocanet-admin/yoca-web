@@ -18,7 +18,7 @@ import {
   type BulkOutcome,
   type GroupMember,
 } from '@/lib/insightGroup';
-import { findImages, findPendingByKey, findPublishByKey, finalizePublishRecord, imagePatch, insertPublishSnapshot, lastPublishedFingerprint, markSnapshotNotPublished, recordedFirstPublish, recordStaged, releaseImages, releaseStaleAttempt, stageImages, verifyPublishedImages, withPublicUrls } from '@/lib/insightPublishServer';
+import { findPendingByKey, findPublishByKey, finalizePublishRecord, imagePatch, insertPublishSnapshot, lastPublishedFingerprint, markSnapshotNotPublished, recordedFirstPublish, recordMediaUrls, resolveImages, withMediaUrls } from '@/lib/insightPublishServer';
 
 /**
  * Yoca — publish several language versions of ONE article at once (admin only).
@@ -41,7 +41,8 @@ import { findImages, findPendingByKey, findPublishByKey, finalizePublishRecord, 
  *      only when the admin ticked it in the dialog for these languages; never implied;
  *   5. checks: title, slug, body, [KAYNAK GEREKLİ], language check, slug in use, image references;
  *   6. already public and nothing changed → "unchanged", nothing written;
- *   7. images promoted (public bucket only now), pre-publish snapshot revision,
+ *   7. image references → /media/insights URLs (nothing is copied: an image is
+ *      served only while a visible version uses it), pre-publish snapshot revision,
  *      ONE conditional update with the admin's own session (RLS + audit log
  *      actor) that saves the changes and publishes; an update keeps the first
  *      publish date unless asked otherwise;
@@ -138,8 +139,8 @@ export async function POST(request: NextRequest) {
         await finalizePublishRecord(service!, pending.id, article, { requestKey, outcome, by });
         return { ...base, mode: outcome === 'updated' ? 'update' : 'publish', outcome, changed: outcome === 'updated', publishAt: article.publish_at, updatedAt: article.updated_at, replay: true };
       }
-      // …or it stopped before its update: undo the public copies it had made, then go on normally.
-      if (pending) await releaseStaleAttempt(service!, article.group_id, pending.id);
+      // …or it stopped before its update: nothing became public; mark the snapshot and go on normally.
+      if (pending) await markSnapshotNotPublished(service!, pending.id, 'önceki deneme yarıda kaldı');
     }
 
     // 2. Group and concurrency.
@@ -173,8 +174,8 @@ export async function POST(request: NextRequest) {
       const { data: taken } = await service!.from('insights').select('id').eq('locale', article.locale).eq('slug', slug).neq('id', article.id).limit(1);
       if (taken?.length) blockers.push({ code: 'slug_taken', text: `“${slug}” adresi bu dilde başka bir yazıda kullanılıyor.` });
     }
-    const imgs = await findImages(service!, article.group_id, String(merged.body_md ?? ''));
-    if (imgs.missing.length) blockers.push({ code: 'image', text: `Metinde bulunamayan görsel referansı var (${imgs.missing.length}). Görseli yeniden ekleyin.` });
+    const resolved = await resolveImages(service!, article.group_id, String(merged.body_md ?? ''));
+    if (!resolved.ok) blockers.push({ code: 'image', text: resolved.error ?? 'Görsel referansı çözülemedi.' });
 
     const warnings: string[] = [];
     if (isTranslation && article.source_hash) {
@@ -199,22 +200,16 @@ export async function POST(request: NextRequest) {
     if (blockers.length) return fail(verdict, blockers);
     if (mode === 'unchanged') return { ...verdict, outcome: 'unchanged', publishAt: article.publish_at, updatedAt: article.updated_at };
 
-    // 7. Promote images, snapshot, one conditional update.
-    // Last look right before images go public: still the version the editor loaded?
+    // 7. Snapshot, one conditional update.
+    // Last look before writing: still the version the editor loaded?
     const { data: fresh } = await service!.from('insights').select('updated_at').eq('id', article.id).maybeSingle();
     if (!fresh || !sameTimestamp((fresh as { updated_at: string }).updated_at, article.updated_at)) {
       const done = await findPublishByKey(service!, article.id, requestKey);
       if (done?.outcome) return { ...verdict, outcome: done.outcome, replay: true };
-      return fail(verdict, [{ code: 'conflict', text: 'Bu dil tam o sırada başka bir yerde değişti; yayımlanmadı, görsel kopyalanmadı. Yenileyip tekrar deneyin.' }]);
+      return fail(verdict, [{ code: 'conflict', text: 'Bu dil tam o sırada başka bir yerde değişti; yayımlanmadı. Yenileyip tekrar deneyin.' }]);
     }
     const plannedOutcome: BulkOutcome = mode === 'update' ? 'updated' : 'published';
     const revisionId = await insertPublishSnapshot(service!, article, mode === 'update' ? 'Toplu güncelleme öncesi' : 'Toplu yayın öncesi', by, { requestKey, outcome: plannedOutcome as 'published' | 'updated' });
-    const promoted = await stageImages(service!, article.group_id, String(merged.body_md));
-    if (!promoted.ok) {
-      await markSnapshotNotPublished(service!, revisionId, promoted.error ?? 'görsel');
-      return fail(verdict, [{ code: 'image', text: `${promoted.error ?? 'Görseller yayına kopyalanamadı.'} Yayımlanmadı; hiçbir görsel açıkta bırakılmadı.` }]);
-    }
-    await recordStaged(service!, revisionId, requestKey, plannedOutcome as 'published' | 'updated', promoted.created);
     const now = new Date().toISOString();
     // First publication: the earliest recorded one, else the current publish time.
     const recorded = mode === 'update' ? await recordedFirstPublish(service!, article.id) : null;
@@ -223,10 +218,10 @@ export async function POST(request: NextRequest) {
     const publishAt = mode === 'update' && keepFirst && firstPublishedAt ? firstPublishedAt : now;
     const patch: Record<string, unknown> = {
       ...changes,
-      body_md: withPublicUrls(String(merged.body_md), promoted.urls),
+      body_md: withMediaUrls(String(merged.body_md), resolved.urls),
       status: 'PUBLISHED',
       publish_at: publishAt,
-      ...imagePatch(promoted, merged),
+      ...imagePatch(resolved, merged),
       ...(reviewSet ? { language_reviewed: true, language_reviewed_at: now, language_reviewed_by: by } : {}),
       ...((changes as Record<string, unknown>).language_reviewed === false && !reviewSet ? { language_reviewed: false, language_reviewed_at: null, language_reviewed_by: null } : {}),
     };
@@ -234,8 +229,7 @@ export async function POST(request: NextRequest) {
     const { data: updated, error } = await asUser!.from('insights').update(patch).eq('id', article.id).eq('updated_at', article.updated_at).select('*');
     const row = (updated ?? [])[0] as Record<string, unknown> | undefined;
     if (error || !row) {
-      // Not published: the public copies THIS attempt made go away again (unless a public version uses them).
-      await releaseImages(service!, article.group_id, promoted.created);
+      // Not published: the row did not change, so none of its images is served.
       // Lost a race (double click / second tab): maybe the other request was this same one.
       for (let i = 0; i < 3; i += 1) {
         await new Promise((r) => setTimeout(r, 300));
@@ -249,7 +243,7 @@ export async function POST(request: NextRequest) {
       return fail(verdict, [{ code: 'conflict', text: error ? `Kaydedilemedi: ${error.message}` : 'Bu dil tam o sırada başka bir yerde değişti; yayımlanmadı. Yenileyip tekrar deneyin.' }]);
     }
     const outcome: BulkOutcome = plannedOutcome;
-    await verifyPublishedImages(service!, article.group_id, String(row.body_md ?? ''));
+    await recordMediaUrls(service!, resolved, row);
     // 8. What is public now, for "unchanged" next time and for retries.
     await finalizePublishRecord(service!, revisionId, row, { requestKey, outcome, by, firstPublishedAt: firstPublishedAt ?? null, ...(reviewSet ? { review: { by, at: now, fingerprint: contentFingerprint } } : {}) });
     return { ...verdict, outcome, publishAt: String(row.publish_at ?? ''), updatedAt: String(row.updated_at ?? '') };

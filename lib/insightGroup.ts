@@ -251,7 +251,7 @@ export function editableFields(row: Record<string, unknown>): Partial<Record<Edi
 
 /** Images in a published body are public URLs, in a draft they are references: read both as the image id. */
 function normalizeImages(body: string): string {
-  return body.replace(/(?:yoca-image:|https?:\/\/[^)\s]*\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\.(?:png|jpe?g|webp))?/gi, 'img:$1');
+  return body.replace(/(?:yoca-image:|https?:\/\/[^)\s]*\/|\/media\/insights\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\.(?:png|jpe?g|webp))?/gi, 'img:$1');
 }
 
 /**

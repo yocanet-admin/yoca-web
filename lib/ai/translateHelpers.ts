@@ -93,7 +93,7 @@ export function sourceFingerprintText(row: TranslatableFields): string {
  * alt/caption (those are still translated, just not compared). Pure.
  */
 export function normalizeImageRefs(body: string): string {
-  return body.replace(/\]\((?:yoca-image:|https?:\/\/[^)\s]*\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\.(?:png|jpe?g|webp))?\)/gi, '](img:$1)');
+  return body.replace(/\]\((?:yoca-image:|https?:\/\/[^)\s]*\/|\/media\/insights\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\.(?:png|jpe?g|webp))?\)/gi, '](img:$1)');
 }
 
 /** SHA-256 hex of the fingerprint text (WebCrypto: browser and Node ≥ 19). */

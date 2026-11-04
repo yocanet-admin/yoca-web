@@ -1,4 +1,5 @@
 import { esc, SITE } from '@/lib/notifyTemplates';
+import { absoluteMedia } from '@/lib/insightMedia';
 import { COMPANY } from '@/lib/company';
 import { newsletterCopy } from '@/lib/newsletter/copy';
 import { teaserParagraphs, type EmailCopy, type NewsletterLocale, type PublishedVersion } from '@/lib/newsletter/core';
@@ -140,8 +141,9 @@ export function issueEmail(opts: { locale: NewsletterLocale; version: PublishedV
   const arrow = rtl ? '&larr;' : '&rarr;';
   const p = (text: string) => `<p class="nl-muted" style="margin:0 0 14px 0;font:400 16px/1.65 ${FONT};color:${C.muted};">${esc(text)}</p>`;
 
-  const cover = v.cover_url && /^https:\/\//.test(v.cover_url)
-    ? `<a href="${esc(opts.url)}" style="text-decoration:none;"><img src="${esc(v.cover_url)}" width="600" alt="${esc(v.cover_alt || v.title)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;"></a>`
+  const coverUrl = absoluteMedia(v.cover_url, SITE);
+  const cover = coverUrl && /^https:\/\//.test(coverUrl)
+    ? `<a href="${esc(opts.url)}" style="text-decoration:none;"><img src="${esc(coverUrl)}" width="600" alt="${esc(v.cover_alt || v.title)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;"></a>`
     : '';
   const kicker = `${esc(t.kicker)}${opts.category ? ` <span class="nl-subtle" style="color:${C.subtle};font-weight:600;">· ${esc(opts.category)}</span>` : ''}`;
   const quoteBlock = quote

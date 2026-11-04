@@ -1,25 +1,25 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { DRAFT_BUCKET, PUBLIC_BUCKET } from '@/lib/ai/images';
+import { DRAFT_BUCKET } from '@/lib/ai/images';
 import { collectImageRefs, replaceImageRefs } from '@/lib/insightImages';
 import { publicFingerprint } from '@/lib/insightGroup';
+import { MEDIA_PREFIX, mediaPathFor } from '@/lib/insightMedia';
 
 /**
  * Yoca — server helpers shared by the two publish routes
  * (app/api/admin/insights/publish and …/publish-group). Service role only.
  *
  * Images (selected cover of the group, its 1200×630 crop, every yoca-image:
- * reference in the body) live in the private draft bucket. Publishing makes
- * them public in three steps, so a publish that fails leaves nothing public:
- *   stageImages            copy to the public bucket at a deterministic path
- *                          (existing objects reused, never a second copy);
- *                          remembers which objects THIS attempt created
- *   conditional update     the article row (admin session)
- *   failure → releaseImages        remove what this attempt created unless a
- *                                  published/scheduled version uses it
- *   success → verifyPublishedImages   re-copy anything a concurrent cleanup
- *                                     removed, record public URLs
- * The created objects are also written to the pending publish snapshot, so a
- * retry after a crash can release them (releaseStaleAttempt).
+ * reference in the body) stay in the PRIVATE draft bucket — publishing no
+ * longer copies anything anywhere. A published version refers to them as
+ * /media/insights/<id>.<ext>; that route (app/media/insights/[file]) serves
+ * an image only while a version that is visible to visitors right now
+ * (PUBLISHED, publish_at ≤ now — the same rule as the public pages) refers
+ * to exactly that URL. So:
+ *   - a failed, cancelled or interrupted publish makes nothing public: the
+ *     row did not change, the route answers 404 — no cleanup, no retry needed;
+ *   - an image shared by several languages is served while ANY of them is
+ *     public; nothing is ever deleted, so a shared image cannot be removed;
+ *   - unpublishing hides the images at once (apart from caches, see the route).
  *
  * Publish records: every publish stores a "publish" revision with the text
  * before publishing (restorable). After the row is public, the revision's
@@ -30,29 +30,28 @@ import { publicFingerprint } from '@/lib/insightGroup';
 
 type ImageRow = { bucket: string; path: string; id: string; public_url: string | null; group_id: string | null; selected: boolean; crop: string | null; parent_id: string | null; alt_text: string };
 
-export interface PromoteResult {
+export interface ResolvedImages {
   ok: boolean;
   error?: string;
+  /** image id → the gated media URL used in the published version. */
   urls: Record<string, string>;
   cover: ImageRow | null;
   og: ImageRow | null;
-  /** Public objects THIS attempt created (did not exist before). Only these may be cleaned up. */
-  created: StagedImage[];
 }
 
-export interface StagedImage {
-  imageId: string;
-  path: string;
-  draftBucket: string;
-  draftPath: string;
-}
-
-const PUBLIC_REF = /\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(?:png|jpe?g|webp)\b/gi;
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+/** Public-bucket URLs written by the earlier publish (before the media route). */
+const LEGACY_PUBLIC = new RegExp(`https?://[^)\\s"']*/storage/v1/object/public/insights/[^)\\s"']*?(${UUID})\\.(?:png|jpe?g|webp)`, 'gi');
+const MEDIA_REF = new RegExp(`${MEDIA_PREFIX.replace(/\//g, '\\/')}(${UUID})\\.(?:png|jpe?g|webp)`, 'gi');
 
 export async function findImages(service: SupabaseClient, groupId: string, body: string): Promise<{ wanted: ImageRow[]; missing: string[]; cover: ImageRow | null; og: ImageRow | null }> {
   const draftRefs = collectImageRefs(body);
-  // A body that was public already carries public URLs: those images are found by id too.
-  const refs = Array.from(new Set([...draftRefs, ...Array.from(body.matchAll(PUBLIC_REF)).map((m) => m[1].toLowerCase())]));
+  // A body that was public already carries media (or older public) URLs: those images are found by id too.
+  const refs = Array.from(new Set([
+    ...draftRefs,
+    ...Array.from(body.matchAll(MEDIA_REF)).map((m) => m[1].toLowerCase()),
+    ...Array.from(body.matchAll(LEGACY_PUBLIC)).map((m) => m[1].toLowerCase()),
+  ]));
   const { data } = await service.from('insight_images').select('id, bucket, path, public_url, group_id, selected, crop, parent_id, alt_text').eq('group_id', groupId);
   const images = (data ?? []) as ImageRow[];
   const cover = images.find((img) => img.selected) ?? null;
@@ -62,130 +61,44 @@ export async function findImages(service: SupabaseClient, groupId: string, body:
   return { wanted: Array.from(wanted.values()), missing: draftRefs.filter((id) => !wanted.has(id)), cover, og };
 }
 
-const dbg = (...a: unknown[]) => { if (process.env.INSIGHTS_PUBLISH_DEBUG === '1') console.log('[publish-img]', new Date().toISOString(), ...a); };
-const contentType = (ext: string) => (ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg');
-/** Deterministic public path: retries and other languages reuse the same object (never a second copy). */
-export function publicPathFor(groupId: string, img: { id: string; path: string }): string {
-  const ext = img.path.split('.').pop() || 'png';
-  return `${groupId}/${img.id}.${ext}`;
-}
-
-async function publicObjectExists(service: SupabaseClient, path: string): Promise<boolean> {
-  const slash = path.lastIndexOf('/');
-  const dir = path.slice(0, slash), file = path.slice(slash + 1);
-  const { data, error } = await service.storage.from(PUBLIC_BUCKET).list(dir, { search: file, limit: 10 });
-  if (error) throw new Error(`Depo okunamadı: ${error.message}`);
-  return (data ?? []).some((o) => o.name === file);
-}
-
-async function copyToPublic(service: SupabaseClient, s: StagedImage, upsert: boolean): Promise<'created' | 'exists' | string> {
-  const dl = await service.storage.from(s.draftBucket || DRAFT_BUCKET).download(s.draftPath);
-  if (dl.error || !dl.data) return 'Bir görsel okunamadı.';
-  const ext = s.path.split('.').pop() || 'png';
-  const up = await service.storage.from(PUBLIC_BUCKET).upload(s.path, Buffer.from(await dl.data.arrayBuffer()), { contentType: contentType(ext), upsert });
-  if (!up.error) return 'created';
-  if (!upsert && /exist|duplicate|409/i.test(`${up.error.message} ${(up.error as { statusCode?: string }).statusCode ?? ''}`)) return 'exists';
-  return `Görsel yayına kopyalanamadı: ${up.error.message}`;
-}
-
 /**
- * Step 1 of a publish: make the images the version uses available in the
- * public bucket at their deterministic path. Objects that already exist
- * (published earlier, or by another language) are reused and never counted
- * as created. If anything fails, the objects created so far are released
- * again before returning.
+ * The media URLs a version will use once published. Writes nothing: an image
+ * becomes visible only through the published row itself.
  */
-export async function stageImages(service: SupabaseClient, groupId: string, body: string): Promise<PromoteResult> {
+export async function resolveImages(service: SupabaseClient, groupId: string, body: string): Promise<ResolvedImages> {
   const { wanted, missing, cover, og } = await findImages(service, groupId, body);
-  const created: StagedImage[] = [];
-  if (missing.length) return { ok: false, error: `Metinde bulunamayan görsel referansı var (${missing.length}). Görseli yeniden ekleyin.`, urls: {}, cover, og, created };
+  if (missing.length) return { ok: false, error: `Metinde bulunamayan görsel referansı var (${missing.length}). Görseli yeniden ekleyin.`, urls: {}, cover, og };
+  const foreign = wanted.filter((img) => (img.bucket || DRAFT_BUCKET) !== DRAFT_BUCKET);
+  if (foreign.length) return { ok: false, error: 'Bir görsel beklenmeyen bir depoda; yayımlanmadı.', urls: {}, cover, og };
   const urls: Record<string, string> = {};
-  try {
-    for (const img of wanted) {
-      const s: StagedImage = { imageId: img.id, path: publicPathFor(groupId, img), draftBucket: img.bucket, draftPath: img.path };
-      urls[img.id] = service.storage.from(PUBLIC_BUCKET).getPublicUrl(s.path).data.publicUrl;
-      if (await publicObjectExists(service, s.path)) { dbg('stage exists', s.path); continue; }
-      const r = await copyToPublic(service, s, false);
-      dbg('stage', s.path, r);
-      if (r === 'created') created.push(s);
-      else if (r !== 'exists') throw new Error(r);
-    }
-  } catch (e) {
-    await releaseImages(service, groupId, created);
-    return { ok: false, error: e instanceof Error ? e.message : 'Görseller yayına kopyalanamadı.', urls, cover, og, created: [] };
+  for (const img of wanted) urls[img.id] = mediaPathFor(img);
+  return { ok: true, urls, cover, og };
+}
+
+/** After a successful publish: the image record shows its media URL (admin "yayında" label). */
+export async function recordMediaUrls(service: SupabaseClient, resolved: ResolvedImages, publishedRow: Record<string, unknown>): Promise<void> {
+  const text = `${publishedRow.body_md ?? ''} ${publishedRow.cover_url ?? ''} ${publishedRow.og_image ?? ''}`;
+  for (const [id, url] of Object.entries(resolved.urls)) {
+    if (text.includes(url)) await service.from('insight_images').update({ public_url: url }).eq('id', id).neq('public_url', url);
   }
-  return { ok: true, urls, cover, og, created };
 }
 
-/** Is this image used by a version that is (or will be) public: published or scheduled, anywhere in the group? */
-async function usedByPublicVersion(service: SupabaseClient, groupId: string, imageId: string): Promise<boolean> {
-  const { data, error } = await service.from('insights').select('body_md, cover_url, og_image').eq('group_id', groupId).in('status', ['PUBLISHED', 'SCHEDULED']);
-  if (error) return true; // unknown → keep (never remove something that may be in use)
-  return ((data ?? []) as Array<{ body_md: string | null; cover_url: string | null; og_image: string | null }>).some((r) => `${r.body_md ?? ''} ${r.cover_url ?? ''} ${r.og_image ?? ''}`.includes(imageId));
-}
-
-/**
- * After a failed or cancelled publish: removes the public objects this
- * attempt created, unless a published/scheduled version uses the image.
- * Race-safe with a concurrent publish of another language: after removing,
- * it looks again and puts the object back if a public version started
- * using it in the meantime (that publish also re-checks its images after
- * its own update — see verifyPublishedImages).
- */
-export async function releaseImages(service: SupabaseClient, groupId: string, created: StagedImage[]): Promise<{ removed: string[]; kept: string[]; restored: string[] }> {
-  const out = { removed: [] as string[], kept: [] as string[], restored: [] as string[] };
-  for (const s of created) {
-    if (await usedByPublicVersion(service, groupId, s.imageId)) { dbg('release keep', s.path); out.kept.push(s.path); continue; }
-    const rm = await service.storage.from(PUBLIC_BUCKET).remove([s.path]);
-    if (rm.error) { out.kept.push(s.path); continue; }
-    out.removed.push(s.path);
-    dbg('release removed', s.path);
-    if (await usedByPublicVersion(service, groupId, s.imageId)) {
-      const r = await copyToPublic(service, s, true);
-      dbg('release restore', s.path, r);
-      if (r === 'created') out.restored.push(s.path);
-    }
-  }
-  return out;
-}
-
-/**
- * After a successful update: every image the now-public version uses must
- * exist (a concurrent failed publish may have released it a moment ago);
- * missing ones are copied again. Records the public URL on the image.
- */
-export async function verifyPublishedImages(service: SupabaseClient, groupId: string, body: string): Promise<{ restored: string[]; missing: string[] }> {
-  const { wanted } = await findImages(service, groupId, body);
-  const out = { restored: [] as string[], missing: [] as string[] };
-  for (const img of wanted) {
-    const s: StagedImage = { imageId: img.id, path: publicPathFor(groupId, img), draftBucket: img.bucket, draftPath: img.path };
-    let ok = false;
-    try { ok = await publicObjectExists(service, s.path); } catch { ok = false; }
-    dbg('verify', s.path, ok);
-    if (!ok) {
-      const r = await copyToPublic(service, s, true);
-      if (r === 'created') out.restored.push(s.path);
-      else { out.missing.push(s.path); continue; }
-    }
-    const url = service.storage.from(PUBLIC_BUCKET).getPublicUrl(s.path).data.publicUrl;
-    if (img.public_url !== url) await service.from('insight_images').update({ public_url: url }).eq('id', img.id);
-  }
-  return out;
-}
-
-/** Cover / social image fields after promotion (same rules as before). */
-export function imagePatch(promoted: PromoteResult, article: { cover_alt: string | null; og_image: string | null }): Record<string, unknown> {
+/** Cover / social image fields of the published version. */
+export function imagePatch(resolved: ResolvedImages, article: { cover_alt: string | null; og_image: string | null }): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
-  if (promoted.cover && promoted.urls[promoted.cover.id]) {
-    patch.cover_url = promoted.urls[promoted.cover.id];
-    if (!article.cover_alt) patch.cover_alt = promoted.cover.alt_text || null;
+  if (resolved.cover && resolved.urls[resolved.cover.id]) {
+    patch.cover_url = resolved.urls[resolved.cover.id];
+    if (!article.cover_alt) patch.cover_alt = resolved.cover.alt_text || null;
   }
-  if (promoted.og && promoted.urls[promoted.og.id] && !article.og_image) patch.og_image = promoted.urls[promoted.og.id];
+  const og = String(article.og_image ?? '');
+  const legacyOg = og ? Array.from(og.matchAll(LEGACY_PUBLIC))[0]?.[1]?.toLowerCase() : undefined;
+  if (resolved.og && resolved.urls[resolved.og.id] && (!og || legacyOg === resolved.og.id)) patch.og_image = resolved.urls[resolved.og.id];
   return patch;
 }
 
-export function withPublicUrls(body: string, urls: Record<string, string>): string {
-  return replaceImageRefs(body, urls);
+/** Draft references (and older public-bucket URLs of the same images) → media URLs. */
+export function withMediaUrls(body: string, urls: Record<string, string>): string {
+  return replaceImageRefs(body, urls).replace(LEGACY_PUBLIC, (whole, id: string) => urls[id.toLowerCase()] ?? whole);
 }
 
 export interface PublishRecord {
@@ -255,23 +168,6 @@ export async function findPublishByKey(service: SupabaseClient, insightId: strin
   const { data, error } = await service.from('insight_revisions').select('data').eq('insight_id', insightId).eq('kind', 'publish').eq('data->publish->>requestKey', requestKey).limit(1);
   if (error || !data?.length) return null;
   return ((data[0] as { data?: { publish?: PublishRecord } }).data?.publish) ?? null;
-}
-
-/** Writes the objects this attempt created into its pending snapshot (crash recovery). */
-export async function recordStaged(service: SupabaseClient, revisionId: string | null, requestKey: string | undefined, outcome: 'published' | 'updated' | undefined, created: StagedImage[]): Promise<void> {
-  if (!revisionId) return;
-  await service.from('insight_revisions').update({ data: { publish: { pending: true, ...(requestKey ? { pendingKey: requestKey, pendingOutcome: outcome } : {}), staged: created } } }).eq('id', revisionId);
-}
-
-/**
- * A pending snapshot of this request key whose update never happened (the
- * function stopped): release the public objects it had created and mark it.
- */
-export async function releaseStaleAttempt(service: SupabaseClient, groupId: string, revisionId: string): Promise<void> {
-  const { data } = await service.from('insight_revisions').select('data').eq('id', revisionId).maybeSingle();
-  const staged = ((data as { data?: { publish?: { staged?: StagedImage[] } } } | null)?.data?.publish?.staged ?? []).filter((x) => x && typeof x.path === 'string' && typeof x.imageId === 'string');
-  if (staged.length) await releaseImages(service, groupId, staged);
-  await markSnapshotNotPublished(service, revisionId, 'önceki deneme yarıda kaldı; görselleri geri alındı');
 }
 
 /** A snapshot whose publish did not happen is kept, marked as such (nothing is deleted). */

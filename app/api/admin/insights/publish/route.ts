@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
-import { finalizePublishRecord, imagePatch, insertPublishSnapshot, markSnapshotNotPublished, recordStaged, releaseImages, stageImages, verifyPublishedImages, withPublicUrls } from '@/lib/insightPublishServer';
+import { finalizePublishRecord, imagePatch, insertPublishSnapshot, markSnapshotNotPublished, recordMediaUrls, resolveImages, withMediaUrls } from '@/lib/insightPublishServer';
 import { countSourceMarkers } from '@/lib/ai/sourceText';
 
 /**
@@ -9,11 +9,12 @@ import { countSourceMarkers } from '@/lib/ai/sourceText';
  * The ONLY place an article becomes public. AI actions never call it.
  *  - publish:   status PUBLISHED, publish_at = now
  *  - schedule:  status SCHEDULED, publish_at = the given future time
- *  - unpublish: status DRAFT (already-public image copies stay at their URLs)
- * Before publishing/scheduling, the images the article uses (selected cover,
- * its 1200×630 crop and every yoca-image: reference in the body) are copied
- * from the private draft bucket to the public "insights" bucket and the
- * references are replaced with public URLs. A snapshot revision is stored.
+ *  - unpublish: status DRAFT (its images stop being served: /media/insights)
+ * The images the article uses (selected cover, its 1200×630 crop and every
+ * yoca-image: reference in the body) stay in the private bucket; the
+ * published row refers to them as /media/insights/<id>.<ext>, which serves a
+ * file only while a visible version uses it. Nothing is copied, so a failed
+ * publish leaves nothing public. A snapshot revision is stored.
  * The article row is updated with the admin's own session (audit log actor).
  * A translation made from a source article (v15 source_insight_id) needs
  * language_reviewed = true before it can be published or scheduled.
@@ -60,31 +61,26 @@ export async function POST(request: NextRequest) {
     publishAt = new Date(at).toISOString();
   }
 
-  // Images to promote: body references + selected cover + its social crop.
+  // Images: media URLs only (nothing is copied or made public here).
   const by = admin.email ?? admin.id;
+  const resolved = await resolveImages(service, a.group_id, a.body_md);
+  if (!resolved.ok) return NextResponse.json({ ok: false, error: resolved.error }, { status: 422 });
   const revisionId = await insertPublishSnapshot(service, a, action === 'publish' ? 'Yayın öncesi' : 'Zamanlama öncesi', by);
-  const promoted = await stageImages(service, a.group_id, a.body_md);
-  if (!promoted.ok) {
-    await markSnapshotNotPublished(service, revisionId, promoted.error ?? 'görsel');
-    return NextResponse.json({ ok: false, error: promoted.error }, { status: promoted.error?.startsWith('Metinde') ? 422 : 500 });
-  }
-  await recordStaged(service, revisionId, undefined, undefined, promoted.created);
-  const urls = promoted.urls;
-  const nextBody = withPublicUrls(a.body_md, urls);
+  const urls = resolved.urls;
+  const nextBody = withMediaUrls(a.body_md, urls);
   const patch: Record<string, unknown> = {
     body_md: nextBody,
     status: action === 'publish' ? 'PUBLISHED' : 'SCHEDULED',
     publish_at: publishAt,
-    ...imagePatch(promoted, a),
+    ...imagePatch(resolved, a),
   };
   const { data: updated, error } = await asUser.from('insights').update(patch).eq('id', a.id).eq('updated_at', a.updated_at).select('*').maybeSingle();
   if (error || !updated) {
-    // Nothing became public: the copies this attempt made are removed again.
-    await releaseImages(service, a.group_id, promoted.created);
+    // The row did not change, so none of its images is served.
     await markSnapshotNotPublished(service, revisionId, error?.message ?? 'güncellenemedi');
     return NextResponse.json({ ok: false, error: error?.message ?? 'İçerik bu arada başka bir yerde değişti ya da yetki yok; yayın yapılmadı. Sayfayı yenileyip tekrar deneyin.' }, { status: error ? 500 : 409 });
   }
-  await verifyPublishedImages(service, a.group_id, nextBody);
+  await recordMediaUrls(service, resolved, updated as Record<string, unknown>);
   // Fingerprint of what is public now: a later bulk publish leaves an unchanged version alone.
   if (action === 'publish') await finalizePublishRecord(service, revisionId, updated as Record<string, unknown>, { outcome: 'published', by });
   else await finalizePublishRecord(service, revisionId, updated as Record<string, unknown>, { by });
