@@ -42,7 +42,7 @@ const CAPTURE_MODE = Boolean(process.env.NOTIFY_RESEND_ENDPOINT);
 const TELEGRAM_API = (process.env.NOTIFY_TELEGRAM_API || 'https://api.telegram.org').replace(/\/$/, '');
 
 export type ChannelResult = 'sent' | 'skipped' | 'error';
-export type AlertKind = 'lead' | 'site' | 'summary' | 'test';
+export type AlertKind = 'lead' | 'site' | 'summary' | 'test' | 'ops';
 
 export function escapeHtml(value: string): string {
   return esc(value);

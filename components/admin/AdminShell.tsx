@@ -25,6 +25,18 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
     ],
   },
   {
+    title: 'Operasyon',
+    items: [
+      { href: '/admin/ops', label: 'Genel bakış', icon: '◈' },
+      { href: '/admin/ops/clients', label: 'Müşteriler ve firmalar', icon: '◎' },
+      { href: '/admin/ops/services', label: 'Hizmetler ve varlıklar', icon: '▤' },
+      { href: '/admin/ops/finance', label: 'Ödemeler ve yenilemeler', icon: '₺' },
+      { href: '/admin/ops/providers', label: 'Sağlayıcılar', icon: '⌂' },
+      { href: '/admin/ops/licenses', label: 'Lisanslar', icon: '⚿' },
+      { href: '/admin/ops/settings', label: 'Operasyon ayarları', icon: '⚙' },
+    ],
+  },
+  {
     title: 'Site içeriği',
     items: [
       { href: '/admin/sections', label: 'Bölümler', icon: '◧' },
@@ -49,7 +61,9 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
 
 const NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
 
-const isActive = (href: string, pathname: string) => (href === '/admin' ? pathname === '/admin' : pathname.startsWith(href));
+// Section roots that have their own sub-pages in the menu match exactly.
+const EXACT = new Set(['/admin', '/admin/ops']);
+const isActive = (href: string, pathname: string) => (EXACT.has(href) ? pathname === href : pathname === href || pathname.startsWith(`${href}/`));
 
 const NOT_ALLOWED = 'Bu hesabın yönetim paneline erişim izni yok. Yetkili bir hesapla giriş yapın.';
 const CHECK_FAILED = 'Yönetici kontrolü yapılamadı (veritabanındaki is_admin() fonksiyonu yok ya da erişilemiyor). Güvenlik için panel açılmadı.';

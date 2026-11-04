@@ -88,7 +88,8 @@ export async function loadCrm(): Promise<CrmData> {
   if (clients.error) return { ready: false, clients: [], deals: [], activities: [] };
   return {
     ready: true,
-    clients: (clients.data as Client[]) ?? [],
+    // Firms that are only providers (Operasyon, v18 roles) are not CRM clients.
+    clients: ((clients.data as Array<Client & { roles?: string[] }>) ?? []).filter((c) => !Array.isArray(c.roles) || c.roles.includes('customer')),
     deals: ((deals.data as Deal[]) ?? []).map((d) => ({ ...d, value: Number(d.value) || 0 })),
     activities: (activities.data as Activity[]) ?? [],
   };
