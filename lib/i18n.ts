@@ -271,6 +271,31 @@ export interface Dict {
   clocks: { heading: string; sub: string; active: string; istanbul: string; baku: string; london: string; dubai: string };
   team: { heading: string; sub: string; linkedin: string };
   cta: { heading: string; body: string; button: string };
+  /** Home page (2026 redesign): hero links, selected work, services, process, Check-Up, closing. */
+  home: {
+    ctaWork: string;
+    ctaBrief: string;
+    reelLabel: string;
+    workEyebrow: string;
+    workTitle: string;
+    workAll: string;
+    servicesTitle: string;
+    relatedWork: string;
+    serviceLink: string;
+    processEyebrow: string;
+    processTitle: string;
+    processSub: string;
+    process: Array<{ name: string; desc: string }>;
+    checkupHow: string;
+    checkupSteps: Array<{ title: string; desc: string }>;
+    checkupLooks: string;
+    insightsTitle: string;
+    closingChannels: string;
+    channelEmail: string;
+    channelForm: string;
+  };
+  /** Project detail (2026 layout). */
+  caseView: { nextProject: string; desktop: string; mobile: string; inUse: string; visitSite: string };
   footer: {
     message: string;
     rights: string;
@@ -638,10 +663,10 @@ const en: Dict = {
   },
   hero: {
     eyebrow: 'Independent Creative Growth Partner',
-    title: 'We turn ideas into brands, and brands into systems built to grow.',
+    title: 'We design your brand and bring it to life in digital.',
     description:
-      'Yoca brings strategy, identity, digital experience, technology and growth into one connected system—so ambitious ideas can launch clearly, perform intelligently and scale without losing what makes them distinct.',
-    emphasis: ['brands', 'systems'],
+      'We bring brand identity, websites, digital products and marketing together around what your project needs.',
+    emphasis: ['digital'],
     primaryCta: 'Start a Project',
     secondaryCta: 'Free Digital Check-Up',
     line: 'Strategy. Identity. Experience. Growth.',
@@ -690,6 +715,45 @@ const en: Dict = {
     heading: 'What are you building next?',
     body: 'Tell us where you are, where you want to go and what is standing in the way. We will help define the right next move.',
     button: 'Start the Conversation',
+  },
+  home: {
+    ctaWork: 'Explore the work',
+    ctaBrief: 'Tell us about your project',
+    reelLabel: 'Selected work',
+    workEyebrow: 'Selected projects',
+    workTitle: 'A selection of work we designed and built.',
+    workAll: 'All projects',
+    servicesTitle: 'What we do',
+    relatedWork: 'Our work in this area',
+    serviceLink: 'Explore the service',
+    processEyebrow: 'Process',
+    processTitle: 'Every project moves at the same open rhythm.',
+    processSub: 'We always see together which stage we are in and what comes next.',
+    process: [
+      { name: 'Understand', desc: 'We study your brand, your audience and where things stand today, and agree on what needs to change.' },
+      { name: 'Design', desc: 'Identity, content and interface decisions take shape through drafts you can review.' },
+      { name: 'Build', desc: 'The approved design becomes a fast, accessible structure your team can manage.' },
+      { name: 'Launch', desc: 'After a preview review and content checks, the work goes live cleanly.' },
+      { name: 'Improve', desc: 'After launch we measure, learn and refine the points that need it, together.' },
+    ],
+    checkupHow: 'How it works',
+    checkupSteps: [
+      { title: 'Answer the questions', desc: '{n} short questions about your brand, website, channels and goals.' },
+      { title: 'We review your answers', desc: 'Our team reads your answers.' },
+      { title: 'See your priorities', desc: 'We email you a prioritised assessment and clear next steps.' },
+    ],
+    checkupLooks: 'What we look at',
+    insightsTitle: 'Latest from Insights',
+    closingChannels: 'Reach us directly',
+    channelEmail: 'Email',
+    channelForm: 'Contact form',
+  },
+  caseView: {
+    nextProject: 'Next project',
+    desktop: 'Desktop',
+    mobile: 'Mobile',
+    inUse: 'In use',
+    visitSite: 'Visit the site',
   },
   footer: {
     message: 'Good ideas deserve a system built to move them forward.',
@@ -1082,10 +1146,10 @@ const tr: Dict = {
   },
   hero: {
     eyebrow: 'Bağımsız Yaratıcı Büyüme Partneri',
-    title: 'Fikirleri markaya, markaları büyüyen sistemlere dönüştürüyoruz.',
+    title: 'Markanızı tasarlıyor, dijitalde hayata geçiriyoruz.',
     description:
-      'Yoca; strateji, kimlik, dijital deneyim, teknoloji ve büyümeyi tek bir bağlantılı sistemde birleştirir — iddialı fikirler net biçimde yayına çıkar, akıllıca performans gösterir ve onları farklı kılan şeyi kaybetmeden ölçeklenir.',
-    emphasis: ['markaya', 'sistemlere'],
+      'Marka kimliği, web sitesi, dijital ürün ve pazarlama çalışmalarını projenizin ihtiyacına göre bir araya getiriyoruz.',
+    emphasis: ['dijitalde'],
     primaryCta: 'Projeyi Başlat',
     secondaryCta: 'Ücretsiz Dijital Check-Up',
     line: 'Strateji. Kimlik. Deneyim. Büyüme.',
@@ -1134,6 +1198,45 @@ const tr: Dict = {
     heading: 'Sırada neyi inşa ediyorsunuz?',
     body: 'Bugün nerede olduğunuzu, nereye ulaşmak istediğinizi ve önünüzde neyin durduğunu anlatın. Doğru sonraki adımı birlikte tanımlayalım.',
     button: 'Konuşmayı Başlat',
+  },
+  home: {
+    ctaWork: 'Projeleri İncele',
+    ctaBrief: 'Projenizi Anlatın',
+    reelLabel: 'Seçili iş',
+    workEyebrow: 'Seçili projeler',
+    workTitle: 'Tasarlayıp geliştirdiğimiz işlerden bir seçki.',
+    workAll: 'Tüm projeler',
+    servicesTitle: 'Neler yapıyoruz',
+    relatedWork: 'Bu alandaki işimiz',
+    serviceLink: 'Hizmeti incele',
+    processEyebrow: 'Süreç',
+    processTitle: 'Her proje aynı açık ritimle ilerler.',
+    processSub: 'Hangi aşamada olduğumuzu ve bir sonraki adımı her zaman birlikte görürüz.',
+    process: [
+      { name: 'Anla', desc: 'Markanızı, hedef kitlenizi ve bugünkü durumu birlikte inceler, neyin değişmesi gerektiğini netleştiririz.' },
+      { name: 'Tasarla', desc: 'Kimlik, içerik ve arayüz kararlarını inceleyebileceğiniz taslaklarla şekillendiririz.' },
+      { name: 'Geliştir', desc: 'Onaylanan tasarımı hızlı, erişilebilir ve ekibinizin yönetebileceği bir yapıya dönüştürürüz.' },
+      { name: 'Yayına al', desc: 'Önizleme incelemesi ve içerik kontrollerinden sonra işi temiz biçimde canlıya alırız.' },
+      { name: 'İyileştir', desc: 'Yayından sonra ölçer, öğrenir ve gereken noktaları birlikte geliştiririz.' },
+    ],
+    checkupHow: 'Nasıl işler?',
+    checkupSteps: [
+      { title: 'Soruları yanıtlayın', desc: 'Markanız, web siteniz, kanallarınız ve hedefleriniz hakkında {n} kısa soru.' },
+      { title: 'Yanıtlarınızı inceleriz', desc: 'Yanıtlarınızı ekibimiz okur.' },
+      { title: 'Önceliklerinizi görün', desc: 'Önceliklendirilmiş değerlendirmeyi ve net sonraki adımları e-postanıza göndeririz.' },
+    ],
+    checkupLooks: 'İncelediğimiz alanlar',
+    insightsTitle: 'Insights’tan son yazılar',
+    closingChannels: 'Doğrudan ulaşın',
+    channelEmail: 'E-posta',
+    channelForm: 'İletişim formu',
+  },
+  caseView: {
+    nextProject: 'Sıradaki proje',
+    desktop: 'Masaüstü',
+    mobile: 'Mobil',
+    inUse: 'Kullanımda',
+    visitSite: 'Siteyi ziyaret et',
   },
   footer: {
     message: 'İyi fikirler, onları ileri taşıyacak doğru sistemi hak eder.',
@@ -1526,10 +1629,10 @@ const az: Dict = {
   },
   hero: {
     eyebrow: 'Müstəqil Kreativ İnkişaf Tərəfdaşı',
-    title: 'İdeyaları brendə, brendləri isə böyüyən sistemlərə çeviririk.',
+    title: 'Brendinizi dizayn edir, rəqəmsalda həyata keçiririk.',
     description:
-      'Yoca strategiya, kimlik, rəqəmsal təcrübə, texnologiya və inkişafı vahid əlaqəli sistemdə birləşdirir — iddialı ideyalar aydın şəkildə istifadəyə verilir, ağıllı performans göstərir və onları fərqləndirəni itirmədən miqyaslanır.',
-    emphasis: ['brendə', 'sistemlərə'],
+      'Brend kimliyi, veb-sayt, rəqəmsal məhsul və marketinq işlərini layihənizin ehtiyacına uyğun olaraq bir araya gətiririk.',
+    emphasis: ['rəqəmsalda'],
     primaryCta: 'Layihəyə Başla',
     secondaryCta: 'Pulsuz Rəqəmsal Check-Up',
     line: 'Strategiya. Kimlik. Təcrübə. İnkişaf.',
@@ -1578,6 +1681,45 @@ const az: Dict = {
     heading: 'Növbəti olaraq nə qurursunuz?',
     body: 'Hazırda harada olduğunuzu, hara çatmaq istədiyinizi və qarşınızda nə dayandığını paylaşın. Doğru növbəti addımı birlikdə müəyyən edək.',
     button: 'Söhbətə Başla',
+  },
+  home: {
+    ctaWork: 'Layihələrə baxın',
+    ctaBrief: 'Layihənizi bizə danışın',
+    reelLabel: 'Seçilmiş iş',
+    workEyebrow: 'Seçilmiş layihələr',
+    workTitle: 'Dizayn edib hazırladığımız işlərdən seçmələr.',
+    workAll: 'Bütün layihələr',
+    servicesTitle: 'Nə edirik',
+    relatedWork: 'Bu sahədəki işimiz',
+    serviceLink: 'Xidmətə baxın',
+    processEyebrow: 'Proses',
+    processTitle: 'Hər layihə eyni açıq ritmlə irəliləyir.',
+    processSub: 'Hansı mərhələdə olduğumuzu və növbəti addımı hər zaman birlikdə görürük.',
+    process: [
+      { name: 'Anlamaq', desc: 'Brendinizi, auditoriyanızı və bugünkü vəziyyəti birlikdə öyrənir, nəyin dəyişməli olduğunu aydınlaşdırırıq.' },
+      { name: 'Dizayn', desc: 'Kimlik, məzmun və interfeys qərarlarını nəzərdən keçirə biləcəyiniz eskizlərlə formalaşdırırıq.' },
+      { name: 'İnkişaf', desc: 'Təsdiqlənmiş dizaynı sürətli, əlçatan və komandanızın idarə edə biləcəyi struktura çeviririk.' },
+      { name: 'Yayım', desc: 'Önizləmə yoxlaması və məzmun nəzarətindən sonra işi səliqəli şəkildə yayıma veririk.' },
+      { name: 'Təkmilləşdirmə', desc: 'Yayımdan sonra ölçür, öyrənir və lazım olan nöqtələri birlikdə inkişaf etdiririk.' },
+    ],
+    checkupHow: 'Necə işləyir?',
+    checkupSteps: [
+      { title: 'Sualları cavablayın', desc: 'Brendiniz, veb-saytınız, kanallarınız və hədəfləriniz haqqında {n} qısa sual.' },
+      { title: 'Cavablarınızı nəzərdən keçiririk', desc: 'Cavablarınızı komandamız oxuyur.' },
+      { title: 'Prioritetlərinizi görün', desc: 'Prioritetləşdirilmiş qiymətləndirməni və aydın növbəti addımları e-poçtunuza göndəririk.' },
+    ],
+    checkupLooks: 'Baxdığımız sahələr',
+    insightsTitle: 'Baxışlardan son yazılar',
+    closingChannels: 'Birbaşa əlaqə',
+    channelEmail: 'E-poçt',
+    channelForm: 'Əlaqə forması',
+  },
+  caseView: {
+    nextProject: 'Növbəti layihə',
+    desktop: 'Masaüstü',
+    mobile: 'Mobil',
+    inUse: 'İstifadədə',
+    visitSite: 'Sayta keçin',
   },
   footer: {
     message: 'Yaxşı ideyalar onları irəli aparacaq düzgün sistemə layiqdir.',
@@ -1946,10 +2088,10 @@ const ar: Dict = {
   },
   hero: {
     eyebrow: 'شريك نمو إبداعي مستقل',
-    title: 'نحوّل الأفكار إلى علامات، والعلامات إلى أنظمة صُممت للنمو.',
+    title: 'نصمّم علامتك التجارية ونُطلقها في العالم الرقمي.',
     description:
-      'تجمع Yoca الاستراتيجية والهوية والتجربة الرقمية والتقنية والنمو في نظام واحد مترابط — لتنطلق الأفكار الطموحة بوضوح، وتؤدي بذكاء، وتتوسع دون أن تفقد ما يميزها.',
-    emphasis: ['علامات', 'أنظمة'],
+      'نجمع هوية العلامة والمواقع الإلكترونية والمنتجات الرقمية والتسويق وفق ما يحتاجه مشروعك.',
+    emphasis: ['الرقمي'],
     primaryCta: 'ابدأ مشروعك',
     secondaryCta: 'فحص رقمي مجاني',
     line: 'استراتيجية. هوية. تجربة. نمو.',
@@ -1998,6 +2140,45 @@ const ar: Dict = {
     heading: 'ماذا تبني تاليًا؟',
     body: 'أخبرنا أين أنت اليوم، وإلى أين تريد الوصول، وما الذي يقف في الطريق. سنساعدك على تحديد الخطوة التالية الصحيحة.',
     button: 'ابدأ المحادثة',
+  },
+  home: {
+    ctaWork: 'استعرض المشاريع',
+    ctaBrief: 'حدّثنا عن مشروعك',
+    reelLabel: 'عمل مختار',
+    workEyebrow: 'مشاريع مختارة',
+    workTitle: 'مختارات من أعمال صمّمناها وطوّرناها.',
+    workAll: 'كل المشاريع',
+    servicesTitle: 'ماذا نقدّم',
+    relatedWork: 'عملنا في هذا المجال',
+    serviceLink: 'استكشف الخدمة',
+    processEyebrow: 'المنهجية',
+    processTitle: 'كل مشروع يسير بالإيقاع الواضح نفسه.',
+    processSub: 'نرى معًا في كل وقت المرحلة التي نحن فيها والخطوة التالية.',
+    process: [
+      { name: 'الفهم', desc: 'ندرس معًا علامتك وجمهورك والوضع الحالي، ونحدد ما الذي يجب أن يتغير.' },
+      { name: 'التصميم', desc: 'نشكّل قرارات الهوية والمحتوى والواجهة عبر مسودات يمكنك مراجعتها.' },
+      { name: 'التطوير', desc: 'نحوّل التصميم المعتمد إلى بنية سريعة وسهلة الوصول يستطيع فريقك إدارتها.' },
+      { name: 'الإطلاق', desc: 'بعد مراجعة المعاينة وتدقيق المحتوى نطلق العمل بشكل منظّم.' },
+      { name: 'التحسين', desc: 'بعد الإطلاق نقيس ونتعلّم ونطوّر معًا النقاط التي تحتاج إلى ذلك.' },
+    ],
+    checkupHow: 'كيف يعمل؟',
+    checkupSteps: [
+      { title: 'أجب عن الأسئلة', desc: 'أسئلة قصيرة عن علامتك وموقعك وقنواتك وأهدافك، وعددها {n}.' },
+      { title: 'نراجع إجاباتك', desc: 'يقرأ فريقنا إجاباتك.' },
+      { title: 'تعرّف على أولوياتك', desc: 'نرسل إلى بريدك الإلكتروني تقييمًا مرتّبًا حسب الأولوية وخطوات تالية واضحة.' },
+    ],
+    checkupLooks: 'ما الذي ننظر فيه',
+    insightsTitle: 'أحدث المقالات',
+    closingChannels: 'تواصل معنا مباشرة',
+    channelEmail: 'البريد الإلكتروني',
+    channelForm: 'نموذج التواصل',
+  },
+  caseView: {
+    nextProject: 'المشروع التالي',
+    desktop: 'سطح المكتب',
+    mobile: 'الجوال',
+    inUse: 'أثناء الاستخدام',
+    visitSite: 'زيارة الموقع',
   },
   footer: {
     message: 'تستحق الأفكار الجيدة نظامًا يدفعها إلى الأمام.',

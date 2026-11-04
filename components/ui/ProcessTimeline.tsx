@@ -2,7 +2,6 @@
 
 import { useRef, useState } from 'react';
 import { motion, useMotionValueEvent, useReducedMotion, useScroll, useTransform } from 'framer-motion';
-import { EASE_YOCA } from '@/lib/motion';
 
 /**
  * Yoca — process journey (Understand → Define → Build → Launch → Grow).
@@ -12,10 +11,14 @@ import { EASE_YOCA } from '@/lib/motion';
  */
 interface ProcessTimelineProps {
   steps: Array<{ name: string; desc: string }>;
+  /** 'light' (default) for soft-white sections, 'dark' for the home page. */
+  tone?: 'light' | 'dark';
 }
 
-export default function ProcessTimeline({ steps }: ProcessTimelineProps) {
+export default function ProcessTimeline({ steps, tone = 'light' }: ProcessTimelineProps) {
   const reduced = useReducedMotion();
+  const dark = tone === 'dark';
+  const ink = dark ? '255,255,255' : '5,5,5';
   const ref = useRef<HTMLOListElement>(null);
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start 80%', 'end 45%'] });
   const fill = useTransform(scrollYProgress, [0, 1], [0, 1]);
@@ -28,36 +31,30 @@ export default function ProcessTimeline({ steps }: ProcessTimelineProps) {
   return (
     <ol ref={ref} className="relative mt-14 grid gap-10 sm:grid-cols-2 lg:mt-20 lg:grid-cols-5 lg:gap-6">
       {/* Rail (desktop): hairline + scroll-linked fill */}
-      <span aria-hidden="true" className="absolute inset-x-0 top-[9px] hidden h-px overflow-hidden bg-[rgba(5,5,5,0.16)] lg:block">
+      <span aria-hidden="true" className="absolute inset-x-0 top-[9px] hidden h-px overflow-hidden lg:block" style={{ background: `rgba(${ink},0.16)` }}>
         <motion.span className="absolute inset-0 origin-left bg-yoca-green rtl:origin-right" style={{ scaleX: reduced ? 1 : fill }} />
       </span>
       {steps.map((step, index) => {
         const isActive = reduced ? true : index <= active;
         return (
-          <motion.li
-            key={step.name}
-            className="relative"
-            initial={reduced ? false : { opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: '-60px' }}
-            transition={{ duration: 0.55, delay: index * 0.08, ease: EASE_YOCA }}
-          >
+          // Steps are never hidden: only the rail fill and the active marker follow scroll.
+          <li key={step.name} className="relative">
             <motion.span
               aria-hidden="true"
               className="slant relative z-10 block h-[19px] w-[22px]"
-              animate={{ backgroundColor: isActive ? (index === steps.length - 1 ? '#A2FF00' : '#40C401') : 'rgba(5,5,5,0.18)' }}
+              animate={{ backgroundColor: isActive ? (index === steps.length - 1 ? '#A2FF00' : '#40C401') : `rgba(${ink},0.18)` }}
               transition={{ duration: 0.35 }}
             />
             <motion.span
               className="mt-6 block text-[clamp(44px,5vw,72px)] font-extrabold leading-none tracking-[-0.05em]"
-              animate={{ color: isActive ? 'rgba(5,5,5,0.9)' : 'rgba(5,5,5,0.14)' }}
+              animate={{ color: isActive ? `rgba(${ink},0.9)` : `rgba(${ink},0.14)` }}
               transition={{ duration: 0.4 }}
             >
               {String(index + 1).padStart(2, '0')}
             </motion.span>
             <h3 className="mt-3 text-[20px] font-extrabold tracking-[-0.02em]">{step.name}</h3>
-            <p className="light-muted mt-2 max-w-[30ch] text-[14px] leading-relaxed">{step.desc}</p>
-          </motion.li>
+            <p className={`mt-2 max-w-[30ch] text-[14px] leading-relaxed ${dark ? 'text-muted' : 'light-muted'}`}>{step.desc}</p>
+          </li>
         );
       })}
     </ol>
