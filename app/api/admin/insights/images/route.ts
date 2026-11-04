@@ -13,7 +13,8 @@ import { OpenAIError } from '@/lib/ai/openai';
  *   crop: { imageId, crop: '1200x630' | '1080x1080' } — server-side crop
  *   (sharp) of the logo-free original; crops of AI images get the logo again.
  *   (The browser crop in ImageStudio is only a fallback for an old server.)
- * Nothing here publishes: public copies are made only by the publish route.
+ * Nothing here publishes or makes an image public: visitors see an image only
+ * through /media/insights while a published version uses it.
  */
 
 export const runtime = 'nodejs';
