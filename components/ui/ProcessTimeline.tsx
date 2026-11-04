@@ -2,7 +2,6 @@
 
 import { useRef, useState } from 'react';
 import { motion, useMotionValueEvent, useReducedMotion, useScroll, useTransform } from 'framer-motion';
-import { EASE_YOCA } from '@/lib/motion';
 
 /**
  * Yoca — process journey (Understand → Define → Build → Launch → Grow).
@@ -34,14 +33,8 @@ export default function ProcessTimeline({ steps }: ProcessTimelineProps) {
       {steps.map((step, index) => {
         const isActive = reduced ? true : index <= active;
         return (
-          <motion.li
-            key={step.name}
-            className="relative"
-            initial={reduced ? false : { opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: '-60px' }}
-            transition={{ duration: 0.55, delay: index * 0.08, ease: EASE_YOCA }}
-          >
+          // Steps are never hidden: only the rail fill and the active marker follow scroll.
+          <li key={step.name} className="relative">
             <motion.span
               aria-hidden="true"
               className="slant relative z-10 block h-[19px] w-[22px]"
@@ -57,7 +50,7 @@ export default function ProcessTimeline({ steps }: ProcessTimelineProps) {
             </motion.span>
             <h3 className="mt-3 text-[20px] font-extrabold tracking-[-0.02em]">{step.name}</h3>
             <p className="light-muted mt-2 max-w-[30ch] text-[14px] leading-relaxed">{step.desc}</p>
-          </motion.li>
+          </li>
         );
       })}
     </ol>
