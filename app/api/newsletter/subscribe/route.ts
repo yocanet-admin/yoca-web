@@ -7,6 +7,7 @@ import { asLocale, CONFIRM_RESEND_MS, CONFIRM_TTL_MS, confirmUrl, hashIp, hashTo
 import { confirmEmail } from '@/lib/newsletter/template';
 import { sendOne } from '@/lib/newsletter/mailer';
 import { SITE } from '@/lib/notifyTemplates';
+import { newsletterSender } from '@/lib/newsletter/extras';
 
 /**
  * Yoca — newsletter sign-up (double opt-in).
@@ -103,7 +104,7 @@ export async function POST(request: NextRequest) {
 
   // Production links always point at yoca.net (never at a Host header value).
   const site = process.env.VERCEL_ENV === 'production' ? SITE : request.nextUrl.origin;
-  const mail = confirmEmail(listLocale, confirmUrl(site, token));
+  const mail = confirmEmail(listLocale, confirmUrl(site, token), await newsletterSender());
   const sent = await sendOne({ to: email, ...mail });
   if (!sent.ok) {
     console.error('newsletter: confirmation e-mail failed', sent.error);

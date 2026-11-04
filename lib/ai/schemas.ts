@@ -363,14 +363,16 @@ export const EmailTeaserSchema = {
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['subject', 'preheader', 'teaser', 'notes'],
-    properties: { subject: str, preheader: str, teaser: str, notes: str },
+    required: ['subject', 'preheader', 'teaser', 'quote', 'notes'],
+    properties: { subject: str, preheader: str, teaser: str, quote: str, notes: str },
   },
 };
 export interface EmailTeaser {
   subject: string;
   preheader: string;
   teaser: string;
+  /** One sentence copied word for word from the article ('' when none fits). */
+  quote: string;
   /** Short note for the editor (Turkish): which hook was used. */
   notes: string;
 }
@@ -381,6 +383,7 @@ export function validateEmailTeaser(v: unknown): v is EmailTeaser {
     isString(d.subject, 120) && d.subject.trim().length > 0 &&
     isString(d.preheader, 200) &&
     isString(d.teaser, 1400) && d.teaser.trim().length > 0 &&
+    isString(d.quote, 400) &&
     isString(d.notes, 400)
   );
 }
