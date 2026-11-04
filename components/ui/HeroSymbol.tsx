@@ -32,8 +32,8 @@ interface FragmentSpec {
 
 const FRAGMENTS: FragmentSpec[] = [
   { points: MARK.y, fill: '#FFFFFF', depth: 10, from: { x: 26, y: -18, r: 6 }, delay: 0 },
-  { points: MARK.lime, fill: '#A2FF00', depth: 30, from: { x: -34, y: -26, r: -10 }, delay: 0.32 },
-  { points: MARK.green, fill: '#40C401', depth: 44, from: { x: -30, y: 30, r: 8 }, delay: 0.5 },
+  { points: MARK.lime, fill: '#A2FF00', depth: 30, from: { x: -34, y: -26, r: -10 }, delay: 0.18 },
+  { points: MARK.green, fill: '#40C401', depth: 44, from: { x: -30, y: 30, r: 8 }, delay: 0.3 },
 ];
 
 export default function HeroSymbol() {
@@ -112,7 +112,7 @@ function Fragment({
         fill={fragment.fill}
         initial={reduced ? false : { opacity: 0, x: fragment.from.x, y: fragment.from.y, rotate: fragment.from.r }}
         animate={{ opacity: 1, x: 0, y: 0, rotate: 0 }}
-        transition={{ duration: 1.1, delay: 0.25 + fragment.delay, ease: EASE_YOCA }}
+        transition={{ duration: 0.8, delay: 0.15 + fragment.delay, ease: EASE_YOCA }}
         style={{ transformOrigin: 'center', transformBox: 'fill-box' }}
       />
     </motion.g>

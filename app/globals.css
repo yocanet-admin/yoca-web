@@ -105,31 +105,101 @@
      Engineered states: hover shifts hue, press compresses 1px, focus ring
      comes from the global :focus-visible rule. */
   .btn-primary {
-    @apply inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-sm bg-yoca-lime px-7 py-3 text-[15px] font-bold text-black;
+    @apply inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-sm border border-transparent bg-yoca-lime px-7 py-3 text-[15px] font-bold text-black;
     color: #000000;
     transition:
       background-color 0.2s cubic-bezier(0.22, 0.72, 0.32, 1),
       transform 0.15s cubic-bezier(0.22, 0.72, 0.32, 1);
   }
-  .btn-primary:hover {
-    @apply bg-yoca-green;
-  }
   .btn-primary:active {
     transform: translateY(1px) scale(0.995);
   }
-  /* Secondary CTA — border only (lead magnet / Digital Check-Up) */
+  /* Secondary CTA — border only (lead magnet / Digital Check-Up).
+     Same box as the primary (1px border on both), so pairs line up. */
   .btn-ghost {
-    @apply inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-sm border border-line px-7 py-3 text-[15px] font-bold text-white;
+    @apply relative isolate inline-flex min-h-12 min-w-12 items-center justify-center gap-2 overflow-hidden rounded-sm border border-line px-7 py-3 text-[15px] font-bold text-white;
     transition:
       border-color 0.2s cubic-bezier(0.22, 0.72, 0.32, 1),
       color 0.2s cubic-bezier(0.22, 0.72, 0.32, 1),
       transform 0.15s cubic-bezier(0.22, 0.72, 0.32, 1);
   }
-  .btn-ghost:hover {
-    @apply border-yoca-lime text-yoca-lime;
+  /* Quiet fill that rises from the bottom edge on hover (~250 ms). */
+  .btn-ghost::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: rgba(162, 255, 0, 0.08);
+    transform: scaleY(0);
+    transform-origin: bottom;
+    transition: transform 0.25s cubic-bezier(0.22, 0.72, 0.32, 1);
   }
   .btn-ghost:active {
     transform: translateY(1px);
+  }
+  /* Hover styles only where a real pointer hovers — no "stuck" lime state after a tap on phones. */
+  @media (hover: hover) {
+    .btn-primary:hover {
+      @apply bg-yoca-green;
+    }
+    .btn-ghost:hover {
+      @apply border-yoca-lime text-yoca-lime;
+    }
+    .btn-ghost:hover::before {
+      transform: scaleY(1);
+    }
+  }
+  /* Label roll: the label slides up and an identical copy slides in (~250 ms). */
+  .roll {
+    position: relative;
+    display: inline-flex;
+    overflow: hidden;
+  }
+  .roll > span {
+    display: block;
+    transition: transform 0.25s cubic-bezier(0.22, 0.72, 0.32, 1);
+  }
+  .roll > span + span {
+    position: absolute;
+    inset: 0;
+    transform: translateY(105%);
+  }
+  @media (hover: hover) {
+    a:hover > .roll > span:first-child,
+    a:focus-visible > .roll > span:first-child {
+      transform: translateY(-105%);
+    }
+    a:hover > .roll > span + span,
+    a:focus-visible > .roll > span + span {
+      transform: translateY(0);
+    }
+  }
+  /* Header links: a lime hairline draws in from the start edge on hover and leaves toward the end. */
+  .nav-line {
+    position: relative;
+  }
+  .nav-line::after {
+    content: '';
+    position: absolute;
+    inset-inline: 0.75rem;
+    bottom: 0;
+    height: 2px;
+    background: var(--yoca-lime);
+    transform: scaleX(0);
+    transform-origin: right;
+    transition: transform 0.25s cubic-bezier(0.22, 0.72, 0.32, 1);
+  }
+  [dir='rtl'] .nav-line::after {
+    transform-origin: left;
+  }
+  @media (hover: hover) {
+    .nav-line:hover::after {
+      transform: scaleX(1);
+      transform-origin: left;
+    }
+    [dir='rtl'] .nav-line:hover::after {
+      transform-origin: right;
+    }
   }
   /* Shared arrow micro-movement — one behaviour site-wide, RTL-aware */
   .icon-arrow {

@@ -41,7 +41,7 @@ export default function SystemPillars({ t, base }: SystemPillarsProps) {
       <div className="container-y">
         {/* Head — heading first, support copy second */}
         <div className="grid gap-6 border-b border-[rgba(5,5,5,0.16)] pb-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-end lg:gap-16">
-          <h2 className="max-w-[16ch] text-[clamp(34px,4.6vw,64px)] font-extrabold leading-[1.08] tracking-[-0.03em]">
+          <h2 className="max-w-[16ch] text-[clamp(34px,4.6vw,64px)] font-extrabold leading-[1.04] tracking-[-0.035em]">
             <SplitWords text={t.heading} />
           </h2>
           <p className="light-muted max-w-[46ch] text-[16px] leading-relaxed lg:justify-self-end lg:text-[17px]">
@@ -64,33 +64,33 @@ export default function SystemPillars({ t, base }: SystemPillarsProps) {
                       onFocus={() => setHovered(index)}
                       onBlur={() => setHovered(null)}
                       aria-current={isActive ? 'true' : undefined}
-                      className="group grid gap-6 py-10 md:grid-cols-[88px_minmax(0,1fr)] md:gap-8 lg:py-12"
+                      className="group grid gap-4 py-10 md:grid-cols-[96px_minmax(0,1fr)] md:gap-8 lg:py-12"
                     >
                       <span
                         aria-hidden="true"
-                        className={`block text-[clamp(44px,5vw,72px)] font-extrabold leading-[0.9] tracking-[-0.05em] transition-colors duration-300 ${
-                          isActive ? 'text-[#050505]' : 'text-[rgba(5,5,5,0.16)]'
+                        className={`block text-[clamp(40px,4.6vw,64px)] font-extrabold leading-[0.9] tracking-[-0.05em] transition-colors duration-[250ms] ${
+                          isActive ? 'text-[#050505]' : 'text-[rgba(5,5,5,0.2)]'
                         }`}
                       >
                         {String(index + 1).padStart(2, '0')}
                       </span>
                       <div>
-                        <h3 className="text-[clamp(22px,2.2vw,30px)] font-extrabold leading-tight tracking-[-0.02em]">{system.name}</h3>
-                        <p className="light-subtle mt-1.5 text-[12px] font-bold uppercase tracking-[0.14em]">{brandText(system.tagline)}</p>
-                        <p className="light-muted mt-4 max-w-[52ch] text-[16px] leading-relaxed">{system.body}</p>
-                        <ul className="mt-5 flex flex-wrap gap-2">
+                        <h3 className="text-[clamp(22px,2.2vw,30px)] font-extrabold leading-tight tracking-[-0.02em] transition-transform duration-[250ms] ease-out group-hover:translate-x-1 rtl:group-hover:-translate-x-1 motion-reduce:transform-none">{system.name}</h3>
+                        <p className="light-subtle mt-2 text-[12px] font-bold uppercase tracking-[0.14em]">{brandText(system.tagline)}</p>
+                        <p className="light-muted mt-4 max-w-[48ch] text-[16px] leading-[1.65] lg:text-[17px]">{system.body}</p>
+                        {/* Points as a quiet inline list (the same marker as the spine) instead of bordered boxes */}
+                        <ul className="mt-5 flex flex-wrap gap-x-5 gap-y-2">
                           {system.points.map((point) => (
-                            <li
-                              key={point}
-                              className={`border px-3 py-1.5 text-[13px] font-bold transition-colors duration-300 ${
-                                isActive ? 'border-[#050505] text-[#050505]' : 'border-[rgba(5,5,5,0.2)] text-[rgba(5,5,5,0.7)]'
-                              }`}
-                            >
+                            <li key={point} className="flex items-center gap-2 text-[14px] font-semibold text-[rgba(5,5,5,0.78)]">
+                              <span
+                                aria-hidden="true"
+                                className={`slant block h-2 w-2.5 flex-none transition-colors duration-[250ms] ${isActive ? TONE[index] : 'bg-[rgba(5,5,5,0.25)]'}`}
+                              />
                               {point}
                             </li>
                           ))}
                         </ul>
-                        <span className="mt-5 inline-flex items-center gap-1.5 text-[12px] font-extrabold uppercase tracking-[0.1em] text-[#267800]">
+                        <span className="mt-6 inline-flex items-center gap-1.5 text-[12px] font-extrabold uppercase tracking-[0.1em] text-[#267800]">
                           {String(index + 1).padStart(2, '0')} <span aria-hidden="true" className="icon-arrow">→</span>
                         </span>
                       </div>
@@ -111,7 +111,7 @@ export default function SystemPillars({ t, base }: SystemPillarsProps) {
                     className="absolute inset-x-0 top-0 bg-yoca-green"
                     initial={false}
                     animate={{ height: reduced ? '100%' : `${(active / 2) * 100}%` }}
-                    transition={{ duration: 0.4, ease: EASE_YOCA }}
+                    transition={{ duration: 0.3, ease: EASE_YOCA }}
                   />
                 </span>
                 {items.map((system, index) => {
@@ -131,7 +131,7 @@ export default function SystemPillars({ t, base }: SystemPillarsProps) {
                           backgroundColor: on ? '#FFFFFF' : 'rgba(255,255,255,0.45)',
                           borderColor: on ? 'rgba(5,5,5,0.9)' : 'rgba(5,5,5,0.14)',
                         }}
-                        transition={{ duration: 0.35, ease: EASE_YOCA }}
+                        transition={{ duration: 0.25, ease: EASE_YOCA }}
                         className="border p-5"
                       >
                         <div className="flex items-center justify-between gap-4">
@@ -148,7 +148,7 @@ export default function SystemPillars({ t, base }: SystemPillarsProps) {
                         <motion.div
                           initial={false}
                           animate={{ height: on ? 'auto' : 0, opacity: on ? 1 : 0 }}
-                          transition={{ duration: 0.35, ease: EASE_YOCA }}
+                          transition={{ duration: 0.25, ease: EASE_YOCA }}
                           className="overflow-hidden"
                         >
                           <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
