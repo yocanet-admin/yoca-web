@@ -1,76 +1,44 @@
-'use client';
-
-import { useEffect, useRef } from 'react';
-import { motion, useAnimationFrame, useMotionValue, useReducedMotion, useScroll, useSpring, useVelocity } from 'framer-motion';
-
 /**
- * Yoca — kinetic brand band (motion signature).
- * Two typography tracks on Electric Lime move slowly in opposite directions;
- * scrolling nudges the speed a little (max 1.5×) and it settles back. No skew
- * (it blurred the words), and the loop only runs while the band is on screen. Words come from the localized index line
- * ("Strategy. Identity. Experience. Growth."). Static under reduced motion;
- * direction respects RTL because the tracks are mirrored per row, not per script.
+ * Yoca — brand band (the index line "Strateji. Kimlik. Deneyim. Büyüme.").
+ *
+ * One ruled line set across the full measure on Electric Lime, its long
+ * edges cut on a slight lean and overlapping the hero's lower edge, so the
+ * dark hero, the band and the soft-white methodology read as one built
+ * stack. Desktop: a single justified line that only drifts a few percent
+ * while you scroll past (CSS scroll-driven, never on its own). Phones: the
+ * four words as a 2 × 2 block — a static arrangement made for the narrow
+ * screen, not a squeezed marquee. Decorative (aria-hidden): the same words
+ * are already part of the page's text. Server component, no JavaScript.
  */
 
 interface BrandBandProps {
   line: string;
 }
 
-function Track({ words, direction, velocity, reduced, visible }: { words: string[]; direction: 1 | -1; velocity: ReturnType<typeof useSpring>; reduced: boolean; visible: React.MutableRefObject<boolean> }) {
-  const x = useMotionValue(0);
-  const ref = useRef<HTMLDivElement>(null);
-  useAnimationFrame((_, delta) => {
-    if (reduced || !visible.current || !ref.current) return;
-    const width = ref.current.scrollWidth / 2; // two copies
-    const base = 32; // px per second
-    const boost = Math.min(0.5, Math.abs(velocity.get()) / 3000) * base;
-    let next = x.get() + direction * ((base + boost) * delta) / 1000 * -1;
-    if (next <= -width) next += width;
-    if (next > 0) next -= width;
-    x.set(next);
-  });
-  const sequence = [...words, ...words, ...words, ...words];
+export default function BrandBand({ line }: BrandBandProps) {
+  const words = line.split('.').map((w) => w.trim()).filter(Boolean);
   return (
-    <motion.div ref={ref} style={{ x: reduced ? 0 : x }} className="flex w-max items-center">
-      {[0, 1].map((copy) => (
-        <div key={copy} className="flex shrink-0 items-center">
-          {sequence.map((word, index) => (
-            <span key={`${copy}-${index}`} className="flex items-center">
-              <span className="px-5 text-[clamp(24px,3.4vw,52px)] font-extrabold leading-none tracking-[-0.03em] lg:px-7">
-                {word}.
-              </span>
-              <span className="slant block h-[0.42em] w-[0.48em] bg-black text-[clamp(24px,3.4vw,52px)]" />
+    <div aria-hidden="true" className="yband relative z-[8] -mt-6 bg-yoca-lime text-black lg:-mt-10">
+      {/* Desktop: one justified line */}
+      <div className="hidden overflow-hidden py-9 lg:block">
+        <div className="yband-line container-y flex items-center justify-between gap-6">
+          {words.map((word, index) => (
+            <span key={word} className="flex items-center gap-6">
+              <span className="whitespace-nowrap text-[clamp(44px,4.6vw,74px)] font-extrabold leading-none tracking-[-0.045em]">{word}.</span>
+              {index < words.length - 1 && <span className="slant block h-[26px] w-[30px] flex-none bg-black" />}
             </span>
           ))}
         </div>
-      ))}
-    </motion.div>
-  );
-}
+      </div>
 
-export default function BrandBand({ line }: BrandBandProps) {
-  const reduced = useReducedMotion();
-  const words = line.split('.').map((w) => w.trim()).filter(Boolean);
-  const { scrollY } = useScroll();
-  const rawVelocity = useVelocity(scrollY);
-  const velocity = useSpring(rawVelocity, { stiffness: 80, damping: 30 });
-  const bandRef = useRef<HTMLDivElement>(null);
-  const visible = useRef(false);
-  useEffect(() => {
-    const el = bandRef.current;
-    if (!el) return;
-    const io = new IntersectionObserver(([entry]) => {
-      visible.current = entry.isIntersecting;
-    });
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-
-  return (
-    <div ref={bandRef} aria-hidden="true" className="relative z-[7] overflow-hidden border-y border-black/20 bg-yoca-lime py-4 text-black lg:py-5" dir="ltr">
-      <div className="grid gap-2 lg:gap-2.5">
-        <Track words={words} direction={1} velocity={velocity} reduced={!!reduced} visible={visible} />
-        <Track words={words} direction={-1} velocity={velocity} reduced={!!reduced} visible={visible} />
+      {/* Phones / tablets: a 2 × 2 block */}
+      <div className="container-y grid grid-cols-2 gap-x-4 gap-y-3 py-8 lg:hidden">
+        {words.map((word, index) => (
+          <span key={word} className={`flex items-center gap-2.5 ${index % 2 === 1 ? 'justify-self-end' : ''}`}>
+            <span className={`slant block h-3 w-3.5 flex-none ${index % 2 === 0 ? 'bg-black' : 'bg-[#267800]'}`} />
+            <span className="text-[clamp(28px,8.4vw,44px)] font-extrabold leading-none tracking-[-0.04em]">{word}.</span>
+          </span>
+        ))}
       </div>
     </div>
   );

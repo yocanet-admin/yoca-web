@@ -392,6 +392,182 @@
   }
 }
 
+/* ── Home hero / band / methodology (2026 composition) ──────────────
+   Final state is the default; animations only describe where things come
+   FROM, so content is in the first paint without JavaScript and reduced
+   motion shows the composition as is. */
+.hero-guides {
+  background-image: linear-gradient(#171a21 1px, transparent 1px), linear-gradient(90deg, #171a21 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(180deg, transparent 0%, #000 18%, #000 55%, transparent 90%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 18%, #000 55%, transparent 90%);
+  opacity: 0.7;
+}
+.hero-title {
+  text-wrap: balance;
+  /* one hairline under every line of the title: the type sits on the grid it was drawn on */
+  background-image: linear-gradient(to bottom, transparent calc(100% - 1px), rgba(255, 255, 255, 0.1) calc(100% - 1px));
+  background-size: 100% 1lh;
+  background-position: 0 -0.06lh;
+}
+.hero-word {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  /* room for diacritics and descenders inside the clipping box */
+  padding: 0.12em 0.06em 0.22em;
+  margin: -0.12em -0.06em -0.22em;
+}
+.hero-word > span {
+  display: inline-block;
+}
+.hero-mark-word {
+  position: relative;
+  z-index: 0;
+  display: inline-block;
+  padding: 0 0.1em;
+  margin: 0 -0.04em;
+  color: #050505;
+}
+.hero-mark-word::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0.1em 0 0.02em;
+  background: var(--yoca-lime);
+  clip-path: polygon(5% 0, 100% 0, 95% 100%, 0 100%);
+  transform-origin: left center;
+}
+[dir='rtl'] .hero-mark-word::before {
+  clip-path: polygon(0 0, 95% 0, 100% 100%, 5% 100%);
+  transform-origin: right center;
+}
+.hero-rule {
+  transform-origin: left center;
+}
+[dir='rtl'] .hero-rule {
+  transform-origin: right center;
+}
+.hero-logo path {
+  transform-box: fill-box;
+}
+.hero-title-mark {
+  float: inline-end;
+  height: 1.86lh;
+  width: auto;
+  margin-top: 0.08lh;
+  margin-inline-start: 0.4em;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hero-word > span {
+    animation: hero-word-rise 0.72s cubic-bezier(0.22, 0.72, 0.32, 1) backwards;
+    animation-delay: calc(60ms + var(--i, 0) * 42ms);
+  }
+  .hero-mark-word::before {
+    animation: hero-module-in 0.5s cubic-bezier(0.22, 0.72, 0.32, 1) 0.62s backwards;
+  }
+  .hero-mark-word {
+    animation: hero-ink 0.5s steps(1, end) 0.62s backwards;
+  }
+  .hero-rule {
+    animation: hero-rule-draw 0.9s cubic-bezier(0.22, 0.72, 0.32, 1) 0.3s backwards;
+  }
+  .hero-fade {
+    animation: hero-fade-up 0.6s cubic-bezier(0.22, 0.72, 0.32, 1) backwards;
+    animation-delay: var(--d, 0ms);
+  }
+  .hero-logo-y {
+    animation: hero-dock-y 0.75s cubic-bezier(0.22, 0.72, 0.32, 1) 0.42s backwards;
+  }
+  .hero-logo-lime {
+    animation: hero-dock-lime 0.7s cubic-bezier(0.22, 0.72, 0.32, 1) 0.62s backwards;
+  }
+  .hero-logo-green {
+    animation: hero-dock-green 0.7s cubic-bezier(0.22, 0.72, 0.32, 1) 0.74s backwards;
+  }
+}
+@keyframes hero-word-rise {
+  from { transform: translateY(108%); }
+}
+@keyframes hero-module-in {
+  from { transform: scaleX(0); }
+}
+@keyframes hero-ink {
+  from { color: #ffffff; }
+}
+@keyframes hero-rule-draw {
+  from { transform: scaleX(0); }
+}
+@keyframes hero-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+}
+@keyframes hero-dock-y {
+  from { opacity: 0; transform: translate(14%, 10%); }
+}
+@keyframes hero-dock-lime {
+  from { opacity: 0; transform: translate(-60%, -40%); }
+}
+@keyframes hero-dock-green {
+  from { opacity: 0; transform: translate(-60%, 40%); }
+}
+
+/* Brand band: one ruled line of the four words, cut on the mark's lean,
+   overlapping the hero edge. It only moves with scrolling (never on its own). */
+.yband {
+  clip-path: polygon(0 22px, 100% 0, 100% calc(100% - 22px), 0 100%);
+}
+@media (max-width: 1023px) {
+  .yband {
+    clip-path: polygon(0 12px, 100% 0, 100% calc(100% - 12px), 0 100%);
+  }
+}
+
+/* Methodology stair: the three systems step down like the mark's modules. */
+.ystair-link {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+/* Scroll-linked accents (progressive enhancement: browsers without
+   scroll-driven animations simply show the static composition). */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .hero-title {
+      animation: hero-title-exit linear both;
+      animation-timeline: view();
+      animation-range: exit 0% exit 100%;
+    }
+    .yband-line {
+      animation: yband-drift linear both;
+      animation-timeline: view();
+      animation-range: cover 0% cover 100%;
+    }
+    .ystep {
+      animation: ystep-settle linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 90%;
+    }
+    .ystair-link {
+      animation: ystair-draw linear both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 45%;
+    }
+  }
+}
+@keyframes hero-title-exit {
+  to { transform: translateY(-56px); opacity: 0.35; }
+}
+@keyframes yband-drift {
+  from { transform: translateX(2.5%); }
+  to { transform: translateX(-2.5%); }
+}
+@keyframes ystep-settle {
+  from { transform: translateY(var(--rise, 48px)); }
+}
+@keyframes ystair-draw {
+  from { stroke-dashoffset: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
