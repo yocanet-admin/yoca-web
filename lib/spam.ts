@@ -100,7 +100,7 @@ function looksRandomWord(company: string | undefined): boolean {
 }
 
 /** Record a dropped submission (reasons only — no personal data). Never throws. */
-export async function logSpam(form: 'contact' | 'checkup', reasons: string[]): Promise<void> {
+export async function logSpam(form: 'contact' | 'checkup' | 'newsletter', reasons: string[]): Promise<void> {
   try {
     const { getSupabaseAdmin } = await import('@/lib/supabase');
     const admin = getSupabaseAdmin();

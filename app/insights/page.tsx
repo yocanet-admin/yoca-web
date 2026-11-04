@@ -5,6 +5,10 @@ import SiteFooter from '@/components/SiteFooter';
 import PageIntro from '@/components/ui/PageIntro';
 import CtaSection from '@/components/sections/CtaSection';
 import InsightCard from '@/components/insights/InsightCard';
+import NewsletterForm from '@/components/newsletter/NewsletterForm';
+import { newsletterCopy } from '@/lib/newsletter/copy';
+import { getCompanyInfo, getKvkkPublish } from '@/lib/siteSettings';
+import { noticeIsFinal } from '@/lib/companyInfo';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { buildMetadata, breadcrumbSchema, getRequestContext, jsonLdString } from '@/lib/seo';
@@ -31,11 +35,14 @@ export default async function InsightsPage({ searchParams }: PageProps) {
   const page = Math.max(1, parseInt(searchParams.page ?? '1', 10) || 1);
   const category = searchParams.category;
 
-  const [categories, featured, list] = await Promise.all([
+  const [categories, featured, list, company, kvkk] = await Promise.all([
     getInsightCategories(),
     category ? Promise.resolve(null) : getFeaturedInsight(ctx.locale),
     listInsights(ctx.locale, { category, page }),
+    getCompanyInfo(),
+    getKvkkPublish(),
   ]);
+  const privacyHref = noticeIsFinal(company, kvkk) ? `${base}/privacy` : null;
   const items = list.items.filter((item) => item.id !== featured?.id);
   const totalPages = Math.max(1, Math.ceil(list.total / INSIGHTS_PAGE_SIZE));
   const hasAny = Boolean(featured) || items.length > 0;
@@ -111,6 +118,12 @@ export default async function InsightsPage({ searchParams }: PageProps) {
                 )}
               </div>
             )}
+          </div>
+        </section>
+
+        <section className="relative z-[7] bg-surface-deep pb-16 lg:pb-20" aria-label={newsletterCopy(ctx.locale).form.heading}>
+          <div className="container-y">
+            <NewsletterForm locale={ctx.locale} copy={newsletterCopy(ctx.locale).form} privacyHref={privacyHref} source="insights" />
           </div>
         </section>
 

@@ -22,6 +22,7 @@ import { sourceFingerprint, uniqueSlug, asciiSlug, type TranslatableFields } fro
 import type { SiblingInfo } from '@/components/admin/insights/MultilangPanel';
 import type { InsightCategoryRow, InsightRow, InsightSource, Locale } from '@/types';
 import StudioPanel from '@/components/admin/insights/StudioPanel';
+import NewsletterBox from '@/components/admin/insights/NewsletterBox';
 import PreviewModal from '@/components/admin/insights/PreviewModal';
 import type { StudioImage } from '@/components/admin/insights/ImageStudio';
 
@@ -566,6 +567,13 @@ export default function InsightEditor({ id }: Props) {
                 </div>
                 <p className="mt-2 text-[12px] text-subtle">{row.source_insight_id ? 'Bu yazı bir çeviri; diğer diller kaynak yazıdan oluşturulur.' : 'Diğer dilleri İçerik stüdyosundaki “Diller” adımında “Tüm dilleri oluştur” ile hazırlayın; kaydedilenler taslaktır. “kaynak değişti” yazan çeviri, bu metnin eski hâlinden yapılmıştır.'}</p>
               </div>
+            </div>
+          )}
+
+          {tab === 'publish' && row.id && (
+            <div className="admin-card grid gap-2">
+              <p className="text-[13px] font-semibold text-muted">Bülten (e-posta)</p>
+              <NewsletterBox insightId={row.id} groupId={row.group_id} dirty={dirty} />
             </div>
           )}
 

@@ -9,6 +9,8 @@ import type { Dict } from '@/lib/i18n';
 import { COMPANY } from '@/lib/company';
 import FooterWordmark from '@/components/ui/FooterWordmark';
 import YocaSignature from '@/components/branding/YocaSignature';
+import NewsletterForm from '@/components/newsletter/NewsletterForm';
+import { newsletterCopy } from '@/lib/newsletter/copy';
 
 /**
  * Yoca — site footer.
@@ -16,6 +18,7 @@ import YocaSignature from '@/components/branding/YocaSignature';
  * three-card action gateway (Start a Project · Digital Check-Up · Explore
  * Yoca Products), a 4-column breakdown, the official "Made to move forward."
  * signature lockup in the bottom bar and the oversized wordmark.
+ * Above the columns: the Insights newsletter sign-up (double opt-in).
  */
 
 interface SiteFooterProps {
@@ -110,6 +113,13 @@ export default async function SiteFooter({ t }: SiteFooterProps) {
                 {t.footer.exploreProducts} <span aria-hidden="true" className="icon-arrow">→</span>
               </span>
             </Link>
+          </div>
+        </div>
+
+        {/* ── Newsletter (double opt-in) ─────────────────────────── */}
+        <div className="border-b border-line py-10">
+          <div className="max-w-[720px]">
+            <NewsletterForm locale={ctx.locale} copy={newsletterCopy(ctx.locale).form} privacyHref={noticeFinal ? `${base}/privacy` : null} source="footer" variant="footer" />
           </div>
         </div>
 
