@@ -58,7 +58,8 @@ export function sampleLetter(): DocContent {
   c.recipient = { name: 'Murat Yıldız (ÖRNEK)', company: 'Örnek Lojistik A.Ş. (ÖRNEK)', attention: '', address: 'Örnek Cad. No: 21, Çankaya / Ankara', taxOffice: '', taxNumber: '', email: '', phone: '' };
   c.subject = 'Web sitesi yayın takvimindeki değişiklik hakkında';
   c.reference = 'TKL-2026-0012 sayılı teklif (ÖRNEK)';
-  c.blocks[0].body = 'Sayın Yıldız,\n\nŞirketiniz için hazırladığımız web sitesinin yayın tarihi, 28 Kasım 2026 olarak planlanmıştı. Ürün kataloğu verilerinin tarafımıza 12 Kasım yerine 19 Kasım’da ulaşması nedeniyle yayın tarihi 5 Aralık 2026 olarak güncellenmiştir.\n\nBu değişiklik kapsamı, bedeli ve ödeme planını etkilemez. Tasarım ve geliştirme çalışmaları sürmektedir; katalog dışındaki tüm sayfalar test ortamında incelemenize açıktır.\n\nYayın öncesinde aşağıdaki iki konuda onayınıza ihtiyaç duyuyoruz:\n- Kurumsal e-posta adreslerinin iletişim sayfasında gösterilmesi\n- İngilizce sayfalarda fiyat bilgisinin yer almaması\n\nSorularınız için proje ekibimize her zaman ulaşabilirsiniz.';
+  c.salutation = 'Sayın Yıldız,';
+  c.blocks[0].body = 'Şirketiniz için hazırladığımız web sitesinin yayın tarihi, 28 Kasım 2026 olarak planlanmıştı. Ürün kataloğu verilerinin tarafımıza 12 Kasım yerine 19 Kasım’da ulaşması nedeniyle yayın tarihi 5 Aralık 2026 olarak güncellenmiştir.\n\nBu değişiklik kapsamı, bedeli ve ödeme planını etkilemez. Tasarım ve geliştirme çalışmaları sürmektedir; katalog dışındaki tüm sayfalar test ortamında incelemenize açıktır.\n\nYayın öncesinde aşağıdaki iki konuda onayınıza ihtiyaç duyuyoruz:\n- Kurumsal e-posta adreslerinin iletişim sayfasında gösterilmesi\n- İngilizce sayfalarda fiyat bilgisinin yer almaması\n\nSorularınız için proje ekibimize her zaman ulaşabilirsiniz.';
   c.signatory = { name: 'ÖRNEK İmza Yetkilisi', title: 'Proje Direktörü' };
   return c;
 }

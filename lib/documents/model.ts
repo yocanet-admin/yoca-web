@@ -146,8 +146,12 @@ export interface DocContent {
   deliveryTime: string;
   bankAccountIds: string[];
   blocks: Block[];
+  /** Letters: the salutation line ("Sayın Yetkili,"); printed before the text. */
+  salutation: string;
   closing: string;
   signatory: { name: string; title: string };
+  /** Optional link to an Operasyon project (ops_projects.id); the document keeps its own copy of the name. */
+  projectId: string | null;
 }
 
 export const EMPTY_RECIPIENT: Recipient = { name: '', company: '', attention: '', address: '', taxOffice: '', taxNumber: '', email: '', phone: '' };
@@ -199,8 +203,10 @@ export function newContent(kind: DocKind, opts: { locale?: DocLocale; currency?:
     deliveryTime: '',
     bankAccountIds: [],
     blocks: def.blocks.map((key) => ({ id: localId('b'), key, heading: blockHeading(key, locale), body: '' })),
+    salutation: kind === 'letter' ? (locale === 'tr' ? 'Sayın Yetkili,' : 'Dear Sir or Madam,') : '',
     closing: kind === 'letter' ? (locale === 'tr' ? 'Saygılarımızla,' : 'Kind regards,') : '',
     signatory: opts.signatory ?? { name: '', title: '' },
+    projectId: null,
   };
 }
 
@@ -259,8 +265,10 @@ export function sanitizeContent(input: unknown, kind: DocKind): DocContent {
       const key = (BLOCK_KEYS as readonly string[]).includes(b.key as string) ? (b.key as BlockKey) : 'custom';
       return { id: id(b.id, 'b'), key, heading: str(b.heading, 160), body: str(b.body, LIMITS.blockBody) };
     }),
+    salutation: str(v.salutation, 160),
     closing: str(v.closing, 120),
     signatory: { name: str(sig.name, 120), title: str(sig.title, 120) },
+    projectId: typeof v.projectId === 'string' && /^[0-9a-f-]{36}$/i.test(v.projectId) ? v.projectId : null,
   };
 }
 
@@ -289,7 +297,7 @@ export interface MissingReport {
 
 /** Every text the PDF prints (for marker checks). */
 export function allText(c: DocContent): string {
-  return [c.subject, c.reference, c.projectName, c.period, c.deliveryTime, c.closing, c.signatory.name, c.signatory.title,
+  return [c.subject, c.reference, c.projectName, c.period, c.deliveryTime, c.salutation, c.closing, c.signatory.name, c.signatory.title,
     ...Object.values(c.recipient), ...c.items.flatMap((i) => [i.title, i.description, i.unit]), ...c.payment.flatMap((p) => [p.label, p.due]),
     ...c.blocks.flatMap((b) => [b.heading, b.body])].join('\n');
 }
