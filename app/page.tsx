@@ -1,20 +1,21 @@
-import Link from 'next/link';
 import type { Metadata } from 'next';
 import SectionWrapper from '@/components/SectionWrapper';
 import SiteHeader from '@/components/SiteHeader';
 import SiteFooter from '@/components/SiteFooter';
-import Hero from '@/components/sections/Hero';
-import SystemPillars from '@/components/sections/SystemPillars';
-import BrandBand from '@/components/sections/BrandBand';
-import WorkShowcase from '@/components/sections/WorkShowcase';
-import ToolsStrip from '@/components/sections/ToolsStrip';
-import TeamSection from '@/components/sections/TeamSection';
-import ServicesGrid from '@/components/sections/ServicesGrid';
-import CtaSection from '@/components/sections/CtaSection';
-import LiveStatus from '@/components/ui/LiveStatus';
+import HomeHero, { type HeroReelData } from '@/components/sections/HomeHero';
+import SelectedWork from '@/components/sections/SelectedWork';
+import HomeServices, { type ServiceItem } from '@/components/sections/HomeServices';
+import { HomeCheckup, HomeClosing, HomeInsights, HomeProcess } from '@/components/sections/HomeBlocks';
+import RevealOnScroll from '@/components/ui/RevealOnScroll';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { getFormCopy } from '@/lib/siteSettings';
+import { getCaseStudies } from '@/lib/work';
+import { localizeServices } from '@/lib/workData';
+import { getWorkMedia } from '@/lib/workMedia';
+import { hasNewCaseLayout, toCardData } from '@/lib/projectCards';
+import { categoryName, getInsightCategories, listInsights } from '@/lib/insights';
+import { SERVICE_SLUGS } from '@/lib/serviceSlugs';
 import { buildMetadata, getRequestContext, jsonLdString, breadcrumbSchema } from '@/lib/seo';
 
 export function generateMetadata(): Metadata {
@@ -28,11 +29,54 @@ export function generateMetadata(): Metadata {
   });
 }
 
+/** Raw service tags (lib/workData BASE / case_studies.services) that show real work next to a service. */
+const SERVICE_EVIDENCE: Partial<Record<(typeof SERVICE_SLUGS)[number], string[]>> = {
+  'brand-strategy-identity': ['Brand', 'Identity'],
+  'web-digital-experiences': ['Web'],
+};
+
+/**
+ * Yoca — home page (2026 redesign).
+ * Hero → selected projects → services → process → Check-Up → Insights →
+ * closing. Existing admin visibility keys are kept for the sections that
+ * existed before (hero, work, services, checkup_banner, cta); the new
+ * process / insights blocks have their own keys (visible by default).
+ */
 export default async function HomePage() {
   const ctx = getRequestContext();
   const t = await getContent(ctx.locale);
-  const copy = await getFormCopy(ctx.locale);
   const base = ctx.base;
+  const [copy, studies, insights, categories] = await Promise.all([
+    getFormCopy(ctx.locale),
+    getCaseStudies(ctx.locale),
+    listInsights(ctx.locale).catch(() => ({ items: [], total: 0 })),
+    getInsightCategories().catch(() => []),
+  ]);
+
+  // Real captures only: projects with a registered cover, in the admin's order.
+  const withCover = studies.map(toCardData).filter((card) => Boolean(card.cover));
+  const projects = withCover.slice(0, 5).map((card) => ({ ...card, transition: hasNewCaseLayout(card.slug) }));
+
+  const reelSource = withCover.find((card) => card.clip);
+  const reel: HeroReelData | null = reelSource?.clip
+    ? { slug: reelSource.slug, name: reelSource.name, services: reelSource.services, video: reelSource.clip.video, poster: reelSource.clip.poster }
+    : null;
+
+  // Services: show related real work only where a project actually carries that scope.
+  const used = new Set<string>();
+  const services: ServiceItem[] = t.services.items.map((item, index) => {
+    const slug = SERVICE_SLUGS[index];
+    const tags = SERVICE_EVIDENCE[slug];
+    let related: ServiceItem['related'] = [];
+    if (tags) {
+      const labels = new Set(localizeServices(tags, ctx.locale));
+      const matches = withCover.filter((card) => card.services.some((s) => labels.has(s)));
+      const fresh = matches.filter((card) => !used.has(card.slug));
+      related = (fresh.length >= 2 ? fresh : matches).slice(0, 2).map((card) => ({ slug: card.slug, name: card.name, cover: getWorkMedia(card.slug).hero ?? card.cover! }));
+      related.forEach((r) => used.add(r.slug));
+    }
+    return { slug, name: item.name, desc: item.desc, changes: item.changes, related };
+  });
 
   return (
     <>
@@ -45,98 +89,48 @@ export default async function HomePage() {
       <SiteHeader t={t} path="/" />
       <main id="main">
         <SectionWrapper sectionKey="hero">
-          <Hero t={t.hero} base={base} rail={t.systems.items.map((system) => system.name)} />
+          <HomeHero t={t.hero} home={t.home} base={base} reel={reel} />
         </SectionWrapper>
 
-        {/* Brand band — the index line as a full-bleed lime strip */}
-        <SectionWrapper sectionKey="clients">
-          <BrandBand line={t.hero.line} />
-        </SectionWrapper>
-
-        {/* System architecture — canonical order: Brand → Growth → Scale */}
-        <SectionWrapper sectionKey="bento">
-          <SystemPillars t={t.systems} base={base} />
-        </SectionWrapper>
-
-        {/* Selected work — typographic index, honest status labels */}
         <SectionWrapper sectionKey="work">
-          <WorkShowcase t={t.work} locale={ctx.locale} base={base} />
+          <SelectedWork home={t.home} viewLabel={t.work.viewCase} base={base} projects={projects} />
         </SectionWrapper>
 
         <SectionWrapper sectionKey="services">
-          <ServicesGrid t={t.services} flows={t.servicesPage.flows} ctaLabel={t.cta.button} base={base} />
+          <HomeServices
+            eyebrow={t.home.servicesTitle}
+            heading={t.services.heading}
+            sub={t.services.sub}
+            items={services}
+            labels={{ related: t.home.relatedWork, link: t.home.serviceLink, all: t.nav.services }}
+            base={base}
+          />
         </SectionWrapper>
 
-        {/* Digital Check-Up — full-bleed lime band (secondary lead magnet) */}
+        <SectionWrapper sectionKey="process">
+          <HomeProcess home={t.home} />
+        </SectionWrapper>
+
         <SectionWrapper sectionKey="checkup_banner">
-          <section className="relative z-[7] overflow-hidden bg-yoca-lime py-16 text-black lg:py-24">
-            <span
-              aria-hidden="true"
-              className="slant absolute -bottom-10 end-[6%] hidden h-[220px] w-[240px] bg-black/10 lg:block"
-            />
-            <div className="container-y relative grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-end">
-              <div>
-                <p className="flex items-center gap-2.5 text-[12px] font-extrabold uppercase tracking-[0.14em] text-black/70">
-                  <span aria-hidden="true" className="slant block h-2.5 w-3 bg-black" />
-                  {t.checkup.eyebrow}
-                </p>
-                <h2 className="mt-5 max-w-[16ch] text-[clamp(32px,4.4vw,60px)] font-extrabold leading-[1.02] tracking-[-0.03em]">
-                  {t.checkup.introTitle}
-                </h2>
-                <p className="mt-5 max-w-[50ch] text-[16px] leading-relaxed text-black/75 lg:text-[17px]">
-                  {copy.checkupDescription}
-                </p>
-              </div>
-              <div className="grid justify-items-start gap-8 lg:justify-items-end">
-                {/* What the Check-Up looks at — no score is promised (the visitor does not see one). */}
-                <ul className="grid w-full max-w-sm gap-1.5" aria-label={t.checkup.sectionWord}>
-                  {t.checkup.sections.map((section, index) => (
-                    <li key={section.key} className="flex items-center gap-3 border-b border-black/15 py-2 text-[15px] font-bold">
-                      <span className="text-[12px] font-extrabold tracking-[0.08em] text-black/60">{String(index + 1).padStart(2, '0')}</span>
-                      {section.label}
-                    </li>
-                  ))}
-                </ul>
-                <Link
-                  href={`${base}/checkup`}
-                  className="inline-flex min-h-12 items-center gap-2 bg-black px-8 py-4 text-[15px] font-bold text-white transition-colors hover:bg-[#1a1a1a]"
-                >
-                  {t.hero.secondaryCta}
-                  <span aria-hidden="true" className="icon-arrow">→</span>
-                </Link>
-              </div>
-            </div>
-          </section>
+          <HomeCheckup t={t.checkup} home={t.home} description={copy.checkupDescription} ctaLabel={t.hero.secondaryCta} base={base} />
         </SectionWrapper>
 
-        <SectionWrapper sectionKey="partners">
-          <ToolsStrip t={t.partners} />
-        </SectionWrapper>
-
-        <SectionWrapper sectionKey="team">
-          <TeamSection t={t.team} />
+        <SectionWrapper sectionKey="insights">
+          <HomeInsights
+            items={insights.items.slice(0, 3)}
+            categoryOf={(key) => categoryName(categories, key, ctx.locale)}
+            t={t.insights}
+            home={t.home}
+            base={base}
+            locale={ctx.locale}
+          />
         </SectionWrapper>
 
         <SectionWrapper sectionKey="cta">
-          <CtaSection t={t.cta} base={base} />
+          <HomeClosing t={t.cta} home={t.home} base={base} />
         </SectionWrapper>
       </main>
-
-      <SectionWrapper sectionKey="clocks">
-        <LiveStatus
-          locale={ctx.locale}
-          heading={t.clocks.heading}
-          sub={t.clocks.sub}
-          activeLabel={t.clocks.active}
-          cityLabels={{
-            istanbul: t.clocks.istanbul,
-            baku: t.clocks.baku,
-            london: t.clocks.london,
-            dubai: t.clocks.dubai,
-          }}
-        />
-      </SectionWrapper>
-
+      <RevealOnScroll />
       <SiteFooter t={t} />
     </>
   );

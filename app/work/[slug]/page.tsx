@@ -15,6 +15,9 @@ import { getWorkMedia } from '@/lib/workMedia';
 import ParallaxMedia from '@/components/ui/ParallaxMedia';
 import CaseStudyVideo from '@/components/ui/CaseStudyVideo';
 import ProjectCover from '@/components/work/ProjectCover';
+import CaseDetail from '@/components/work/CaseDetail';
+import RevealOnScroll from '@/components/ui/RevealOnScroll';
+import { hasNewCaseLayout, toCardData } from '@/lib/projectCards';
 import {
   buildMetadata,
   breadcrumbSchema,
@@ -75,6 +78,9 @@ export default async function CaseStudyPage({ params }: PageProps) {
   const index = all.findIndex((cs) => cs.slug === study.slug);
   const prev = index > 0 ? all[index - 1] : null;
   const next = index < all.length - 1 ? all[index + 1] : null;
+  // New layout: the flow always continues (the last project leads back to the first).
+  const nextStudy = all.length > 1 ? all[(index + 1) % all.length] : null;
+  const nextCard = nextStudy ? { card: toCardData(nextStudy), transition: hasNewCaseLayout(nextStudy.slug) } : null;
 
   /** Case template: Need → Yoca's scope → Delivered features → visuals + live
    *  link → (optional) verified result + testimonial, each only when approved. */
@@ -112,6 +118,24 @@ export default async function CaseStudyPage({ params }: PageProps) {
         }}
       />
       <SiteHeader t={t} path={`/work/${study.slug}`} />
+      {hasNewCaseLayout(study.slug) ? (
+        <main id="main">
+          <CaseDetail
+            study={study}
+            media={media}
+            t={t}
+            base={base}
+            locale={ctx.locale}
+            statusLabel={statusLabel}
+            resultsHeading={resultsHeading}
+            metrics={metrics}
+            testimonials={testimonials}
+            next={nextCard}
+          />
+          <CtaSection t={t.cta} base={base} />
+          <RevealOnScroll />
+        </main>
+      ) : (
       <main id="main">
         <PageIntro
           crumbs={[
@@ -347,6 +371,7 @@ export default async function CaseStudyPage({ params }: PageProps) {
 
         <CtaSection t={t.cta} base={base} />
       </main>
+      )}
       <SiteFooter t={t} />
     </>
   );
