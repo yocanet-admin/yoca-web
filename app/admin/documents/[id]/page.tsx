@@ -76,6 +76,8 @@ function EditorInner() {
   const [showAi, setShowAi] = useState(params.get('ai') === '1');
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [openBlocks, setOpenBlocks] = useState<Record<string, boolean>>({});
+  // "?bank=1" (revision opened for the current bank details) or a bank revision just opened here
+  const openBankRef = useRef(params.get('bank') === '1');
   const [restore, setRestore] = useState<DocBackup | null>(null);
   // Signed-in user: the browser backup is kept per user and per document.
   const [uid, setUid] = useState<string | null>(null);
@@ -94,6 +96,13 @@ function EditorInner() {
       // so a section never folds away while someone is typing or applying a suggestion.
       const bl = r.document.content.blocks;
       setOpenBlocks(Object.fromEntries(bl.map((b) => [b.id, bl.length <= 3 || !b.body.trim()])));
+      // Groups: open where work usually happens. Also decided once per load — a
+      // group must never close while someone types in it (e.g. the recipient
+      // group of a new document after the first character).
+      const rc = r.document.content.recipient;
+      const gone = r.document.content.bankAccountIds.some((x) => !r.settings.bankAccounts.some((a) => a.id === x));
+      setOpen({ facts: true, recipient: !(rc.company || rc.name), items: true, payment: true, bank: openBankRef.current || gone, blocks: true, closing: false });
+      openBankRef.current = false;
       // Unsaved changes from an earlier visit in this browser: offer to restore, never apply silently.
       const b = r.document.status === 'draft' ? readDocBackup(uid, id) : null;
       const same = b && JSON.stringify({ t: b.title, c: b.clientId, x: b.content }) === JSON.stringify({ t: r.document.title, c: r.document.client_id, x: r.document.content });
@@ -181,7 +190,7 @@ function EditorInner() {
     const r = await act('revise', { expectedUpdatedAt: doc.updated_at }, why === 'bank'
       ? 'Revizyon açıldı. Banka bilgileri artık Belge ayarlarındaki güncel hâliyle gösterilir; kontrol edip kaydedin ve kesinleştirin. Yeni sürüm oluşur, önceki sürüm ve PDF’leri saklanır.'
       : 'Revizyon açıldı. Kaydedip kesinleştirdiğinizde yeni sürüm oluşur; önceki sürümün PDF’i saklanır.');
-    if (r.ok) { setBankAsk(null); if (why === 'bank') setOpen((o) => ({ ...o, bank: true })); await load(); }
+    if (r.ok) { setBankAsk(null); if (why === 'bank') openBankRef.current = true; await load(); }
   };
 
   const fillFromClient = () => {
@@ -314,12 +323,8 @@ function EditorInner() {
   const blockKeysAvailable = def.blocks.filter((k) => !c.blocks.some((b) => b.key === k));
   const recipientName = c.recipient.company || c.recipient.name;
 
-  // Groups: open by default where work usually happens; the state is per page visit.
-  const groupDefault: Record<string, boolean> = {
-    facts: true, recipient: !recipientName, items: true, payment: true,
-    bank: params.get('bank') === '1' || goneBanks.length > 0, blocks: true, closing: false,
-  };
-  const isOpen = (g: string) => open[g] ?? groupDefault[g];
+  // Group open state is set once per load (see load()); never derived from live input.
+  const isOpen = (g: string) => open[g] ?? true;
   const toggle = (g: string) => setOpen((o) => ({ ...o, [g]: !isOpen(g) }));
   const groupIds = ['facts', 'recipient', ...(def.items ? ['items'] : []), ...(def.payment ? ['payment'] : []), ...(def.bank ? ['bank'] : []), 'blocks', 'closing'];
   const allOpen = groupIds.every(isOpen);
