@@ -21,6 +21,8 @@ export interface CompanyInfo {
   /** Address shown on the site today (informational only). */
   siteAddress: string;
   generalEmail: string;
+  /** Phone line printed on documents (Teklifler ve Belgeler). Empty = not printed. */
+  phone: string;
   /** How data subjects apply (e.g. e-mail address, KEP, postal address). */
   dataRequestChannel: string;
   kep: string;
@@ -52,6 +54,7 @@ export const DEFAULT_COMPANY: CompanyInfo = {
   officialAddress: '',
   siteAddress: 'Bağdat Caddesi, No: 131, Kadıköy / İstanbul',
   generalEmail: 'connect@yoca.net',
+  phone: '',
   dataRequestChannel: '',
   kep: '',
   mersis: '',
@@ -72,7 +75,7 @@ export const DEFAULT_COMPANY: CompanyInfo = {
 };
 
 const TEXT_FIELDS: Array<[keyof CompanyInfo, number]> = [
-  ['controllerName', 200], ['officialAddress', 400], ['siteAddress', 200], ['generalEmail', 200], ['dataRequestChannel', 400], ['kep', 200],
+  ['controllerName', 200], ['officialAddress', 400], ['siteAddress', 200], ['generalEmail', 200], ['phone', 40], ['dataRequestChannel', 400], ['kep', 200],
   ['mersis', 40], ['tradeRegistry', 120], ['taxOffice', 120], ['taxNumber', 40], ['noticeVersion', 40], ['noticeUpdatedAt', 10],
   ['legalBasisContact', 2000], ['legalBasisCheckup', 2000], ['retentionContact', 2000], ['retentionCheckup', 2000], ['legalBasisNewsletter', 2000], ['retentionNewsletter', 2000], ['transferAssessment', 3000], ['legalReviewNote', 2000],
 ];

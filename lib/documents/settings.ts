@@ -4,8 +4,8 @@
  * Stored in cockpit_settings key "documents" (admin-only RLS). Company facts
  * (legal name, official address, tax office/number, MERSİS …) are NOT copied
  * here: they are read from the existing "company_info" setting (Şirket
- * bilgileri) so there is one source. This setting only holds what documents
- * need on top: phone line, bank accounts, defaults and the signatory.
+ * bilgileri, phone included) so there is one source. This setting only holds
+ * what documents need on top: bank accounts, defaults and the signatory.
  * Nothing is pre-filled with guessed facts.
  */
 
@@ -25,7 +25,6 @@ export interface BankAccount {
 }
 
 export interface DocSettings {
-  phone: string;
   defaultCurrency: DocCurrency;
   defaultLocale: DocLocale;
   validityDays: number;
@@ -39,7 +38,6 @@ export interface DocSettings {
 }
 
 export const DEFAULT_DOC_SETTINGS: DocSettings = {
-  phone: '',
   defaultCurrency: 'TRY',
   defaultLocale: 'tr',
   validityDays: 30,
@@ -79,7 +77,6 @@ export function sanitizeDocSettings(input: unknown): DocSettings {
   const accounts = Array.isArray(v.bankAccounts) ? v.bankAccounts.slice(0, 8) : [];
   const days = Number(v.validityDays);
   return {
-    phone: s(v.phone, 60),
     defaultCurrency: (DOC_CURRENCIES as readonly string[]).includes(v.defaultCurrency as string) ? (v.defaultCurrency as DocCurrency) : 'TRY',
     defaultLocale: v.defaultLocale === 'en' ? 'en' : 'tr',
     validityDays: Number.isInteger(days) && days >= 1 && days <= 365 ? days : 30,
@@ -111,7 +108,7 @@ export function docSettingsProblems(v: DocSettings): string[] {
 }
 
 /** Issuer block from the existing company settings + document settings. Empty facts stay empty. */
-export function issuerFrom(company: CompanyInfo, docs: DocSettings): Issuer {
+export function issuerFrom(company: CompanyInfo): Issuer {
   return {
     brand: company.brand || 'Yoca',
     legalName: company.controllerName,
@@ -121,7 +118,7 @@ export function issuerFrom(company: CompanyInfo, docs: DocSettings): Issuer {
     mersis: company.mersis,
     tradeRegistry: company.tradeRegistry,
     email: company.generalEmail,
-    phone: docs.phone,
+    phone: company.phone,
     website: company.website,
     kep: company.kep,
   };

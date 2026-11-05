@@ -6,9 +6,17 @@
 import { newContent, type DocContent, type Issuer } from '../lib/documents/model';
 import type { BankAccount } from '../lib/documents/settings';
 
+/** As the design kit's sample profile: only the brand and the website are filled. */
 export const SAMPLE_ISSUER: Issuer = {
-  brand: 'Yoca', legalName: '', address: 'Bağdat Caddesi, No: 131, Kadıköy / İstanbul', taxOffice: '', taxNumber: '', mersis: '', tradeRegistry: '',
-  email: 'connect@yoca.net', phone: '', website: 'https://yoca.net', kep: '',
+  brand: 'Yoca', legalName: '', address: '', taxOffice: '', taxNumber: '', mersis: '', tradeRegistry: '',
+  email: '', phone: '', website: 'https://yoca.net', kep: '',
+};
+
+/** A fully filled SYNTHETIC profile (long legal name, multi-line address) for layout checks only. */
+export const FULL_TEST_ISSUER: Issuer = {
+  brand: 'Yoca', legalName: 'ÖRNEK Yaratıcı Ajans Danışmanlık Yazılım ve Reklam Hizmetleri Limited Şirketi',
+  address: 'Örnek Mahallesi, Uzun Bir Cadde Adı Sokağı No: 131 Kat: 4 Daire: 12\nKadıköy / İstanbul 34710', taxOffice: 'Örnek Vergi Dairesi', taxNumber: '0000000000',
+  mersis: '0000000000000000', tradeRegistry: 'İstanbul Ticaret Sicil Müdürlüğü 000000-0', email: 'ornek@yoca.example', phone: '+90 000 000 00 00', website: 'https://yoca.net', kep: '',
 };
 
 export const SAMPLE_BANK: BankAccount = { id: 'bank1', label: 'ÖRNEK hesap', bank: 'ÖRNEK Bankası', holder: 'ÖRNEK — hesap sahibi', iban: 'TR000000000000000000000000', currency: 'TRY', swift: '', branch: '' };

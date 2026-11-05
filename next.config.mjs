@@ -2,6 +2,12 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  experimental: {
+    // Document PDFs read the embedded fonts and the original logo SVG from disk.
+    outputFileTracingIncludes: {
+      '/api/admin/documents/**': ['./lib/documents/fonts/**', './public/brand/*.svg'],
+    },
+  },
   images: {
     formats: ['image/avif', 'image/webp'],
     remotePatterns: [

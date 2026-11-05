@@ -329,15 +329,17 @@ export function missingFor(kind: DocKind, c: DocContent, issuer: Issuer, extra: 
   return { blocking, warnings };
 }
 
-/** Split a block body into paragraphs / bullet lines for display (pure). */
-export function bodyParts(body: string, list: boolean): Array<{ type: 'p' | 'li'; text: string }> {
-  const out: Array<{ type: 'p' | 'li'; text: string }> = [];
+/** Split a block body into paragraphs / bullet lines / sub-headings for display (pure). */
+export function bodyParts(body: string, list: boolean): Array<{ type: 'p' | 'li' | 'h'; text: string }> {
+  const out: Array<{ type: 'p' | 'li' | 'h'; text: string }> = [];
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
   let para: string[] = [];
   const flush = () => { if (para.length) { out.push({ type: 'p', text: para.join(' ').trim() }); para = []; } };
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) { flush(); continue; }
+    // "## Başlık" inside a text section = a sub-heading (letters, reports).
+    if (!list && /^#{1,3}\s+\S/.test(line)) { flush(); out.push({ type: 'h', text: line.replace(/^#{1,3}\s+/, '') }); continue; }
     const bullet = /^[-•*]\s+/.exec(line);
     if (bullet || list) { flush(); out.push({ type: 'li', text: line.replace(/^[-•*]\s+/, '') }); continue; }
     para.push(line);

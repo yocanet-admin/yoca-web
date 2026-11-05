@@ -4,7 +4,7 @@ import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
 import { addDaysIso, blockHeading, KIND_DEF, localId, newContent, sanitizeContent, todayIso, DOC_KINDS, QUOTE_STATES, type DocContent, type DocKind } from '@/lib/documents/model';
 import { docSettingsProblems, sanitizeDocSettings } from '@/lib/documents/settings';
-import { assess, buildSnapshot, contentOf, dbError, DOC_BUCKET, istanbulStamp, loadContext, recipientFromClient, selectedBanks, type DocRow, type VersionRow } from '@/lib/documents/server';
+import { assess, buildSnapshot, contentOf, dbError, DOC_BUCKET, istanbulStamp, loadContext, recipientFromClient, selectedBanks, TEMPLATE_VERSION, type DocRow, type VersionRow } from '@/lib/documents/server';
 import { renderDocumentPdf } from '@/lib/documents/pdf';
 
 /**
@@ -36,7 +36,6 @@ const unauthorized = () => json({ ok: false, error: 'unauthorized' }, 401);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID.test(v);
 
-const LIST_COLUMNS = 'id, kind, number, title, status, client_id, source_id, locale, currency, total, final_version, final_total, final_at, quote_state, quote_state_at, quote_state_by, archived_at, created_by, created_at, updated_at, issue_date:content->>issueDate, valid_until:content->>validUntil, recipient_company:content->recipient->>company, recipient_name:content->recipient->>name';
 const CLIENT_COLUMNS = 'id, name, legal_name, brand_name, party_type, roles, contact_name, email, phone, address, billing, archived_at';
 
 export async function GET(request: NextRequest) {
@@ -47,18 +46,24 @@ export async function GET(request: NextRequest) {
   const ctx = await loadContext(client);
   if (!id) {
     const [docs, clients] = await Promise.all([
-      client.from('doc_documents').select(LIST_COLUMNS).order('created_at', { ascending: false }).limit(1000),
+      client.from('doc_documents').select('*').order('created_at', { ascending: false }).limit(1000),
       client.from('clients').select(CLIENT_COLUMNS).order('name'),
     ]);
     if (docs.error) { const e = dbError(docs.error); return json({ ok: false, error: e.error }, e.status); }
-    return json({ ok: true, documents: docs.data ?? [], clients: clients.data ?? [], settings: ctx.settings, issuer: ctx.issuer });
+    // List rows without the full content (only what the list shows).
+    const documents = ((docs.data ?? []) as DocRow[]).map(({ content, ...row }) => {
+      const c = (content && typeof content === 'object' ? content : {}) as { issueDate?: string; validUntil?: string; recipient?: { company?: string; name?: string } };
+      return { ...row, issue_date: c.issueDate ?? null, valid_until: c.validUntil ?? null, recipient_company: c.recipient?.company ?? '', recipient_name: c.recipient?.name ?? '' };
+    });
+    return json({ ok: true, documents, clients: clients.data ?? [], settings: ctx.settings, issuer: ctx.issuer, companyRevision: ctx.revision });
   }
   if (!isUuid(id)) return json({ ok: false, error: 'bad id' }, 400);
-  const [doc, versions, events, clients] = await Promise.all([
+  const [doc, versions, events, clients, renders] = await Promise.all([
     client.from('doc_documents').select('*').eq('id', id).maybeSingle(),
     client.from('doc_versions').select('id, document_id, version, number, title, total, currency, pdf_path, pdf_bytes, pdf_pages, pdf_sha256, finalized_by, finalized_at').eq('document_id', id).order('version', { ascending: false }),
     client.from('doc_events').select('id, kind, detail, actor, at').eq('document_id', id).order('at', { ascending: false }).limit(100),
     client.from('clients').select(CLIENT_COLUMNS).order('name'),
+    client.from('doc_renders').select('id, version, company_revision, template_version, reason, issuer, pdf_pages, pdf_bytes, generated_by, generated_at').eq('document_id', id).order('generated_at', { ascending: false }),
   ]);
   if (doc.error) { const e = dbError(doc.error); return json({ ok: false, error: e.error }, e.status); }
   if (!doc.data) return json({ ok: false, error: 'Belge bulunamadı.' }, 404);
@@ -79,6 +84,10 @@ export async function GET(request: NextRequest) {
     settings: ctx.settings,
     issuer: ctx.issuer,
     company: ctx.company,
+    companyRevision: ctx.revision,
+    templateVersion: TEMPLATE_VERSION,
+    // bigint columns may arrive as text depending on the driver: always numbers here.
+    renders: ((renders.data ?? []) as Array<Record<string, unknown>>).map((r) => ({ ...r, company_revision: Number(r.company_revision), version: Number(r.version) })),
     assessment: assess(row.kind, content, ctx.issuer, row.title),
   });
 }
@@ -216,6 +225,7 @@ export async function POST(request: NextRequest) {
     const content = contentOf(row);
     const { missing, total } = assess(row.kind, content, ctx.issuer, row.title);
     if (missing.blocking.length) return json({ ok: false, error: 'Belge kesinleştirilemedi: eksik bilgi var.', missing }, 422);
+    if (!ctx.revision) return json({ ok: false, error: 'Şirket profili revizyonları yok: supabase/upgrade-v19-documents.sql çalıştırılmalı.' }, 503);
     let sourceNumber: string | null = null;
     if (row.source_id) {
       const src = await client.from('doc_documents').select('number').eq('id', row.source_id).maybeSingle();
@@ -231,11 +241,22 @@ export async function POST(request: NextRequest) {
     }
     const path = `${row.id}/v${version}-${body.requestKey}.pdf`;
     const up = await client.storage.from(DOC_BUCKET).upload(path, pdf.buffer, { contentType: 'application/pdf', upsert: false });
-    if (up.error) return json({ ok: false, error: `PDF depoya kaydedilemedi; belge taslak olarak kaldı. (${up.error.message})` }, 502);
+    if (up.error) {
+      // Same request key already uploading (double click that reached the server twice): wait for that one.
+      if (/exists|duplicate|409/i.test(up.error.message)) {
+        for (let i = 0; i < 20; i += 1) {
+          await new Promise((r) => setTimeout(r, 500));
+          const again = await client.from('doc_versions').select('version').eq('request_key', body.requestKey).maybeSingle();
+          if (again.data) return json({ ok: true, version: (again.data as { version: number }).version, replay: true });
+        }
+      }
+      return json({ ok: false, error: `PDF depoya kaydedilemedi; belge taslak olarak kaldı. (${up.error.message})` }, 502);
+    }
     const sha = createHash('sha256').update(pdf.buffer).digest('hex');
     const fin = await client.rpc('doc_finalize', {
       p_id: row.id, p_expected_updated_at: row.updated_at, p_snapshot: snapshot, p_total: total,
       p_pdf_path: path, p_pdf_sha256: sha, p_pdf_bytes: pdf.buffer.length, p_pdf_pages: pdf.pages, p_request_key: body.requestKey,
+      p_company_revision: ctx.revision, p_template_version: TEMPLATE_VERSION,
     });
     if (fin.error) {
       // The version was not created: remove the file that was just stored (admins cannot delete stored PDFs themselves).

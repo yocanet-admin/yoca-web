@@ -53,19 +53,37 @@ export interface VersionRow {
   snapshot?: unknown;
 }
 
+/** Template version stored with every PDF render (bump when the PDF design changes). */
+export const TEMPLATE_VERSION = 'belge-2026-11-b';
+
 export interface DocContext {
   ready: boolean;
+  /** Company profile revision these facts come from (0 = v19 not installed). */
+  revision: number;
   company: CompanyInfo;
   settings: DocSettings;
   issuer: Issuer;
 }
 
+function contextFrom(companyRaw: unknown, docsRaw: unknown, revision: number, ready: boolean): DocContext {
+  const company = sanitizeCompany((companyRaw ?? DEFAULT_COMPANY) as Partial<CompanyInfo>);
+  const settings = sanitizeDocSettings(docsRaw ?? DEFAULT_DOC_SETTINGS);
+  return { ready, revision, company, settings, issuer: issuerFrom(company) };
+}
+
+/**
+ * The CURRENT company profile, read as ONE revision row (company_info +
+ * documents together), so a PDF never mixes facts from two revisions.
+ */
 export async function loadContext(client: SupabaseClient): Promise<DocContext> {
+  const rev = await client.from('doc_company_revisions').select('revision, profile').order('revision', { ascending: false }).limit(1).maybeSingle();
+  if (!rev.error && rev.data) {
+    const row = rev.data as { revision: number; profile: { company_info?: unknown; documents?: unknown } };
+    return contextFrom(row.profile?.company_info, row.profile?.documents, Number(row.revision), true);
+  }
   const { data, error } = await client.from('cockpit_settings').select('key, value').in('key', ['company_info', 'documents']);
   const rows = (data ?? []) as Array<{ key: string; value: unknown }>;
-  const company = sanitizeCompany((rows.find((r) => r.key === 'company_info')?.value ?? DEFAULT_COMPANY) as Partial<CompanyInfo>);
-  const settings = sanitizeDocSettings(rows.find((r) => r.key === 'documents')?.value ?? DEFAULT_DOC_SETTINGS);
-  return { ready: !error, company, settings, issuer: issuerFrom(company, settings) };
+  return contextFrom(rows.find((r) => r.key === 'company_info')?.value, rows.find((r) => r.key === 'documents')?.value, 0, !error);
 }
 
 /** Recipient copy from the client master record (the document keeps its own copy). */
@@ -118,6 +136,8 @@ export function buildSnapshot(row: DocRow, content: DocContent, ctx: DocContext,
     source_number: sourceNumber,
     content,
     issuer: ctx.issuer,
+    company_revision: ctx.revision,
+    template_version: TEMPLATE_VERSION,
     bankAccounts: selectedBanks(content, ctx.settings, row.kind),
     totals: KIND_DEF[row.kind].items ? totalsJson(content) : null,
   };
@@ -146,4 +166,69 @@ export function dbError(error: { code?: string; message?: string } | null | unde
   if (code === '40001' || /başka bir oturumda/.test(msg)) return { status: 409, error: 'Belge siz düzenlerken başka bir oturumda değişti. Sayfayı yenileyip son hâli üzerinden devam edin.' };
   if (code === '55000' || code === 'P0002' || code === '22023') return { status: code === 'P0002' ? 404 : 409, error: msg.replace(/^doc_\w+:\s*/, '') };
   return { status: 500, error: msg };
+}
+
+/* ── Stored PDFs of finalized versions ─────────────────────────── */
+
+export interface VersionSnapshot {
+  number: string;
+  kind: DocKind;
+  title: string;
+  source_number: string | null;
+  content: unknown;
+  issuer: Issuer;
+  bankAccounts: BankAccount[];
+  company_revision?: number;
+  template_version?: string;
+}
+
+/**
+ * The normal download of a finalized version: the version's frozen content
+ * (items, amounts, recipient, dates, bank details) with the CURRENT company
+ * profile. Rendered once per (version, profile revision, template) and stored;
+ * earlier renders are never replaced.
+ */
+export async function currentRenderOf(
+  client: SupabaseClient,
+  documentId: string,
+  version: number,
+  ctx: DocContext,
+  service: SupabaseClient | null,
+): Promise<{ ok: true; path: string; reused: boolean } | { ok: false; status: number; error: string }> {
+  if (!ctx.revision) return { ok: false, status: 503, error: 'Şirket profili revizyonları yok: supabase/upgrade-v19-documents.sql çalıştırılmalı.' };
+  const hit = await client.from('doc_renders').select('pdf_path').eq('document_id', documentId).eq('version', version).eq('company_revision', ctx.revision).eq('template_version', TEMPLATE_VERSION).maybeSingle();
+  if (hit.data) return { ok: true, path: (hit.data as { pdf_path: string }).pdf_path, reused: true };
+  const v = await client.from('doc_versions').select('snapshot, finalized_at, version, kind').eq('document_id', documentId).eq('version', version).maybeSingle();
+  if (v.error) { const e = dbError(v.error); return { ok: false, ...e }; }
+  if (!v.data) return { ok: false, status: 404, error: 'Bu sürüm bulunamadı.' };
+  const row = v.data as { snapshot: VersionSnapshot; finalized_at: string; version: number; kind: DocKind };
+  const snap = row.snapshot;
+  const content = sanitizeContent(snap.content, row.kind);
+  const { renderDocumentPdf } = await import('@/lib/documents/pdf');
+  let pdf: { buffer: Buffer; pages: number };
+  try {
+    pdf = await renderDocumentPdf({
+      kind: row.kind, number: snap.number, title: snap.title, content, issuer: ctx.issuer, bankAccounts: snap.bankAccounts ?? [],
+      mode: 'final', version: row.version, versionAt: istanbulStamp(new Date(row.finalized_at), content.locale), sourceNumber: snap.source_number,
+    });
+  } catch (error) {
+    return { ok: false, status: 500, error: `PDF üretilemedi: ${(error as Error).message.slice(0, 160)}` };
+  }
+  const { createHash, randomUUID } = await import('node:crypto');
+  const path = `${documentId}/v${version}-r${ctx.revision}-${TEMPLATE_VERSION}-${randomUUID().slice(0, 8)}.pdf`;
+  const up = await client.storage.from(DOC_BUCKET).upload(path, pdf.buffer, { contentType: 'application/pdf', upsert: false });
+  if (up.error) return { ok: false, status: 502, error: `PDF depoya kaydedilemedi (${up.error.message}).` };
+  const r = await client.rpc('doc_add_render', {
+    p_id: documentId, p_version: version, p_company_revision: ctx.revision, p_template_version: TEMPLATE_VERSION, p_issuer: ctx.issuer,
+    p_pdf_path: path, p_pdf_sha256: createHash('sha256').update(pdf.buffer).digest('hex'), p_pdf_bytes: pdf.buffer.length, p_pdf_pages: pdf.pages,
+  });
+  if (r.error) {
+    await service?.storage.from(DOC_BUCKET).remove([path]).catch(() => undefined);
+    const e = dbError(r.error);
+    return { ok: false, ...e };
+  }
+  const out = r.data as { pdf_path: string; replay: boolean };
+  // Another request stored the same render first: keep that one, drop ours.
+  if (out.replay && out.pdf_path !== path) await service?.storage.from(DOC_BUCKET).remove([path]).catch(() => undefined);
+  return { ok: true, path: out.pdf_path, reused: out.replay };
 }

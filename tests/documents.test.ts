@@ -140,6 +140,13 @@ test('what is missing blocks finalizing (prices, plan, markers, proforma issuer 
   assert.deepEqual(missingFor('letter', sampleLetter(), SAMPLE_ISSUER).blocking, []);
 });
 
+test('body text: sub-headings with "## " in text sections only', () => {
+  assert.deepEqual(bodyParts('Giriş\n\n## Sizden beklediğimiz\n\nİçerikler.', false), [
+    { type: 'p', text: 'Giriş' }, { type: 'h', text: 'Sizden beklediğimiz' }, { type: 'p', text: 'İçerikler.' },
+  ]);
+  assert.deepEqual(bodyParts('## not a heading in a list', true), [{ type: 'li', text: '## not a heading in a list' }]);
+});
+
 test('body text: paragraphs, bullets, list blocks', () => {
   assert.deepEqual(bodyParts('Bir\niki\n\n- madde\n• ikinci\nSon', false), [
     { type: 'p', text: 'Bir iki' }, { type: 'li', text: 'madde' }, { type: 'li', text: 'ikinci' }, { type: 'p', text: 'Son' },

@@ -14,6 +14,13 @@
 --   doc_counters   one row per number prefix + year (TKL-2026-0001); numbers
 --                  are drawn with a single atomic upsert, so concurrent
 --                  creations never get the same number
+--   doc_company_revisions  every change of the company profile (cockpit_settings
+--                  "company_info" + "documents") as a numbered revision; a PDF is
+--                  always produced from ONE revision
+--   doc_renders    production history: every stored PDF of a finalized version
+--                  with the company profile revision and template version used.
+--                  The normal download uses the CURRENT profile (a new render);
+--                  earlier PDFs stay as they were ("Geçmiş PDF").
 -- Functions (security definer, admin check inside, actor from the JWT):
 --   doc_create, doc_finalize, doc_revise, doc_archive, doc_quote_state
 -- Storage: private bucket "yoca-docs" (PDF only, 15 MB). Admins may read and
@@ -109,6 +116,32 @@ create table if not exists public.doc_events (
 );
 create index if not exists idx_doc_events_document on public.doc_events (document_id, at desc);
 
+create table if not exists public.doc_company_revisions (
+  revision bigint generated always as identity primary key,
+  profile jsonb not null,            -- { company_info, documents } as they were at that moment
+  changed_by text,
+  changed_at timestamptz not null default now()
+);
+
+create table if not exists public.doc_renders (
+  id uuid primary key default gen_random_uuid(),
+  document_id uuid not null references public.doc_documents(id) on delete restrict,
+  version integer not null,
+  company_revision bigint not null references public.doc_company_revisions(revision) on delete restrict,
+  template_version text not null check (template_version ~ '^[a-z0-9.-]{1,40}$'),
+  reason text not null check (reason in ('finalized', 'download')),
+  issuer jsonb not null,             -- the company facts printed on this PDF
+  pdf_path text not null unique,
+  pdf_sha256 text not null check (pdf_sha256 ~ '^[0-9a-f]{64}$'),
+  pdf_bytes integer not null check (pdf_bytes > 0),
+  pdf_pages integer not null check (pdf_pages > 0),
+  generated_by text,
+  generated_at timestamptz not null default now(),
+  unique (document_id, version, company_revision, template_version),
+  foreign key (document_id, version) references public.doc_versions(document_id, version) on delete restrict
+);
+create index if not exists idx_doc_renders_document on public.doc_renders (document_id, generated_at desc);
+
 -- ── 2. Guards ──────────────────────────────────────────────────────
 -- Lifecycle columns change only inside the doc_* functions (they set
 -- yoca.doc_fn for their transaction). Working-copy columns change only while
@@ -166,6 +199,19 @@ drop trigger if exists doc_documents_no_delete on public.doc_documents;
 create trigger doc_documents_no_delete before delete on public.doc_documents for each row execute function public.doc_no_delete();
 drop trigger if exists doc_versions_frozen on public.doc_versions;
 create trigger doc_versions_frozen before insert or update or delete on public.doc_versions for each row execute function public.doc_versions_frozen();
+create or replace function public.doc_frozen() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    if coalesce(current_setting('yoca.doc_fn', true), '') <> '1' then raise exception '%: kayıt yalnızca belge işlemleriyle eklenir', tg_table_name using errcode = '42501'; end if;
+    return new;
+  end if;
+  raise exception '%: kayıt değiştirilemez veya silinemez', tg_table_name using errcode = '42501';
+end $$;
+drop trigger if exists doc_renders_frozen on public.doc_renders;
+create trigger doc_renders_frozen before insert or update or delete on public.doc_renders for each row execute function public.doc_frozen();
+drop trigger if exists doc_company_revisions_frozen on public.doc_company_revisions;
+create trigger doc_company_revisions_frozen before insert or update or delete on public.doc_company_revisions for each row execute function public.doc_frozen();
 drop trigger if exists doc_events_no_change on public.doc_events;
 create trigger doc_events_no_change before update or delete on public.doc_events for each row execute function public.doc_no_delete();
 
@@ -183,14 +229,20 @@ drop policy if exists "admin read document versions" on public.doc_versions;
 create policy "admin read document versions" on public.doc_versions for select to authenticated using (public.is_admin());
 drop policy if exists "admin read document events" on public.doc_events;
 create policy "admin read document events" on public.doc_events for select to authenticated using (public.is_admin());
+alter table public.doc_company_revisions enable row level security;
+alter table public.doc_renders enable row level security;
+drop policy if exists "admin read company revisions" on public.doc_company_revisions;
+create policy "admin read company revisions" on public.doc_company_revisions for select to authenticated using (public.is_admin());
+drop policy if exists "admin read document renders" on public.doc_renders;
+create policy "admin read document renders" on public.doc_renders for select to authenticated using (public.is_admin());
 -- doc_counters: no policy → only the security definer functions use it.
 
-revoke all on public.doc_documents, public.doc_versions, public.doc_events, public.doc_counters from anon;
+revoke all on public.doc_documents, public.doc_versions, public.doc_events, public.doc_counters, public.doc_company_revisions, public.doc_renders from anon;
 revoke insert, delete on public.doc_documents from authenticated;
-revoke insert, update, delete on public.doc_versions, public.doc_events from authenticated;
+revoke insert, update, delete on public.doc_versions, public.doc_events, public.doc_company_revisions, public.doc_renders from authenticated;
 revoke all on public.doc_counters from authenticated;
 grant select, update on public.doc_documents to authenticated;
-grant select on public.doc_versions, public.doc_events to authenticated;
+grant select on public.doc_versions, public.doc_events, public.doc_company_revisions, public.doc_renders to authenticated;
 
 drop trigger if exists audit_doc_documents on public.doc_documents;
 create trigger audit_doc_documents after insert or update or delete on public.doc_documents for each row execute function public.audit_row();
@@ -266,9 +318,11 @@ grant execute on function public.doc_create(text, text, uuid, uuid, text, text, 
 -- Finalize: the PDF must already be stored in "yoca-docs"; the version and
 -- the status change are one transaction. A second call with the same request
 -- key returns the version that was created (no second version).
+drop function if exists public.doc_finalize(uuid, timestamptz, jsonb, numeric, text, text, integer, integer, uuid);
 create or replace function public.doc_finalize(
   p_id uuid, p_expected_updated_at timestamptz, p_snapshot jsonb, p_total numeric,
-  p_pdf_path text, p_pdf_sha256 text, p_pdf_bytes integer, p_pdf_pages integer, p_request_key uuid
+  p_pdf_path text, p_pdf_sha256 text, p_pdf_bytes integer, p_pdf_pages integer, p_request_key uuid,
+  p_company_revision bigint, p_template_version text
 ) returns jsonb
 language plpgsql security definer set search_path = public, storage as $$
 declare
@@ -291,13 +345,16 @@ begin
   perform set_config('yoca.doc_fn', '1', true);
   insert into public.doc_versions (document_id, version, number, kind, title, snapshot, currency, total, pdf_path, pdf_sha256, pdf_bytes, pdf_pages, request_key, finalized_by)
   values (doc.id, next_v, doc.number, doc.kind, doc.title, p_snapshot, doc.currency, p_total, p_pdf_path, p_pdf_sha256, p_pdf_bytes, p_pdf_pages, p_request_key, public.doc_actor());
+  if not exists (select 1 from public.doc_company_revisions where revision = p_company_revision) then raise exception 'doc_finalize: şirket profili revizyonu yok' using errcode = '22023'; end if;
+  insert into public.doc_renders (document_id, version, company_revision, template_version, reason, issuer, pdf_path, pdf_sha256, pdf_bytes, pdf_pages, generated_by)
+  values (doc.id, next_v, p_company_revision, p_template_version, 'finalized', coalesce(p_snapshot -> 'issuer', '{}'::jsonb), p_pdf_path, p_pdf_sha256, p_pdf_bytes, p_pdf_pages, public.doc_actor());
   update public.doc_documents set status = 'final', final_version = next_v, final_total = p_total, final_at = now() where id = doc.id;
-  insert into public.doc_events (document_id, kind, detail, actor) values (doc.id, 'finalized', jsonb_build_object('version', next_v), public.doc_actor());
+  insert into public.doc_events (document_id, kind, detail, actor) values (doc.id, 'finalized', jsonb_build_object('version', next_v, 'company_revision', p_company_revision), public.doc_actor());
   perform set_config('yoca.doc_fn', '', true);
   return jsonb_build_object('version', next_v, 'replay', false, 'pdf_path', p_pdf_path);
 end $$;
-revoke all on function public.doc_finalize(uuid, timestamptz, jsonb, numeric, text, text, integer, integer, uuid) from anon, public;
-grant execute on function public.doc_finalize(uuid, timestamptz, jsonb, numeric, text, text, integer, integer, uuid) to authenticated;
+revoke all on function public.doc_finalize(uuid, timestamptz, jsonb, numeric, text, text, integer, integer, uuid, bigint, text) from anon, public;
+grant execute on function public.doc_finalize(uuid, timestamptz, jsonb, numeric, text, text, integer, integer, uuid, bigint, text) to authenticated;
 
 -- Revise a finalized document: it becomes a draft again; every finalized
 -- version (and its PDF) stays. The next finalization creates version n+1.
@@ -365,6 +422,75 @@ end $$;
 revoke all on function public.doc_quote_state(uuid, text, text) from anon, public;
 grant execute on function public.doc_quote_state(uuid, text, text) to authenticated;
 
+-- A new stored PDF of a finalized version with the CURRENT company profile
+-- (normal download after a company change). Commercial content comes from the
+-- frozen version snapshot; only the company facts differ. One row per
+-- (version, profile revision, template): a second call returns the first.
+create or replace function public.doc_add_render(
+  p_id uuid, p_version integer, p_company_revision bigint, p_template_version text, p_issuer jsonb,
+  p_pdf_path text, p_pdf_sha256 text, p_pdf_bytes integer, p_pdf_pages integer
+) returns jsonb
+language plpgsql security definer set search_path = public, storage as $$
+declare r public.doc_renders;
+begin
+  if not public.is_admin() then raise exception 'yetkisiz' using errcode = '42501'; end if;
+  select * into r from public.doc_renders where document_id = p_id and version = p_version and company_revision = p_company_revision and template_version = p_template_version;
+  if found then return jsonb_build_object('id', r.id, 'pdf_path', r.pdf_path, 'replay', true); end if;
+  if not exists (select 1 from public.doc_versions where document_id = p_id and version = p_version) then raise exception 'doc_add_render: sürüm yok' using errcode = 'P0002'; end if;
+  if not exists (select 1 from storage.objects where bucket_id = 'yoca-docs' and name = p_pdf_path) then raise exception 'doc_add_render: PDF dosyası depoda yok' using errcode = '55000'; end if;
+  if p_pdf_path not like p_id::text || '/%' then raise exception 'doc_add_render: PDF yolu belgeye ait değil' using errcode = '22023'; end if;
+  perform set_config('yoca.doc_fn', '1', true);
+  insert into public.doc_renders (document_id, version, company_revision, template_version, reason, issuer, pdf_path, pdf_sha256, pdf_bytes, pdf_pages, generated_by)
+  values (p_id, p_version, p_company_revision, p_template_version, 'download', coalesce(p_issuer, '{}'::jsonb), p_pdf_path, p_pdf_sha256, p_pdf_bytes, p_pdf_pages, public.doc_actor())
+  on conflict (document_id, version, company_revision, template_version) do nothing
+  returning * into r;
+  perform set_config('yoca.doc_fn', '', true);
+  if r.id is null then
+    select * into r from public.doc_renders where document_id = p_id and version = p_version and company_revision = p_company_revision and template_version = p_template_version;
+    return jsonb_build_object('id', r.id, 'pdf_path', r.pdf_path, 'replay', true);
+  end if;
+  return jsonb_build_object('id', r.id, 'pdf_path', r.pdf_path, 'replay', false);
+end $$;
+revoke all on function public.doc_add_render(uuid, integer, bigint, text, jsonb, text, text, integer, integer) from anon, public;
+grant execute on function public.doc_add_render(uuid, integer, bigint, text, jsonb, text, text, integer, integer) to authenticated;
+
+-- Company profile revisions: every change of "company_info" or "documents"
+-- (from the existing Şirket bilgileri screen or Belge ayarları) adds a
+-- revision with both values as they are after the change.
+create or replace function public.doc_company_revision_capture() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  prof jsonb;
+  last jsonb;
+begin
+  if new.key not in ('company_info', 'documents') then return new; end if;
+  prof := jsonb_build_object(
+    'company_info', coalesce((select value from public.cockpit_settings where key = 'company_info'), '{}'::jsonb),
+    'documents', coalesce((select value from public.cockpit_settings where key = 'documents'), '{}'::jsonb));
+  select profile into last from public.doc_company_revisions order by revision desc limit 1;
+  if last is distinct from prof then
+    perform set_config('yoca.doc_fn', '1', true);
+    insert into public.doc_company_revisions (profile, changed_by) values (prof, public.doc_actor());
+    perform set_config('yoca.doc_fn', '', true);
+  end if;
+  return new;
+end $$;
+drop trigger if exists doc_company_revision_capture on public.cockpit_settings;
+create trigger doc_company_revision_capture after insert or update on public.cockpit_settings for each row execute function public.doc_company_revision_capture();
+
+-- First revision = the profile as it is now (existing values are not changed).
+do $$
+begin
+  if not exists (select 1 from public.doc_company_revisions) then
+    perform set_config('yoca.doc_fn', '1', true);
+    insert into public.doc_company_revisions (profile, changed_by)
+    values (jsonb_build_object(
+      'company_info', coalesce((select value from public.cockpit_settings where key = 'company_info'), '{}'::jsonb),
+      'documents', coalesce((select value from public.cockpit_settings where key = 'documents'), '{}'::jsonb)), 'v19');
+    perform set_config('yoca.doc_fn', '', true);
+  end if;
+end $$;
+
 -- ── 5. Private PDF bucket ──────────────────────────────────────────
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('yoca-docs', 'yoca-docs', false, 15728640, array['application/pdf'])
@@ -382,9 +508,11 @@ commit;
 -- since. Before real documents exist this is lossless; afterwards prefer
 -- leaving v19 in place and rolling back only the app (the old app never reads it).
 -- begin;
---   drop table if exists public.doc_events, public.doc_versions, public.doc_documents, public.doc_counters cascade;
+--   drop trigger if exists doc_company_revision_capture on public.cockpit_settings;
+--   drop table if exists public.doc_renders, public.doc_events, public.doc_versions, public.doc_documents, public.doc_counters, public.doc_company_revisions cascade;
 --   drop function if exists public.doc_create(text, text, uuid, uuid, text, text, jsonb, numeric, uuid, text),
---     public.doc_finalize(uuid, timestamptz, jsonb, numeric, text, text, integer, integer, uuid),
+--     public.doc_finalize(uuid, timestamptz, jsonb, numeric, text, text, integer, integer, uuid, bigint, text),
+--     public.doc_add_render(uuid, integer, bigint, text, jsonb, text, text, integer, integer), public.doc_company_revision_capture(), public.doc_frozen(),
 --     public.doc_revise(uuid, timestamptz), public.doc_archive(uuid, boolean), public.doc_quote_state(uuid, text, text),
 --     public.doc_next_number(text, integer), public.doc_prefix(text), public.doc_actor(),
 --     public.doc_documents_guard(), public.doc_no_delete(), public.doc_versions_frozen();

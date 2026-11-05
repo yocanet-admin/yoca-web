@@ -31,6 +31,7 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
       { href: '/admin/ops/clients', label: 'Müşteriler ve firmalar', icon: '◎' },
       { href: '/admin/ops/services', label: 'Hizmetler ve varlıklar', icon: '▤' },
       { href: '/admin/ops/finance', label: 'Ödemeler ve yenilemeler', icon: '₺' },
+      { href: '/admin/documents', label: 'Teklifler ve Belgeler', icon: '❐' },
       { href: '/admin/ops/providers', label: 'Sağlayıcılar', icon: '⌂' },
       { href: '/admin/ops/licenses', label: 'Lisanslar', icon: '⚿' },
       { href: '/admin/ops/settings', label: 'Operasyon ayarları', icon: '⚙' },
