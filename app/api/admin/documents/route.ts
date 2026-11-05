@@ -46,6 +46,20 @@ async function projectsOf(client: Sb) {
   return r.error ? [] : (r.data ?? []);
 }
 
+const EMAIL_COLUMNS = 'id, version, render_id, pdf_name, pdf_sha256, to_addrs, cc_addrs, subject, body, status, provider_id, error, last_event, sent_by, created_at, finished_at, status_checked_at';
+/**
+ * Sending history (v20) with the e-mail theme (v22). Before v22 the history is
+ * read without the theme (every row was light) and the dark theme is offered as
+ * not ready; without the table the panel says sending is not set up yet.
+ */
+async function emailsOf(client: Sb, documentId: string): Promise<{ error: unknown; data: unknown[] | null; themeReady: boolean }> {
+  const r = await client.from('doc_emails').select(`${EMAIL_COLUMNS}, theme`).eq('document_id', documentId).order('created_at', { ascending: false });
+  if (!r.error) return { error: null, data: r.data, themeReady: true };
+  if (r.error.code !== '42703' && r.error.code !== 'PGRST204') return { error: r.error, data: null, themeReady: false };
+  const old = await client.from('doc_emails').select(EMAIL_COLUMNS).eq('document_id', documentId).order('created_at', { ascending: false });
+  return { error: old.error, data: (old.data ?? []).map((row) => ({ ...row, theme: 'light' })), themeReady: false };
+}
+
 export async function GET(request: NextRequest) {
   if (!(await requireAdmin(request))) return unauthorized();
   const client = getSupabaseAsUser(bearerToken(request));
@@ -74,8 +88,7 @@ export async function GET(request: NextRequest) {
     client.from('clients').select(CLIENT_COLUMNS).order('name'),
     client.from('doc_renders').select('id, version, company_revision, template_version, reason, issuer, pdf_pages, pdf_bytes, generated_by, generated_at').eq('document_id', id).order('generated_at', { ascending: false }),
     projectsOf(client),
-    // Sending history (v20). Without the table the panel says sending is not set up yet.
-    client.from('doc_emails').select('id, version, render_id, pdf_name, pdf_sha256, to_addrs, cc_addrs, subject, body, status, provider_id, error, last_event, sent_by, created_at, finished_at, status_checked_at').eq('document_id', id).order('created_at', { ascending: false }),
+    emailsOf(client, id),
   ]);
   if (doc.error) { const e = dbError(doc.error); return json({ ok: false, error: e.error }, e.status); }
   if (!doc.data) return json({ ok: false, error: 'Belge bulunamadı.' }, 404);
@@ -100,7 +113,7 @@ export async function GET(request: NextRequest) {
     clients: clients.data ?? [],
     projects,
     emails: emails.error ? [] : emails.data ?? [],
-    mail: { tableReady: !emails.error, serviceReady: mailReady(), from: senderAddress() },
+    mail: { tableReady: !emails.error, themeReady: !emails.error && emails.themeReady, serviceReady: mailReady(), from: senderAddress() },
     source: source.data ?? null,
     derived: derived.data ?? [],
     settings: ctx.settings,

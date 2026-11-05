@@ -24,6 +24,8 @@ export interface EmailRow {
   id: string; version: number; render_id: string; pdf_name: string; pdf_sha256: string; to_addrs: string[]; cc_addrs: string[]; subject: string; body: string;
   status: 'sending' | 'accepted' | 'failed' | 'unknown' | 'delivered' | 'delayed' | 'bounced' | 'complained';
   provider_id: string | null; error: string | null; last_event: string | null; sent_by: string | null; created_at: string; finished_at: string | null; status_checked_at: string | null;
+  /** e-mail body theme (v22); 'light' for every row sent before */
+  theme: 'light' | 'dark';
 }
 
 export interface DocListRow {
@@ -47,7 +49,7 @@ export interface EventRow { id: string; kind: string; detail: Record<string, unk
 export interface DocDetail {
   ok: boolean; error?: string;
   document: DocFull; versions: VersionRow[]; renders: RenderRow[]; events: EventRow[]; clients: ClientLite[]; projects: ProjectLite[];
-  emails: EmailRow[]; mail: { tableReady: boolean; serviceReady: boolean; from: string };
+  emails: EmailRow[]; mail: { tableReady: boolean; themeReady: boolean; serviceReady: boolean; from: string };
   source: { id: string; number: string; title: string } | null; derived: Array<{ id: string; number: string; title: string; kind: DocKind; status: DocStatus }>;
   settings: DocSettings; issuer: Issuer; company: CompanyInfo; companyRevision: number; templateVersion: string;
   assessment: { missing: MissingReport; total: string | null };

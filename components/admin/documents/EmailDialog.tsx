@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Flash, field, label } from '@/components/admin/ops/ui';
 import { adminPost } from '@/lib/cockpit/client';
 import { newKey } from '@/lib/documents/client';
-import { parseAddresses } from '@/lib/documents/mail';
+import { brandedEmailHtml, EMAIL_LOGO, EMAIL_LOGO_DARK, EMAIL_THEME_LABEL, EMAIL_THEMES, parseAddresses, SITE, type EmailTheme } from '@/lib/documents/mail';
+import type { DocLocale, Issuer } from '@/lib/documents/model';
 import { formatIban, type BankChange } from '@/lib/documents/settings';
 
 /**
@@ -14,13 +15,21 @@ import { formatIban, type BankChange } from '@/lib/documents/settings';
  * or "Yeniden dene" after an unclear result never sends a second copy. The
  * result is shown as it is: "servis kabul etti" is not "teslim edildi"; a
  * failure is never shown as success.
+ *
+ * Theme "Açık" (default) / "Koyu" changes only the e-mail body; the preview is
+ * the same HTML the server sends (same function, same company profile, same
+ * attachment note). The attached PDF is identical in both themes.
  */
 
 type Result = { ok: boolean; status?: string; error?: string; emailId?: string; needsBankDecision?: boolean; bankChanges?: BankChange[]; version?: number; replay?: boolean };
 
-export function EmailDialog({ docId, number, versions, defaultVersion, defaults, from, replyTo, onClose, onSent }: {
+export function EmailDialog({ docId, number, versions, defaultVersion, defaults, from, replyTo, issuer, locale, themeReady, onClose, onSent }: {
   docId: string; number: string; versions: Array<{ version: number; finalized_at: string }>; defaultVersion: number;
   defaults: { to: string; subject: string; body: string }; from: string; replyTo: string;
+  /** current company profile and the version's language: the preview uses what the server uses */
+  issuer: Issuer; locale: DocLocale;
+  /** false until v22 is applied: only the light theme can be sent */
+  themeReady: boolean;
   onClose: () => void; onSent: () => void;
 }) {
   const [to, setTo] = useState(defaults.to);
@@ -28,6 +37,7 @@ export function EmailDialog({ docId, number, versions, defaultVersion, defaults,
   const [subject, setSubject] = useState(defaults.subject);
   const [message, setMessage] = useState(defaults.body);
   const [version, setVersion] = useState(defaultVersion);
+  const [theme, setTheme] = useState<EmailTheme>('light');
   const [keepBank, setKeepBank] = useState(false);
   const [bankAsk, setBankAsk] = useState<BankChange[] | null>(null);
   // One key per send: kept for retries of an unclear result, renewed when the content changes after a definite failure.
@@ -53,10 +63,17 @@ export function EmailDialog({ docId, number, versions, defaultVersion, defaults,
     if (result && result.status === 'failed') { setKey(newKey()); setResult(null); }
   };
 
+  const pdfName = `${number}-v${version}.pdf`;
+  // In the preview the logo comes from this site (same file as in the e-mail), so it also shows on a preview deployment.
+  const preview = useMemo(() => brandedEmailHtml({
+    issuer, locale, preheader: subject, body: message.trim() || ' ', note: `${locale === 'tr' ? 'Ek' : 'Attachment'}: ${pdfName}`, theme,
+    logoUrl: typeof window !== 'undefined' ? `${window.location.origin}${(theme === 'dark' ? EMAIL_LOGO_DARK : EMAIL_LOGO).slice(SITE.length)}` : undefined,
+  }), [issuer, locale, subject, message, pdfName, theme]);
+
   const send = async () => {
     if (busy || done) return;
     setBusy(true);
-    const r = await adminPost<Result>('/api/admin/documents/email', { action: 'send', id: docId, version, to, cc, subject, message, keepBank, requestKey: key });
+    const r = await adminPost<Result>('/api/admin/documents/email', { action: 'send', id: docId, version, to, cc, subject, message, theme, keepBank, requestKey: key });
     setBusy(false);
     if (r.needsBankDecision) { setBankAsk(r.bankChanges ?? []); setResult(null); return; }
     // No answer at all (connection dropped): the outcome is unclear, not a failure and not a success.
@@ -85,8 +102,26 @@ export function EmailDialog({ docId, number, versions, defaultVersion, defaults,
               {versions.map((v) => <option key={v.version} value={v.version}>Sürüm {v.version}{v.version === defaultVersion ? ' (son sürüm)' : ''}</option>)}
             </select>
           </label>
-          <p className="text-[12px] text-subtle">Ek: <span className="font-mono">{number}-v{version}.pdf</span> — “PDF indir” ile aynı dosya: sürümün sabit içeriği, güncel şirket bilgileri ve onaylı şablon. Gönderilen dosya saklanır ve gönderim geçmişinden “Gönderilen PDF” ile açılabilir.</p>
+          <p className="text-[12px] text-subtle">Ek: <span className="font-mono">{pdfName}</span> — “PDF indir” ile aynı dosya: sürümün sabit içeriği, güncel şirket bilgileri ve onaylı şablon. Gönderilen dosya saklanır ve gönderim geçmişinden “Gönderilen PDF” ile açılabilir.</p>
+          <div className="grid gap-2">
+            <span className={label}>E-posta teması</span>
+            <div role="radiogroup" aria-label="E-posta teması" className="flex flex-wrap gap-2">
+              {EMAIL_THEMES.map((t) => (
+                <button key={t} type="button" role="radio" aria-checked={theme === t} disabled={t === 'dark' && !themeReady}
+                  className={`admin-btn ${theme === t ? '!border-yoca-lime !text-white' : ''}`} onClick={() => edit(setTheme)(t)}>
+                  {EMAIL_THEME_LABEL[t]}{t === 'light' ? ' (varsayılan)' : ''}
+                </button>
+              ))}
+            </div>
+            <p className="text-[12px] text-subtle">Tema yalnızca e-posta gövdesini değiştirir; ekteki PDF’in tasarımı aynı kalır. Seçilen tema gönderim kaydında saklanır.{!themeReady ? ' Koyu tema için veritabanı güncellemesi (v22) henüz uygulanmadı.' : ''}</p>
+          </div>
         </fieldset>
+
+        <div className="grid gap-1.5">
+          <p className="text-[12px] font-bold">Önizleme · {EMAIL_THEME_LABEL[theme]}</p>
+          <iframe title={`E-posta önizleme (${EMAIL_THEME_LABEL[theme]})`} srcDoc={preview} sandbox="" className="h-[440px] w-full border border-line" style={{ background: theme === 'dark' ? '#0D0E12' : '#F3F5EF' }} />
+          <p className="text-[11px] text-subtle">Gönderilecek HTML’in kendisidir. Bazı e-posta uygulamaları (ör. koyu modda Gmail / Outlook) renkleri kendi kurallarıyla değiştirebilir.</p>
+        </div>
 
         {bankAsk && (
           <div className="grid gap-2 border border-yellow-400/40 p-3 text-[13px]" role="alert">
