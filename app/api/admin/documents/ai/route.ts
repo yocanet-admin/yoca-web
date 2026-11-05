@@ -5,7 +5,7 @@ import { hasOpenAIKey, OpenAIError } from '@/lib/ai/openai';
 import { mockEnabled } from '@/lib/ai/mock';
 import { checkModel, getAiSettings, resolveModel } from '@/lib/ai/settings';
 import { finishRun, startRun } from '@/lib/ai/runs';
-import { cleanDraft, draftDocument, moneyMentions, rewriteText, translateDocument, type RewriteOp } from '@/lib/ai/documents';
+import { cleanDraft, cleanLetter, draftDocument, letterText, moneyMentions, rewriteText, translateDocument, type RewriteOp } from '@/lib/ai/documents';
 import { DOC_KINDS, sanitizeContent, type DocKind, type DocLocale } from '@/lib/documents/model';
 
 /**
@@ -14,6 +14,7 @@ import { DOC_KINDS, sanitizeContent, type DocKind, type DocLocale } from '@/lib/
  * POST { mode: 'draft', kind, locale, brief, recipient?, projectName?, requestKey }
  *      { mode: 'rewrite', op: 'shorten'|'formal'|'simplify', locale, text, requestKey }
  *      { mode: 'translate', id, kind, content, title, to: 'tr'|'en', requestKey }
+ *      { mode: 'letter', locale, subject?, facts, recipient?, projectName?, requestKey } (Antetli yazı / Bilgilendirme)
  * Returns a SUGGESTION. It writes nothing to the document; the admin applies it.
  */
 
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
   if (rateLimited(admin.id)) return NextResponse.json({ ok: false, error: 'Saatlik sınır doldu, biraz sonra tekrar deneyin.' }, { status: 429 });
 
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  const mode = body.mode === 'rewrite' ? 'rewrite' : body.mode === 'translate' ? 'translate' : body.mode === 'draft' ? 'draft' : null;
+  const mode = body.mode === 'rewrite' ? 'rewrite' : body.mode === 'translate' ? 'translate' : body.mode === 'draft' ? 'draft' : body.mode === 'letter' ? 'letter' : null;
   if (!mode) return NextResponse.json({ ok: false, error: 'bad request' }, { status: 400 });
   if (typeof body.requestKey !== 'string' || !KEY.test(body.requestKey)) return NextResponse.json({ ok: false, error: 'İstek anahtarı eksik.' }, { status: 400 });
   const locale: DocLocale = body.locale === 'en' ? 'en' : 'tr';
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
 
   // Validate input before any cost is incurred.
   if (mode === 'draft' && (typeof body.brief !== 'string' || body.brief.trim().length < 10)) return NextResponse.json({ ok: false, error: 'Kısa bir açıklama yazın (en az 10 karakter): ne isteniyor, süre, ödeme koşulları…' }, { status: 400 });
+  if (mode === 'letter' && (typeof body.facts !== 'string' || body.facts.trim().length < 10)) return NextResponse.json({ ok: false, error: 'Yapılan işi veya iletmek istediğiniz bilgiyi yazın (en az 10 karakter). Yapay zekâ yalnızca bu bilgilere dayanır.' }, { status: 400 });
   if (mode === 'rewrite' && (typeof body.text !== 'string' || !body.text.trim())) return NextResponse.json({ ok: false, error: 'Düzenlenecek metni seçin.' }, { status: 400 });
   const op = (['shorten', 'formal', 'simplify'] as const).includes(body.op as RewriteOp) ? (body.op as RewriteOp) : null;
   if (mode === 'rewrite' && !op) return NextResponse.json({ ok: false, error: 'Geçersiz işlem.' }, { status: 400 });
@@ -92,6 +94,14 @@ export async function POST(request: NextRequest) {
     if (mode === 'draft') {
       const r = await draftDocument(model, { kind, locale, brief: String(body.brief), recipient: String(body.recipient ?? '').slice(0, 300), projectName: String(body.projectName ?? '').slice(0, 200) });
       result = { suggestion: cleanDraft(kind, r.data) };
+      usage = r.usage; requestId = r.requestId; isMock = Boolean(r.mock);
+    } else if (mode === 'letter') {
+      const facts = String(body.facts).slice(0, 6000);
+      const subject = String(body.subject ?? '').slice(0, 300);
+      const recipient = String(body.recipient ?? '').slice(0, 300);
+      const projectName = String(body.projectName ?? '').slice(0, 200);
+      const r = await letterText(model, { locale, subject, facts, recipient, projectName, format: body.format === 'email' ? 'email' : 'letter' });
+      result = { suggestion: cleanLetter([subject, facts, recipient, projectName].join('\n'), r.data) };
       usage = r.usage; requestId = r.requestId; isMock = Boolean(r.mock);
     } else if (mode === 'rewrite') {
       const r = await rewriteText(model, { op: op as RewriteOp, locale, text: String(body.text).slice(0, 8000) });

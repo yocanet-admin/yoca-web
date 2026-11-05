@@ -54,7 +54,7 @@ export interface VersionRow {
 }
 
 /** Template version stored with every PDF render (bump when the PDF design changes). */
-export const TEMPLATE_VERSION = 'belge-2026-11-d';
+export const TEMPLATE_VERSION = 'belge-2026-11-f';
 
 export interface DocContext {
   ready: boolean;
@@ -198,10 +198,10 @@ export async function currentRenderOf(
   version: number,
   ctx: DocContext,
   service: SupabaseClient | null,
-): Promise<{ ok: true; path: string; reused: boolean } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; id: string; path: string; reused: boolean } | { ok: false; status: number; error: string }> {
   if (!ctx.revision) return { ok: false, status: 503, error: 'Şirket profili revizyonları yok: supabase/upgrade-v19-documents.sql çalıştırılmalı.' };
-  const hit = await client.from('doc_renders').select('pdf_path').eq('document_id', documentId).eq('version', version).eq('company_revision', ctx.revision).eq('template_version', TEMPLATE_VERSION).maybeSingle();
-  if (hit.data) return { ok: true, path: (hit.data as { pdf_path: string }).pdf_path, reused: true };
+  const hit = await client.from('doc_renders').select('id, pdf_path').eq('document_id', documentId).eq('version', version).eq('company_revision', ctx.revision).eq('template_version', TEMPLATE_VERSION).maybeSingle();
+  if (hit.data) { const h = hit.data as { id: string; pdf_path: string }; return { ok: true, id: h.id, path: h.pdf_path, reused: true }; }
   const v = await client.from('doc_versions').select('snapshot, finalized_at, version, kind').eq('document_id', documentId).eq('version', version).maybeSingle();
   if (v.error) { const e = dbError(v.error); return { ok: false, ...e }; }
   if (!v.data) return { ok: false, status: 404, error: 'Bu sürüm bulunamadı.' };
@@ -231,8 +231,8 @@ export async function currentRenderOf(
     const e = dbError(r.error);
     return { ok: false, ...e };
   }
-  const out = r.data as { pdf_path: string; replay: boolean };
+  const out = r.data as { id: string; pdf_path: string; replay: boolean };
   // Another request stored the same render first: keep that one, drop ours.
   if (out.replay && out.pdf_path !== path) await service?.storage.from(DOC_BUCKET).remove([path]).catch(() => undefined);
-  return { ok: true, path: out.pdf_path, reused: out.replay };
+  return { ok: true, id: out.id, path: out.pdf_path, reused: out.replay };
 }

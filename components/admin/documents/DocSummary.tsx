@@ -143,6 +143,7 @@ export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: Do
       )}
 
       <Card title={kind === 'letter' ? 'Yazı metni' : 'Bölümler'} aside={<span className="text-[12px] text-subtle">{blocks.length} bölüm</span>}>
+        {c.salutation ? <p className="text-[13px] text-white">{c.salutation}</p> : null}
         {blocks.length === 0 ? <p className="text-[13px] text-subtle">Metin yok.</p> : blocks.map((b) => (
           <div key={b.id} className="grid gap-1.5 border-t border-line pt-3 first:border-t-0 first:pt-0">
             <h3 className="text-[13px] font-bold text-white">{b.heading || BLOCK_LABEL[b.key].tr}</h3>

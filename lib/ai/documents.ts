@@ -27,6 +27,7 @@ export interface DraftSuggestion {
 }
 
 export interface RewriteSuggestion { text: string; changes: string[] }
+export interface LetterSuggestion { title: string; salutation: string; body: string; closing: string; missing: string[] }
 export interface TranslateSuggestion { title: string; subject: string; deliveryTime: string; blocks: Array<{ id: string; heading: string; body: string }>; items: Array<{ id: string; title: string; description: string; unit: string }>; payment: Array<{ id: string; label: string; due: string }> }
 
 const YOCA = `Yoca (yoca.net) is a creative agency: brand strategy and identity, web and digital experiences, growth and performance, creative production, AI and automation, digital product development.`;
@@ -107,6 +108,47 @@ export function draftDocument(model: string, input: { kind: DocKind; locale: Doc
   });
 }
 
+/**
+ * Antetli yazı / Bilgilendirme: a corporate letter written ONLY from what the
+ * admin typed (subject + what was done / what to tell). No invented work, test
+ * results, dates, guarantees or commitments; what is missing is marked
+ * "[EKSİK: …]" and listed. The result is a suggestion (title, salutation,
+ * body, closing); nothing is written to the document without "Uygula".
+ */
+export function letterText(model: string, input: { locale: DocLocale; subject: string; facts: string; recipient: string; projectName: string; format?: 'letter' | 'email' }): Promise<OpenAIResult<LetterSuggestion>> {
+  const email = input.format === 'email';
+  return callOpenAI<LetterSuggestion>({
+    model,
+    system:
+      (email
+        ? `You write a short, clear project update e-mail that Yoca will send to a client (the admin reviews it first; nothing is sent automatically). Write ONLY in ${LANG[input.locale]}.\n${YOCA}\n`
+        : `You write a formal corporate letter (antetli yazı / bilgilendirme yazısı) that Yoca will sign and send. Write ONLY in ${LANG[input.locale]}.\n${YOCA}\n`) +
+      'Use ONLY the facts in <FACTS> (and the recipient / project names given). Do not add work that is not stated as done, test results, measurements, dates, deadlines, durations, guarantees, warranties, promises or commitments. Do not turn plans into completed work or the other way round.\n' +
+      'If the letter clearly needs a fact that is not given (for example a date the text refers to), write [EKSİK: what is missing] (Turkish) or [MISSING: what is missing] (English) in its place and list it in "missing". Do not invent a placeholder for things the letter can do without.\n' +
+      (email ? 'Return: title (the e-mail subject line, max ~70 characters), salutation (greeting line), body (2–4 short paragraphs separated by a blank line; no salutation, no sign-off inside the body), closing (one short sign-off such as "Saygılarımızla," or "İyi çalışmalar,").\n' : '') +
+      (email ? '' : 'Return: title (short subject line for the letter, max ~80 characters), salutation (e.g. "Sayın Yetkili," or with the person\'s name only if given), body (plain paragraphs separated by a blank line; a list only if the facts are a list, one item per line starting with "- "; no salutation and no closing inside the body), closing (one short formula such as "Saygılarımızla,").\n') +
+      `${FACT_RULES}\n\n${NO_AI_SLOP_RULES}`,
+    user: [
+      input.recipient ? `Recipient: ${input.recipient}` : 'Recipient: (not given)',
+      input.projectName ? `Project: ${input.projectName}` : '',
+      input.subject ? `Subject given by the user: ${input.subject}` : 'Subject: (not given)',
+      `Facts:\n${fence('FACTS', input.facts.slice(0, 6000))}`,
+    ].filter(Boolean).join('\n'),
+    schema: {
+      name: 'doc_letter',
+      schema: {
+        type: 'object', additionalProperties: false, required: ['title', 'salutation', 'body', 'closing', 'missing'],
+        properties: {
+          title: { type: 'string' }, salutation: { type: 'string' }, body: { type: 'string' }, closing: { type: 'string' },
+          missing: { type: 'array', items: { type: 'string' }, description: 'Facts the user must add (in the letter language)' },
+        },
+      },
+    },
+    maxOutputTokens: 3000,
+    timeoutMs: 60_000,
+  });
+}
+
 export type RewriteOp = 'shorten' | 'formal' | 'simplify';
 const OPS: Record<RewriteOp, string> = {
   shorten: 'Make it shorter (about 30–50% fewer words) without losing any fact, number, name, date or commitment.',
@@ -177,5 +219,43 @@ export function cleanDraft(kind: DocKind, d: DraftSuggestion): DraftSuggestion &
   const money = moneyMentions(all);
   if (money.length) warnings.push(`Önerilen metinde tutar geçiyor (${money.join(', ')}). Fiyatları kalemlere siz girin; uygulama toplamları hesaplar. Metindeki tutarı kontrol edin.`);
   if (payment.some((p) => p.percent === null)) warnings.push('Ödeme planında oranı belirtilmemiş adım var; oranı siz girin.');
+  return { ...out, warnings };
+}
+
+const NUMBERISH = /\d+(?:[.,:/]\d+)*/g;
+const MONTH = /\b(ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık|january|february|march|april|may|june|july|august|september|october|november|december)\b/gi;
+const PROMISE = /\b(garanti\w*|taahhüt\w*|kesinlikle|guarantee\w*|warrant\w*|commit\w*)\b/gi;
+
+/**
+ * Numbers, dates, month names and promise words that appear in the AI letter
+ * but not in what the user gave: shown as warnings next to the suggestion
+ * (the model is told not to invent them; this checks that it did not).
+ */
+export function newFacts(given: string, text: string): string[] {
+  const norm = (x: string) => x.toLocaleLowerCase('tr');
+  const src = norm(given);
+  const out = new Set<string>();
+  for (const m of text.match(NUMBERISH) ?? []) if (!src.includes(m)) out.add(m);
+  for (const m of text.match(MONTH) ?? []) if (!src.includes(norm(m))) out.add(m);
+  for (const m of text.match(PROMISE) ?? []) if (!src.includes(norm(m).slice(0, 6))) out.add(m);
+  return Array.from(out).slice(0, 12);
+}
+
+/** Trim the letter suggestion and add warnings (money, facts not in the input). */
+export function cleanLetter(given: string, d: LetterSuggestion): LetterSuggestion & { warnings: string[] } {
+  const s = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  // the template prints the salutation and the closing itself: drop them if repeated inside the body
+  let body = s(d.body, 12_000);
+  const salutation = s(d.salutation, 160);
+  const closing = s(d.closing, 120);
+  if (salutation && body.startsWith(salutation)) body = body.slice(salutation.length).trim();
+  if (closing && body.endsWith(closing)) body = body.slice(0, -closing.length).trim();
+  const out = { title: s(d.title, 200), salutation, body, closing, missing: (Array.isArray(d.missing) ? d.missing : []).map((m) => s(m, 200)).filter(Boolean).slice(0, 20) };
+  const all = [out.title, out.salutation, out.body, out.closing].join('\n').replace(/\[(EKSİK|MISSING):[^\]]*\]/g, '');
+  const warnings: string[] = [];
+  const money = moneyMentions(all).filter((m) => !given.includes(m));
+  if (money.length) warnings.push(`Önerilen metinde vermediğiniz tutar var (${money.join(', ')}). Uygulamadan önce kontrol edin.`);
+  const extra = newFacts(given, all);
+  if (extra.length) warnings.push(`Önerilen metinde verdiğiniz bilgilerde olmayan ifade var: ${extra.join(', ')}. Uygulamadan önce kontrol edin; doğru değilse silin.`);
   return { ...out, warnings };
 }

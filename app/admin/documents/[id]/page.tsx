@@ -6,6 +6,9 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Badge, Details, Flash, field, label, small, fmtDate, fmtDateTime } from '@/components/admin/ops/ui';
 import { aiAction, clientDisplay, docAction, draftPdf, loadDoc, moneyOf, newKey, storedPdf, type ClientLite, type DocDetail, type StoredPdfResult } from '@/lib/documents/client';
 import { BankDecision } from '@/components/admin/documents/BankDecision';
+import { EmailDialog } from '@/components/admin/documents/EmailDialog';
+import { adminPost } from '@/lib/cockpit/client';
+import { documentEmailDefaults, EMAIL_STATUS_LABEL } from '@/lib/documents/mail';
 import { DocSummary } from '@/components/admin/documents/DocSummary';
 import { Group } from '@/components/admin/documents/Group';
 import type { BankChange } from '@/lib/documents/settings';
@@ -41,12 +44,13 @@ type DraftSuggestion = {
   items: Array<{ title: string; description: string; quantity: string; unit: string }>;
   payment: Array<{ label: string; percent: number | null; due: string }>;
 };
+type LetterSuggestion = { title: string; salutation: string; body: string; closing: string; missing: string[]; warnings: string[] };
 type Rewrite = { blockId: string; start: number; end: number; original: string; text: string; changes: string[]; warnings: string[] };
 type Translation = { to: 'tr' | 'en'; title: string; subject: string; deliveryTime: string; blocks: Array<{ id: string; heading: string; body: string }>; items: Array<{ id: string; title: string; description: string; unit: string }>; payment: Array<{ id: string; label: string; due: string }> };
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'Oluşturuldu', duplicated: 'Çoğaltılarak oluşturuldu', from_quote: 'Tekliften proforma oluşturuldu', finalized: 'Kesinleştirildi',
-  revised: 'Revizyona açıldı', archived: 'Arşivlendi', restored: 'Arşivden çıkarıldı', quote_state: 'Teklif durumu işaretlendi',
+  revised: 'Revizyona açıldı', archived: 'Arşivlendi', restored: 'Arşivden çıkarıldı', quote_state: 'Teklif durumu işaretlendi', emailed: 'E-postayla gönderildi (servis kabul etti)',
 };
 
 function recipientFrom(c: ClientLite) {
@@ -70,9 +74,13 @@ function EditorInner() {
   const [finalizeKey, setFinalizeKey] = useState<string | null>(null);
   const [brief, setBrief] = useState('');
   const [suggestion, setSuggestion] = useState<DraftSuggestion | null>(null);
+  const [facts, setFacts] = useState('');
+  const [aiSubject, setAiSubject] = useState<string | null>(null);
+  const [letterSug, setLetterSug] = useState<LetterSuggestion | null>(null);
   const [rewrite, setRewrite] = useState<Rewrite | null>(null);
   const [translation, setTranslation] = useState<Translation | null>(null);
   const [stateNote, setStateNote] = useState('');
+  const [mailing, setMailing] = useState(false);
   const [showAi, setShowAi] = useState(params.get('ai') === '1');
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [openBlocks, setOpenBlocks] = useState<Record<string, boolean>>({});
@@ -110,6 +118,11 @@ function EditorInner() {
     }
   }, [id, uid]);
   useEffect(() => { void load(); }, [load]);
+  // Sending history only: never touches the editor's (possibly unsaved) draft.
+  const refreshEmails = useCallback(async () => {
+    const r = await loadDoc(id);
+    if (r.ok) setData((d) => (d && d.ok ? { ...d, emails: r.emails, mail: r.mail, renders: r.renders, events: r.events } : d));
+  }, [id]);
 
   // Warn before leaving with unsaved changes.
   useEffect(() => {
@@ -236,6 +249,30 @@ function EditorInner() {
     setFlash({ tone: 'ok', text: 'Öneri uygulandı (henüz kaydedilmedi). Eksik bilgileri ve fiyatları siz tamamlayın.' });
   };
 
+  // Antetli yazı / Bilgilendirme: the AI writes only from the subject and the facts typed here.
+  const aiLetter = async () => {
+    setBusy('ai'); setLetterSug(null);
+    const r = await aiAction<{ suggestion: LetterSuggestion }>({ mode: 'letter', kind, locale: c.locale, subject: aiSubject ?? c.subject, facts, recipient: [c.recipient.company, c.recipient.name].filter(Boolean).join(' / '), projectName: c.projectName, requestKey: newKey() });
+    setBusy(null);
+    if (!r.ok || !r.suggestion) return setFlash({ tone: 'bad', text: r.error ?? 'Yapay zekâ önerisi alınamadı. Belgeniz değişmedi; metni elle yazabilirsiniz.' });
+    setLetterSug(r.suggestion);
+  };
+  const applyLetter = (what: 'title' | 'salutation' | 'body' | 'closing' | 'all') => {
+    if (!letterSug) return;
+    const nd: Partial<Draft> = {};
+    const next: Partial<DocContent> = {};
+    if ((what === 'title' || what === 'all') && letterSug.title) { nd.title = letterSug.title; if (!c.subject.trim() || what === 'title') next.subject = aiSubject ?? c.subject; }
+    if ((what === 'salutation' || what === 'all') && letterSug.salutation) next.salutation = letterSug.salutation;
+    if ((what === 'closing' || what === 'all') && letterSug.closing) next.closing = letterSug.closing;
+    if ((what === 'body' || what === 'all') && letterSug.body) {
+      const i = c.blocks.findIndex((b) => b.key === 'body');
+      next.blocks = i >= 0 ? c.blocks.map((b, j) => (j === i ? { ...b, body: letterSug.body } : b)) : [...c.blocks, { id: localId('b'), key: 'body', heading: blockHeading('body', c.locale), body: letterSug.body }];
+    }
+    setDraft({ ...draft, ...nd, content: { ...c, ...next } });
+    setDirty(true);
+    setFlash({ tone: 'ok', text: 'Öneri uygulandı (henüz kaydedilmedi). [EKSİK: …] yazan yerleri siz tamamlayın.' });
+  };
+
   const aiRewrite = async (b: Block, op: 'shorten' | 'formal' | 'simplify') => {
     const el = textRefs.current[b.id];
     const start = el && el.selectionEnd > el.selectionStart ? el.selectionStart : 0;
@@ -278,6 +315,8 @@ function EditorInner() {
         items: c.items.map((i) => { const x = t.items.find((y) => y.id === i.id); return x ? { ...i, title: x.title, description: x.description, unit: x.unit } : i; }),
         payment: c.payment.map((p) => { const x = t.payment.find((y) => y.id === p.id); return x ? { ...p, label: x.label, due: x.due } : p; }),
         closing: c.closing && kind === 'letter' ? (t.to === 'en' ? 'Kind regards,' : 'Saygılarımızla,') : c.closing,
+        // only the default salutation is switched; a written one ("Sayın Yıldız,") stays for the admin to edit
+        salutation: kind === 'letter' && ['Sayın Yetkili,', 'Dear Sir or Madam,'].includes(c.salutation) ? (t.to === 'en' ? 'Dear Sir or Madam,' : 'Sayın Yetkili,') : c.salutation,
       },
     });
     setDirty(true);
@@ -353,6 +392,7 @@ function EditorInner() {
             <button type="button" className="admin-btn" disabled={!!busy} onClick={() => void previewDraft()}>{busy === 'prev' ? 'Hazırlanıyor…' : 'Önizle (taslak PDF)'}</button>
             <button type="button" className="admin-btn" disabled={!!busy} onClick={() => void downloadDraft()}>{busy === 'pdf' ? 'Hazırlanıyor…' : 'PDF indir'}</button>
             <button type="button" className="admin-btn" disabled={!!busy || missing.blocking.length > 0 || dirty} title={dirty ? 'Önce kaydedin' : missing.blocking.length ? 'Eksik bilgiler tamamlanmalı' : ''} onClick={finalize}>{busy === 'finalize' ? 'Kesinleştiriliyor…' : 'Kesinleştir'}</button>
+            {doc.final_version > 0 && <button type="button" className="admin-btn" disabled={!!busy} onClick={() => setMailing(true)} title="Son kesinleşmiş sürümün PDF’i gönderilir; açık revizyon gönderilmez">E-postayla gönder (v{doc.final_version})</button>}
             {doc.final_version > 0 && <a href="#surumler" className="admin-btn">Sürüm geçmişi ({data.versions.length})</a>}
             {kind === 'quote' && doc.final_version > 0 && <button type="button" className="admin-btn" disabled={!!busy} onClick={async () => { const r = await act('from_quote', { requestKey: newKey() }); if (r.ok && r.id) router.push(`/admin/documents/${r.id}`); }}>Proforma oluştur</button>}
             <button type="button" className="admin-btn" disabled={!!busy} onClick={async () => { const r = await act('duplicate', { requestKey: newKey() }); if (r.ok && r.id) router.push(`/admin/documents/${r.id}`); }}>Çoğalt</button>
@@ -362,6 +402,7 @@ function EditorInner() {
           <div className="flex flex-wrap items-center gap-2">
             {doc.final_version > 0 && <button type="button" className="admin-btn admin-btn-primary" disabled={!!busy} onClick={() => void downloadStored()}>{busy === 'pdf' ? 'Hazırlanıyor…' : 'PDF indir'}</button>}
             {doc.final_version > 0 && <button type="button" className="admin-btn" disabled={!!busy} onClick={() => void previewStored()}>{busy === 'prev' ? 'Hazırlanıyor…' : 'Önizle'}</button>}
+            {doc.final_version > 0 && doc.status !== 'archived' && <button type="button" className="admin-btn" disabled={!!busy} onClick={() => setMailing(true)}>E-postayla gönder</button>}
             {doc.final_version > 0 && <a href="#surumler" className="admin-btn">Sürüm geçmişi ({data.versions.length})</a>}
             {doc.status === 'final' && <button type="button" className="admin-btn" disabled={!!busy} onClick={() => void revise()}>Revize et</button>}
             {kind === 'quote' && doc.final_version > 0 && <button type="button" className="admin-btn" disabled={!!busy} onClick={async () => { const r = await act('from_quote', { requestKey: newKey() }); if (r.ok && r.id) router.push(`/admin/documents/${r.id}`); }}>Proforma oluştur</button>}
@@ -428,7 +469,15 @@ function EditorInner() {
                 {def.period && <label className={label}>Rapor dönemi<input className={field} value={c.period} onChange={(e) => set({ period: e.target.value })} placeholder="Ör. 20 Ekim – 3 Kasım 2026" /></label>}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                {kind !== 'letter' && <label className={label}>Proje<input className={field} value={c.projectName} onChange={(e) => set({ projectName: e.target.value })} /></label>}
+                {(data.projects ?? []).length > 0 && (
+                  <label className={label}>Proje kaydı (isteğe bağlı)
+                    <select className={field} value={c.projectId ?? ''} onChange={(e) => { const p = data.projects.find((x) => x.id === e.target.value); set({ projectId: p ? p.id : null, projectName: p ? p.name : c.projectName }); }}>
+                      <option value="">Projeye bağlı değil</option>
+                      {data.projects.filter((p) => (!p.archived_at || p.id === c.projectId) && (!draft.clientId || !p.client_id || p.client_id === draft.clientId)).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </label>
+                )}
+                <label className={label}>Proje adı (PDF’te{kind === 'letter' ? ' sayı/tarih altında' : ''}; isteğe bağlı)<input className={field} value={c.projectName} onChange={(e) => set({ projectName: e.target.value })} /></label>
                 <label className={label}>İlgi / referans (isteğe bağlı)<input className={field} value={c.reference} onChange={(e) => set({ reference: e.target.value })} /></label>
                 {def.subject && <label className={label}>Konu<input className={field} value={c.subject} onChange={(e) => set({ subject: e.target.value })} /></label>}
                 {def.deliveryTime && <label className={label}>Teslim süresi / takvim<input className={field} value={c.deliveryTime} onChange={(e) => set({ deliveryTime: e.target.value })} placeholder="Ör. Sözleşmeden sonra 6 hafta" /></label>}
@@ -557,6 +606,7 @@ function EditorInner() {
             <Group id="blocks" title={kind === 'letter' ? 'Yazı metni' : 'Bölümler'} open={isOpen('blocks')} onToggle={toggle}
               summary={`${c.blocks.filter((b) => b.body.trim()).length} / ${c.blocks.length} bölüm dolu`}>
               <p className="text-[12px] text-subtle">Boş bölümler PDF’e basılmaz. Paragrafları boş satırla ayırın; “- ” ile madde, “## ” ile ara başlık.</p>
+              {kind === 'letter' && <label className={label}>Hitap (metnin üstüne basılır; boşsa basılmaz)<input className={field} value={c.salutation} onChange={(e) => set({ salutation: e.target.value })} placeholder="Sayın Yetkili," /></label>}
               {c.blocks.map((b, i) => {
                 const bo = blockOpen(b);
                 return (
@@ -612,9 +662,29 @@ function EditorInner() {
           {editable && (
             <section className="admin-card grid gap-3 p-4">
               <button type="button" className="flex items-center justify-between text-left" onClick={() => setShowAi(!showAi)} aria-expanded={showAi}>
-                <h2 className="text-[15px] font-extrabold">Yapay zekâ ile taslak</h2><span className="text-subtle">{showAi ? '−' : '+'}</span>
+                <h2 className="text-[15px] font-extrabold">{kind === 'letter' ? 'AI ile kurumsal metin' : 'Yapay zekâ ile taslak'}</h2><span className="text-subtle">{showAi ? '−' : '+'}</span>
               </button>
-              {showAi && <>
+              {showAi && kind === 'letter' && (
+                <div className="grid gap-3">
+                  <p className="text-[12px] text-subtle">Konuyu ve yapılan işi / iletmek istediğiniz bilgiyi yazın. Yapay zekâ yalnızca bu bilgilere dayanır: yapılmamış iş, test sonucu, tarih, garanti veya taahhüt eklememesi istenir; eksik bilgiyi “[EKSİK: …]” ile işaretler. Siz “Uygula” demeden belgeye hiçbir şey yazılmaz. Yapay zekâ olmadan da metni soldan elle yazabilirsiniz.</p>
+                  <label className={label}>Konu<input className={field} value={aiSubject ?? c.subject} onChange={(e) => setAiSubject(e.target.value)} placeholder="Ör. Web sitesi yayın takvimi" /></label>
+                  <label className={label}>Yapılan iş / iletilecek bilgiler<textarea className={field} rows={6} value={facts} onChange={(e) => setFacts(e.target.value)} placeholder="Ör. Ana sayfa ve iletişim sayfası test ortamına alındı. Katalog verileri bekleniyor. Yayın tarihi katalog gelince netleşecek." /></label>
+                  <button type="button" className="admin-btn admin-btn-primary" disabled={!!busy || facts.trim().length < 10} onClick={aiLetter}>{busy === 'ai' ? 'Hazırlanıyor…' : 'AI ile kurumsal metin hazırla'}</button>
+                  {letterSug && (
+                    <div className="grid gap-2 border border-yoca-lime/40 bg-yoca-lime/5 p-3 text-[13px]">
+                      <p className="font-bold">Öneri — uygulamadıkça belgeniz değişmez</p>
+                      {letterSug.warnings.map((w) => <p key={w} className="text-yellow-200">{w}</p>)}
+                      {letterSug.missing.length > 0 && <div><p className="font-semibold text-yellow-100">Eksik bilgiler (siz tamamlayın)</p><ul className="list-disc ps-5 text-yellow-100">{letterSug.missing.map((m) => <li key={m}>{m}</li>)}</ul></div>}
+                      {letterSug.title && <div className="flex items-start justify-between gap-2"><p><span className="text-subtle">Başlık:</span> {letterSug.title}</p><button type="button" className={small} onClick={() => applyLetter('title')}>Uygula</button></div>}
+                      {letterSug.salutation && <div className="flex items-start justify-between gap-2 border-t border-line pt-2"><p><span className="text-subtle">Hitap:</span> {letterSug.salutation}</p><button type="button" className={small} onClick={() => applyLetter('salutation')}>Uygula</button></div>}
+                      {letterSug.body && <div className="grid gap-1 border-t border-line pt-2"><div className="flex items-center justify-between gap-2"><p className="font-semibold">Açıklama (metin)</p><button type="button" className={small} onClick={() => applyLetter('body')}>Uygula</button></div><p className="whitespace-pre-wrap text-muted">{letterSug.body}</p></div>}
+                      {letterSug.closing && <div className="flex items-start justify-between gap-2 border-t border-line pt-2"><p><span className="text-subtle">Kapanış:</span> {letterSug.closing}</p><button type="button" className={small} onClick={() => applyLetter('closing')}>Uygula</button></div>}
+                      <div className="flex gap-2 border-t border-line pt-2"><button type="button" className="admin-btn" onClick={() => applyLetter('all')}>Hepsini uygula</button><button type="button" className="admin-btn" onClick={() => setLetterSug(null)}>Kapat</button></div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {showAi && kind !== 'letter' && <>
                 <p className="text-[12px] text-subtle">Kısa bir açıklama yazın. Öneri yalnızca metin içerir: fiyat, vergi oranı, şirket veya banka bilgisi yazmaz; bilmediği şeyleri “[EKSİK: …]” olarak işaretler. Hiçbir şey siz uygulamadan belgeye girmez.</p>
                 <textarea className={field} rows={5} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="Ör. Bu müşteri için marka kimliği ve iki dilli web sitesi teklifi hazırla. Süre altı hafta, iki revizyon, ödeme yüzde 50 başlangıçta." />
                 <button type="button" className="admin-btn admin-btn-primary" disabled={!!busy || brief.trim().length < 10} onClick={aiDraft}>{busy === 'ai' ? 'Hazırlanıyor…' : 'Taslak öner'}</button>
@@ -632,6 +702,8 @@ function EditorInner() {
                     <div className="flex gap-2 border-t border-line pt-2"><button type="button" className="admin-btn" onClick={() => applySuggestion('all')}>Hepsini uygula</button><button type="button" className="admin-btn" onClick={() => setSuggestion(null)}>Kapat</button></div>
                   </div>
                 )}
+              </>}
+              {showAi && <>
                 <div className="grid gap-2 border-t border-line pt-3">
                   <button type="button" className="admin-btn" disabled={!!busy} onClick={aiTranslate}>{busy === 'tr' ? 'Çevriliyor…' : c.locale === 'tr' ? 'İngilizce çeviri öner' : 'Türkçe çeviri öner'}</button>
                   {translation && <div className="grid gap-2 border border-yoca-lime/40 bg-yoca-lime/5 p-3 text-[13px]">
@@ -668,6 +740,38 @@ function EditorInner() {
             ))}
           </section>
 
+          <section id="gonderimler" className="admin-card grid scroll-mt-20 gap-3 p-4">
+            <h2 className="text-[15px] font-extrabold">E-posta gönderimleri</h2>
+            {!data.mail.tableReady ? <p className="text-[12px] text-yellow-200">E-posta gönderimi için veritabanı güncellemesi (v20) henüz uygulanmadı.</p>
+              : !data.mail.serviceReady ? <p className="text-[12px] text-yellow-200">E-posta servisi bu ortamda kurulu değil; gönderim yapılamaz.</p> : null}
+            <p className="text-[12px] text-subtle">PDF üretmek veya kesinleştirmek e-posta göndermez. “Servis kabul etti” teslim edildi demek değildir; teslimi “Durumu yenile” gösterir.</p>
+            {data.emails.length === 0 ? <p className="text-[13px] text-subtle">Henüz gönderim yok.</p> : data.emails.map((m) => (
+              <div key={m.id} className="grid gap-1 border-t border-line pt-2 text-[12px]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Badge tone={m.status === 'delivered' ? 'ok' : m.status === 'accepted' || m.status === 'sending' || m.status === 'delayed' ? 'info' : m.status === 'unknown' ? 'warn' : 'bad'}>{EMAIL_STATUS_LABEL[m.status] ?? m.status}</Badge>
+                  <span className="text-subtle">{fmtDateTime(m.created_at)} · {m.sent_by}</span>
+                </div>
+                <p className="text-white">Sürüm {m.version} · {m.pdf_name}</p>
+                <p className="text-muted">Alıcı: {m.to_addrs.join(', ')}{m.cc_addrs.length ? ` · CC: ${m.cc_addrs.join(', ')}` : ''}</p>
+                <p className="text-muted">Konu: {m.subject}</p>
+                {m.error && m.status !== 'accepted' ? <p className="text-yellow-200">{m.error}</p> : null}
+                {m.status_checked_at ? <p className="text-subtle">Durum kontrolü: {fmtDateTime(m.status_checked_at)}{m.last_event ? ` (${m.last_event})` : ''}</p> : null}
+                <div className="flex flex-wrap gap-1.5">
+                  <button type="button" className={small} onClick={async () => { const e = await storedPdf({ render: m.render_id }); handleStored(e, false); }}>{m.status === 'failed' ? 'PDF (gönderilmedi)' : 'Gönderilen PDF'}</button>
+                  {m.provider_id && ['accepted', 'delivered', 'delayed', 'bounced', 'complained'].includes(m.status) && (
+                    <button type="button" className={small} disabled={busy === `st-${m.id}`} onClick={async () => {
+                      setBusy(`st-${m.id}`);
+                      const r = await adminPost<{ ok: boolean; status?: string; error?: string }>('/api/admin/documents/email', { action: 'status', emailId: m.id });
+                      setBusy(null);
+                      setFlash(r.ok ? { tone: 'ok', text: `Durum: ${EMAIL_STATUS_LABEL[r.status ?? ''] ?? r.status}` } : { tone: 'warn', text: r.error ?? 'Durum okunamadı.' });
+                      await refreshEmails();
+                    }}>{busy === `st-${m.id}` ? '…' : 'Durumu yenile'}</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </section>
+
           {kind === 'quote' && (
             <section className="admin-card grid gap-3 p-4">
               <h2 className="text-[15px] font-extrabold">Teklif takibi</h2>
@@ -700,6 +804,16 @@ function EditorInner() {
         </aside>
       </div>
 
+      {mailing && (() => {
+        const v = finalV ?? data.versions[0];
+        const vc = v?.content ?? c;
+        const defaults = documentEmailDefaults({ kind, locale: vc.locale, number: doc.number, title: v?.title ?? draft.title, recipient: vc.recipient, signatory: vc.signatory, issuer: data.issuer });
+        return (
+          <EmailDialog docId={doc.id} number={doc.number} versions={data.versions.map((x) => ({ version: x.version, finalized_at: x.finalized_at }))} defaultVersion={doc.final_version}
+            defaults={defaults} from={data.mail.from} replyTo={data.issuer.email}
+            onClose={() => { setMailing(false); void refreshEmails(); }} onSent={() => void refreshEmails()} />
+        );
+      })()}
       {bankAsk && (
         <BankDecision number={doc.number} version={bankAsk.version} changes={bankAsk.changes} busy={!!busy} canRevise={doc.status === 'final' && bankAsk.version === doc.final_version}
           onClose={() => setBankAsk(null)}

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { Badge, Empty, Flash, PageHead, field, label, small, fmtDate } from '@/components/admin/ops/ui';
-import { clientDisplay, docAction, draftPdf, loadDoc, loadList, moneyOf, newKey, storedPdf, type ClientLite, type DocList, type DocListRow } from '@/lib/documents/client';
+import { clientDisplay, docAction, draftPdf, loadDoc, loadList, moneyOf, newKey, storedPdf, type ClientLite, type DocList, type DocListRow, type ProjectLite } from '@/lib/documents/client';
 import { DOC_KINDS, KIND_LABEL, QUOTE_STATE_LABEL, STATUS_LABEL, type DocKind } from '@/lib/documents/model';
 import type { BankChange } from '@/lib/documents/settings';
 import { BankDecision } from '@/components/admin/documents/BankDecision';
@@ -19,25 +19,35 @@ import { BankDecision } from '@/components/admin/documents/BankDecision';
 const STATUS_TONE = { draft: 'warn', final: 'ok', archived: 'muted' } as const;
 const QUOTE_TONE = { sent: 'info', accepted: 'ok', rejected: 'bad', expired: 'muted' } as const;
 
-function NewDocument({ clients, onClose, preset }: { clients: ClientLite[]; onClose: () => void; preset: { clientId?: string; kind?: DocKind } }) {
+function NewDocument({ clients, projects, onClose, preset }: { clients: ClientLite[]; projects: ProjectLite[]; onClose: () => void; preset: { clientId?: string; kind?: DocKind } }) {
   const router = useRouter();
   const [kind, setKind] = useState<DocKind>(preset.kind ?? 'quote');
   const [clientId, setClientId] = useState(preset.clientId ?? '');
+  const [projectId, setProjectId] = useState('');
+  const [company, setCompany] = useState('');
+  const [person, setPerson] = useState('');
   const [locale, setLocale] = useState<'tr' | 'en'>('tr');
   const [start, setStart] = useState<'manual' | 'ai'>('manual');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [key] = useState(newKey);
   const active = clients.filter((c) => !c.archived_at);
+  // Projects of the chosen client (or all active ones when no client is chosen).
+  const projectOptions = projects.filter((p) => !p.archived_at && (!clientId || p.client_id === clientId));
+  const letter = kind === 'letter';
   const create = async () => {
     setBusy(true); setError(null);
-    const r = await docAction<{ id: string }>({ action: 'create', kind, clientId: clientId || null, locale, requestKey: key });
+    const r = await docAction<{ id: string }>({
+      action: 'create', kind, clientId: clientId || null, locale, requestKey: key,
+      projectId: projectId || null,
+      recipient: clientId ? undefined : { company, name: person },
+    });
     setBusy(false);
     if (!r.ok || !r.id) { setError(r.error ?? 'Belge oluşturulamadı.'); return; }
     router.push(`/admin/documents/${r.id}${start === 'ai' ? '?ai=1' : ''}`);
   };
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="new-doc-title" className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
+    <div role="dialog" aria-modal="true" aria-labelledby="new-doc-title" className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4">
       <div className="admin-card grid w-full max-w-lg gap-4 p-5">
         <h2 id="new-doc-title" className="text-lg font-extrabold">Yeni belge</h2>
         <fieldset className="grid gap-2">
@@ -51,21 +61,35 @@ function NewDocument({ clients, onClose, preset }: { clients: ClientLite[]; onCl
             ))}
           </div>
         </fieldset>
-        <label className={label}>Müşteri
-          <select className={field} value={clientId} onChange={(e) => setClientId(e.target.value)}>
+        <label className={label}>Müşteri (isteğe bağlı)
+          <select className={field} value={clientId} onChange={(e) => { setClientId(e.target.value); setProjectId(''); }}>
             <option value="">Müşteriye bağlamadan (alıcıyı elle yazacağım)</option>
             {active.map((c) => <option key={c.id} value={c.id}>{clientDisplay(c)}</option>)}
           </select>
         </label>
+        {!clientId && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className={label}>Alıcı firma / kurum<input className={field} value={company} onChange={(e) => setCompany(e.target.value)} placeholder="isteğe bağlı" /></label>
+            <label className={label}>Alıcı kişi<input className={field} value={person} onChange={(e) => setPerson(e.target.value)} placeholder="isteğe bağlı" /></label>
+          </div>
+        )}
+        {projectOptions.length > 0 && (
+          <label className={label}>Proje (isteğe bağlı)
+            <select className={field} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <option value="">Projeye bağlamadan</option>
+              {projectOptions.map((p) => <option key={p.id} value={p.id}>{p.name}{!clientId && p.client_id ? ` · ${clientDisplay(clients.find((c) => c.id === p.client_id) ?? ({ name: '' } as ClientLite))}` : ''}</option>)}
+            </select>
+          </label>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <label className={label}>Dil
             <select className={field} value={locale} onChange={(e) => setLocale(e.target.value === 'en' ? 'en' : 'tr')}><option value="tr">Türkçe</option><option value="en">English</option></select>
           </label>
           <label className={label}>Başlangıç
-            <select className={field} value={start} onChange={(e) => setStart(e.target.value === 'ai' ? 'ai' : 'manual')}><option value="manual">Elle dolduracağım</option><option value="ai">Yapay zekâ ile ilk taslak</option></select>
+            <select className={field} value={start} onChange={(e) => setStart(e.target.value === 'ai' ? 'ai' : 'manual')}><option value="manual">Elle dolduracağım</option><option value="ai">{letter ? 'AI ile kurumsal metin hazırla' : 'Yapay zekâ ile ilk taslak'}</option></select>
           </label>
         </div>
-        <p className="text-[12px] text-subtle">Şirket bilgileri “Şirket bilgileri” ayarından gelir. Belge numarası türe göre otomatik verilir. Yapay zekâ taslağı yalnızca öneri olarak gelir; fiyat, vergi ve şirket bilgisi yazmaz.</p>
+        <p className="text-[12px] text-subtle">Şirket bilgileri “Şirket bilgileri” ayarından gelir. Belge numarası türe göre otomatik verilir. {letter ? 'Antetli yazıda konu ve yapılan işi siz yazarsınız; yapay zekâ yalnızca bu bilgilere dayanan bir öneri hazırlar, siz “Uygula” demeden belgeye yazılmaz. Boş antet (numarasız) Kurumsal materyaller sekmesindedir.' : 'Yapay zekâ taslağı yalnızca öneri olarak gelir; fiyat, vergi ve şirket bilgisi yazmaz.'}</p>
         {error && <Flash tone="bad" message={error} />}
         <div className="flex justify-end gap-2">
           <button type="button" className="admin-btn" onClick={onClose} disabled={busy}>Vazgeç</button>
@@ -159,6 +183,7 @@ function ListInner() {
         title="Teklifler ve Belgeler"
         sub="Teklif, proforma, antetli yazı, durum raporu ve teslim belgesi. PDF’ler güncel şirket bilgileriyle üretilir; kesinleşmiş sürümlerin önceki PDF’leri saklanır. Bu modül e-fatura veya muhasebe kaydı değildir."
         actions={<>
+          <Link href="/admin/documents/materials" className="admin-btn">Kurumsal materyaller</Link>
           <Link href="/admin/documents/settings" className="admin-btn">Belge ayarları</Link>
           <button type="button" className="admin-btn admin-btn-primary" onClick={() => setCreating(true)}>+ Yeni belge</button>
         </>}
@@ -227,7 +252,7 @@ function ListInner() {
       )}
       <p className="text-[12px] text-subtle">Daha önce indirdiğiniz veya e-postayla gönderdiğiniz PDF dosyaları değişmez. Yeni indirme, o anki şirket bilgileriyle üretilir; belgenin kalemleri, tutarları, alıcısı ve tarihi değişmez.</p>
       {bankAsk && <BankDecision number={bankAsk.doc.number} version={bankAsk.version} changes={bankAsk.changes} busy={busy === bankAsk.doc.id} canRevise={bankAsk.doc.status === 'final'} onClose={() => setBankAsk(null)} onKeep={() => void download(bankAsk.doc, true)} onRevise={() => void reviseForBank(bankAsk.doc)} />}
-      {creating && <NewDocument clients={data.clients} preset={{ clientId: params.get('client') ?? undefined }} onClose={() => setCreating(false)} />}
+      {creating && <NewDocument clients={data.clients} projects={data.projects ?? []} preset={{ clientId: params.get('client') ?? undefined }} onClose={() => setCreating(false)} />}
     </div>
   );
 }

@@ -1,38 +1,43 @@
 /**
- * Yoca — Teklifler ve Belgeler: A4 PDF design layer (server only, @react-pdf/renderer).
+ * Yoca — Teklifler ve Belgeler: A4 PDF template (server only, @react-pdf/renderer).
  *
- * Design reference: "Yoca kurumsal belge tasarım kiti" (5 Kasım 2026). The
- * kit's ReportLab sample generator places fixed sample text at fixed
- * coordinates; it is NOT used here. This file rebuilds the same look on the
- * existing document data with automatic page breaking.
+ * Template "belge-2026-11-f" (Bolt set; "f": short proforma notes inside "Ödeme ve koşullar"): the Yoca corporate set chosen in Bolt
+ * (yoca-kurumsal-claude-teslim, ProformaDocument / LetterDocument / A4Sheet /
+ * DocumentFooter). The Bolt preview is a fixed 794 × 1123 px stage; this file
+ * rebuilds the same look on the real document data with automatic page
+ * breaking. CSS px are converted with 1 px = 0.75 pt.
  *
- *  - Teklif / proforma ("sidebar"): 146 pt dark side band on every page with
- *    the logo, document type and document facts, and the company block that
- *    grows upwards from the bottom; off-white (#F2F2EC) main surface with the
- *    section label, the editable document title as a strong headline, the
- *    detailed line-item table (quantity, unit, discount and tax columns kept),
- *    totals and the lime total block; then "plan ve koşullar".
- *  - Antetli yazı / durum raporu / teslim belgesi ("letterhead"): dark
- *    letterhead with the lime date block on the right, a thin dark + lime band
- *    on the left edge of every page, recipient and document number, headline,
- *    sections, signature and the dark contact block at the bottom.
- *  - Continuation pages: smaller letterhead (letters) / the same side band
- *    (quotes); the brand band and the page number stay on every page.
+ *  - White page, 42 pt side margins. Page 1: the brand motif in the top right
+ *    corner, the original light-background Yoca logo, a small uppercase
+ *    kicker, a large headline with the leaf-green brand dot.
+ *  - Teklif / proforma: subtitle (document title), "Hazırlanan" and
+ *    "Belge / tarih" columns, the lime three-cell table header (repeated on
+ *    every page), item rows with code / title / description, quantity and
+ *    amount, the totals and the large grand total with the dot; the sections;
+ *    then the closing block under a 1.5 pt ink rule: "Ödeme ve koşullar"
+ *    (payment plan, bank details) on the left, the logo (and signatory) on
+ *    the right.
+ *  - Antetli yazı / durum raporu / teslim belgesi: "Alıcı" and "Sayı / tarih"
+ *    columns, an ink rule, "Konu" with the subject, the text, the closing
+ *    ("Saygılarımızla,") and the logo.
+ *  - Every page: the footer under a 1.5 pt ink rule — legal name and company
+ *    details on the left, website and page number on the right. Continuation
+ *    pages get a small logo header instead of the motif.
  *  - Company facts come ONLY from the Issuer passed in (one company profile
  *    revision per PDF). Empty facts print nothing: no label, no separator.
- *  - Logo: the original vector paths of public/brand/yoca-logo-primary.svg
- *    (white word mark with the lime/green modules), with its own viewBox and
- *    aspect ratio — not the PNG from the kit, not redrawn, not recoloured.
- *  - Colours: #0D0E12, #A2FF00, #40C401, #F2F2EC; body text dark; no lime on
- *    small text over light surfaces. The full background prints (no
- *    "economy" white variant by default).
- *  - Type: Manrope (SIL OFL 1.1, lib/documents/fonts/OFL.txt), embedded. The
- *    kit's samples used Noto Sans; every page was re-checked with Manrope.
+ *    Nothing from the Bolt sample data is used.
+ *  - Logo: the original vector paths of public/brand/yoca-logo-light-bg.svg —
+ *    no added subline, not redrawn, not recoloured. Motif:
+ *    public/brand/yoca-motif.svg (copied unchanged from the Bolt package).
+ *  - Colours: ink #0D0E12, lime #A2FF00, leaf #40C401, line #DCE0D8, muted
+ *    #666A65 on white. Uppercase is done with the document locale (tr-TR:
+ *    "İLETİŞİM", not "ILETIŞIM").
+ *  - Type: Manrope (SIL OFL 1.1, lib/documents/fonts/OFL.txt), embedded.
  *
- * Page breaks: a heading never stays without its first paragraph; table rows,
- * the totals block, the payment plan, bank details and the signature never
- * split; the table header repeats on continuation pages; the bottom contact
- * block's height is reserved from the body so the footer never overflows.
+ * Page breaks: a heading never stays without its first lines; table rows, the
+ * totals, the closing block and the signature never split; the table header
+ * repeats on continuation pages; lists that continue on a new page get a
+ * "… — devam" label; the footer's height is reserved from the body.
  */
 
 import fs from 'node:fs';
@@ -46,13 +51,14 @@ import { computeDocument, fmtMoney, fmtPct, fmtQty, parseMoney } from '@/lib/doc
 // @react-pdf/renderer is ESM-only ("import" export condition): it is loaded with
 // a dynamic import, so this module also works where it is compiled as CommonJS.
 type RP = typeof import('@react-pdf/renderer');
+type Sty = import('@react-pdf/types').Style;
 let R = null as unknown as RP;
 async function loadRenderer(): Promise<RP> {
   if (!R) R = await import('@react-pdf/renderer');
   return R;
 }
 
-/* ── Fonts & logo ─────────────────────────────────────────────── */
+/* ── Fonts & brand files ──────────────────────────────────────── */
 
 const FONT_DIR = path.join(process.cwd(), 'lib', 'documents', 'fonts');
 let fontsReady = false;
@@ -79,28 +85,43 @@ function registerFonts() {
   fontsReady = true;
 }
 
+type BrandFile = 'yoca-logo-primary.svg' | 'yoca-logo-light-bg.svg' | 'yoca-motif.svg';
 interface SvgData { viewBox: [number, number, number, number]; paths: Array<{ d: string; fill: string }> }
 const svgCache = new Map<string, SvgData>();
-export function loadBrandSvg(file: 'yoca-logo-primary.svg' | 'yoca-logo-light-bg.svg'): SvgData {
+export function loadBrandSvg(file: BrandFile): SvgData {
   const hit = svgCache.get(file);
   if (hit) return hit;
   const svg = fs.readFileSync(path.join(process.cwd(), 'public', 'brand', file), 'utf8');
   const vb = /viewBox="([\d.\s-]+)"/.exec(svg)?.[1].trim().split(/\s+/).map(Number) as [number, number, number, number] | undefined;
   const paths = Array.from(svg.matchAll(/<path\s+fill="(#[0-9A-Fa-f]{3,8})"\s+d="([^"]+)"\s*\/>/g)).map((m) => ({ fill: m[1], d: m[2] }));
-  if (!vb || vb.length !== 4 || !paths.length) throw new Error(`Yoca logosu okunamadı (public/brand/${file}).`);
+  if (!vb || vb.length !== 4 || !paths.length) throw new Error(`Yoca marka dosyası okunamadı (public/brand/${file}).`);
   const data = { viewBox: vb, paths };
   svgCache.set(file, data);
   return data;
 }
-export const loadLogo = () => loadBrandSvg('yoca-logo-primary.svg');
+export const loadLogo = () => loadBrandSvg('yoca-logo-light-bg.svg');
 
-/** The original white logo for dark surfaces; width given, height from the file's aspect ratio. */
-function Logo({ width }: { width: number }) {
-  const logo = loadBrandSvg('yoca-logo-primary.svg');
-  const [, , w, h] = logo.viewBox;
+function BrandSvg({ file, width }: { file: BrandFile; width: number }) {
+  const s = loadBrandSvg(file);
+  const [, , w, h] = s.viewBox;
+  const height = (width * h) / w;
+  // the wrapper keeps the size inside render callbacks too (an Svg alone gets clipped there)
   return (
-    <R.Svg viewBox={logo.viewBox.join(' ')} style={{ width, height: (width * h) / w }}>
-      {logo.paths.map((p, i) => <R.Path key={i} d={p.d} fill={p.fill} />)}
+    <R.View style={{ width, height, flexShrink: 0 }}>
+      <R.Svg viewBox={s.viewBox.join(' ')} style={{ width, height }}>
+        {s.paths.map((p, i) => <R.Path key={i} d={p.d} fill={p.fill} />)}
+      </R.Svg>
+    </R.View>
+  );
+}
+/** The original logo for light surfaces; width given, height from the file's aspect ratio. */
+const Logo = ({ width }: { width: number }) => <BrandSvg file="yoca-logo-light-bg.svg" width={width} />;
+
+/** The slanted brand dot (Bolt BrandDot: 17.76 × 16.29). */
+function Dot({ size, style }: { size: number; style?: Sty }) {
+  return (
+    <R.Svg viewBox="0 0 17.76 16.29" style={{ width: size, height: (size * 16.29) / 17.76, flexShrink: 0, ...style }}>
+      <R.Path d="M0,16.29L1.37,0H17.76L16.38,16.29Z" fill={C.leaf} />
     </R.Svg>
   );
 }
@@ -109,30 +130,42 @@ function Logo({ width }: { width: number }) {
 
 const L = {
   tr: {
-    brandDocs: 'Yoca / Belgeler', number: 'Belge no', issued: 'Düzenleme', valid: 'Geçerlilik', currency: 'Para birimi', source: 'Kaynak teklif', version: 'Sürüm', period: 'Dönem',
-    scope: 'Kapsam ve yatırım', scopeProforma: 'Kapsam ve tutarlar', plan: 'Plan ve koşullar', planHeadline: 'Plan ve koşullar.',
-    client: 'Müşteri', project: 'Proje', recipient: 'Alıcı', attention: 'İlgili', taxOffice: 'Vergi dairesi', taxNo: 'Vergi no', mersis: 'MERSİS', tradeReg: 'Ticaret sicil', kep: 'KEP',
-    desc: 'Açıklama', qty: 'Miktar', unitPrice: 'Birim fiyat', disc: 'İnd.', tax: 'KDV', amount: 'Tutar',
-    subtotal: 'Ara toplam', discount: 'İndirim', net: 'Net tutar', taxLine: (r: string) => `KDV %${r}`, base: 'matrah', grand: 'Genel toplam', investment: 'Toplam yatırım', taxIncl: 'KDV dahil', taxExcl: 'KDV hariç',
+    number: 'Belge no', valid: 'Geçerlilik', currency: 'Para birimi', source: 'Kaynak teklif', period: 'Dönem',
+    preparedFor: 'Hazırlanan', docDate: 'Belge / tarih', refDate: 'Sayı / tarih', recipient: 'Alıcı', subject: 'Konu',
+    project: 'Proje', attention: 'İlgili', taxOffice: 'Vergi dairesi', taxNo: 'Vergi no', vkn: 'VKN', mersis: 'MERSİS', tradeReg: 'Ticaret sicil', kep: 'KEP', reference: 'İlgi',
+    service: 'Hizmet / kapsam', qty: 'Miktar', amount: 'Tutar', disc: 'İnd.', tax: 'KDV',
+    subtotal: 'Ara toplam', discount: 'İndirim', net: 'Net tutar', taxLine: (r: string) => `KDV %${r}`, base: 'matrah', grand: 'Genel toplam', investment: 'Toplam yatırım',
     missingTotal: (n: number) => `Genel toplam hesaplanmadı: ${n} kalemin fiyatı eksik.`, priceMissing: 'Fiyat eksik',
-    payment: 'Ödeme planı', delivery: 'Takvim', bank: 'Banka bilgileri', holder: 'Hesap sahibi', iban: 'IBAN', swift: 'SWIFT', branch: 'Şube',
-    proforma: 'Proforma • fatura yerine geçmez', proformaSub: 'Ödeme bilgisi içindir; resmî fatura değildir ve tahsilat yapıldığını göstermez.',
-    subject: 'Konu', reference: 'İlgi', contact: 'İletişim',
-    draft: 'Taslak', draftLine: 'Taslak · kesinleşmemiş belge', versionLine: (v: number, at: string) => `Sürüm ${v} · ${at}`, sample: 'Örnek belge / sentetik bilgiler',
-    brandKind: (k: string) => `Yoca / ${k}`, continued: (h: string) => `${h} — devam`,
+    paymentTerms: 'Ödeme ve koşullar', payment: 'Ödeme planı', delivery: 'Takvim', bank: 'Banka bilgileri', holder: 'Hesap sahibi', iban: 'IBAN', swift: 'SWIFT', branch: 'Şube',
+    notInvoice: 'Fatura yerine geçmez', plan: 'Plan ve koşullar',
+    draft: 'Taslak', sample: 'Örnek', versionLine: (v: number, at: string) => `Sürüm ${v}${at ? ` · ${at}` : ''}`, draftLine: 'Taslak · kesinleşmemiş belge',
+    continued: (h: string) => `${h} — devam`,
+    head: {
+      quote: { kicker: 'Fiyat teklifi', h1: 'Teklif', sub: '' },
+      proforma: { kicker: 'Proforma', h1: 'Proforma', sub: '' },
+      letter: { kicker: 'Kurumsal iletişim', h1: 'Birlikte', sub: 'bir sonraki adıma.' },
+      status_report: { kicker: 'Proje durum raporu', h1: 'Rapor', sub: '' },
+      delivery: { kicker: 'Teslim belgesi', h1: 'Teslim', sub: '' },
+    },
   },
   en: {
-    brandDocs: 'Yoca / Documents', number: 'Document no', issued: 'Issued', valid: 'Valid until', currency: 'Currency', source: 'Source quotation', version: 'Version', period: 'Period',
-    scope: 'Scope and investment', scopeProforma: 'Scope and amounts', plan: 'Plan and terms', planHeadline: 'Plan and terms.',
-    client: 'Client', project: 'Project', recipient: 'To', attention: 'Attn.', taxOffice: 'Tax office', taxNo: 'Tax no', mersis: 'MERSIS', tradeReg: 'Trade registry', kep: 'KEP',
-    desc: 'Description', qty: 'Qty', unitPrice: 'Unit price', disc: 'Disc.', tax: 'VAT', amount: 'Amount',
-    subtotal: 'Subtotal', discount: 'Discount', net: 'Net amount', taxLine: (r: string) => `VAT ${r}%`, base: 'base', grand: 'Grand total', investment: 'Total investment', taxIncl: 'incl. VAT', taxExcl: 'excl. VAT',
+    number: 'Document no', valid: 'Valid until', currency: 'Currency', source: 'Source quotation', period: 'Period',
+    preparedFor: 'Prepared for', docDate: 'Document / date', refDate: 'Ref. / date', recipient: 'To', subject: 'Subject',
+    project: 'Project', attention: 'Attn.', taxOffice: 'Tax office', taxNo: 'Tax no', vkn: 'Tax ID', mersis: 'MERSIS', tradeReg: 'Trade registry', kep: 'KEP', reference: 'Reference',
+    service: 'Service / scope', qty: 'Qty', amount: 'Amount', disc: 'Disc.', tax: 'VAT',
+    subtotal: 'Subtotal', discount: 'Discount', net: 'Net amount', taxLine: (r: string) => `VAT ${r}%`, base: 'base', grand: 'Grand total', investment: 'Total investment',
     missingTotal: (n: number) => `Grand total not calculated: ${n} line(s) without a price.`, priceMissing: 'Price missing',
-    payment: 'Payment plan', delivery: 'Timeline', bank: 'Bank details', holder: 'Account holder', iban: 'IBAN', swift: 'SWIFT', branch: 'Branch',
-    proforma: 'Proforma • fatura yerine geçmez (not an invoice)', proformaSub: 'For payment information only; not a tax invoice and not a confirmation of payment.',
-    subject: 'Subject', reference: 'Reference', contact: 'Contact',
-    draft: 'Draft', draftLine: 'Draft · not final', versionLine: (v: number, at: string) => `Version ${v} · ${at}`, sample: 'Sample document / synthetic data',
-    brandKind: (k: string) => `Yoca / ${k}`, continued: (h: string) => `${h} — continued`,
+    paymentTerms: 'Payment and terms', payment: 'Payment plan', delivery: 'Timeline', bank: 'Bank details', holder: 'Account holder', iban: 'IBAN', swift: 'SWIFT', branch: 'Branch',
+    notInvoice: 'Not an invoice (fatura yerine geçmez)', plan: 'Plan and terms',
+    draft: 'Draft', sample: 'Sample', versionLine: (v: number, at: string) => `Version ${v}${at ? ` · ${at}` : ''}`, draftLine: 'Draft · not final',
+    continued: (h: string) => `${h} — continued`,
+    head: {
+      quote: { kicker: 'Price quotation', h1: 'Quote', sub: '' },
+      proforma: { kicker: 'Proforma', h1: 'Proforma', sub: '' },
+      letter: { kicker: 'Corporate communication', h1: 'Together', sub: 'to the next step.' },
+      status_report: { kicker: 'Project status report', h1: 'Report', sub: '' },
+      delivery: { kicker: 'Delivery note', h1: 'Delivery', sub: '' },
+    },
   },
 } as const;
 type Labels = (typeof L)['tr'] | (typeof L)['en'];
@@ -147,30 +180,27 @@ export function fmtDate(iso: string, locale: 'tr' | 'en'): string {
   if (!m) return iso;
   return `${Number(m[3])} ${MONTHS[locale][Number(m[2]) - 1]} ${m[1]}`;
 }
-/** 05.11.2026 (tr) / 05/11/2026 (en) — the kit's compact form for the side band. */
+/** 05.11.2026 (tr) / 05/11/2026 (en), as in the Bolt sample. */
 function fmtShort(iso: string, locale: 'tr' | 'en'): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!m) return iso;
   return locale === 'tr' ? `${m[3]}.${m[2]}.${m[1]}` : `${m[3]}/${m[2]}/${m[1]}`;
 }
 
-/* ── Palette & measures ───────────────────────────────────────── */
+/* ── Palette & measures (Bolt tailwind tokens; px × 0.75 = pt) ── */
 
-const C = {
-  dark: '#0D0E12', lime: '#A2FF00', green: '#40C401', paper: '#F2F2EC',
-  ink: '#0D0E12', soft: '#3A3D38', muted: '#62665F', rule: '#CDD0C6', label: '#397800',
-  onDark: '#FFFFFF', onDarkLabel: '#92968F', onDarkSoft: '#BDC0B8', onDarkKicker: '#B0B3AB', warn: '#8A2E0B',
-};
+const C = { ink: '#0D0E12', lime: '#A2FF00', leaf: '#40C401', mist: '#F3F5EF', line: '#DCE0D8', muted: '#666A65', warn: '#8A2E0B' };
 const W = 595.28;
 const H = 841.89;
-const SIDE = 146;          // side band width (quote / proforma)
-const MAIN_X = 176;        // main column x
-const MAIN_R = 36;         // main column right margin
-const MAIN_W = W - MAIN_X - MAIN_R;
-const LX = 44;             // letter content x
-const LR = 44;             // letter right margin
-const LETTER_W = W - LX - LR;
-const FOOT_LINE = 786;     // footer rule y (from top)
+const PX = 42;                 // px-14
+const CW = W - PX * 2;         // content width
+const TOP1 = 36;               // pt-12: page 1 starts here
+const PT = 84;                 // text area top on every page (continuation header above it)
+const BOTTOM = 30;             // pb-10: footer bottom
+const MOTIF_W = 147;           // 196 px
+const COL_QTY = 90;            // 120 px
+const COL_AMT = 126;           // 168 px
+const GAP = 6;                 // gap-2
 
 let UP_LOCALE = 'tr-TR';
 const up = (text: string) => text.toLocaleUpperCase(UP_LOCALE);
@@ -187,85 +217,41 @@ function lines(text: string, width: number, size: number): number {
 
 // No lineHeight on the page: an inherited lineHeight stops react-pdf from drawing
 // the dynamic page number. Every Text style sets its own size and line height.
+const KICK = 8.25;
 const st = {
-  label: { fontSize: 7.6, fontWeight: 800, letterSpacing: 0.6, color: C.label, lineHeight: 1.3 },
-  labelMuted: { fontSize: 7.6, fontWeight: 800, letterSpacing: 0.6, color: C.muted, lineHeight: 1.3 },
-  headline: { fontSize: 30, fontWeight: 800, color: C.ink, lineHeight: 1.22, letterSpacing: -0.3 },
-  sub: { fontSize: 10, color: C.muted, lineHeight: 1.5 },
-  lead: { fontSize: 11, color: C.ink, lineHeight: 1.55 },
-  body: { fontSize: 10, color: C.ink, lineHeight: 1.55 },
-  small: { fontSize: 8.6, color: C.muted, lineHeight: 1.5 },
-  strong: { fontSize: 10, fontWeight: 800, color: C.ink, lineHeight: 1.45 },
-  li: { flexDirection: 'row', marginBottom: 4 },
-  liMark: { width: 4.5, height: 4.5, backgroundColor: C.green, marginTop: 5.2, marginRight: 9 },
-  liText: { flexGrow: 1, flexBasis: 0, fontSize: 10, color: C.ink, lineHeight: 1.55 },
-  rule: { height: 0.6, backgroundColor: C.rule },
-
-  // side band
-  side: { position: 'absolute', top: 0, left: 0, bottom: 0, width: SIDE, backgroundColor: C.dark },
-  sideKicker: { position: 'absolute', top: 102, left: 23, fontSize: 7.6, fontWeight: 800, color: C.onDarkKicker, letterSpacing: 0.6 },
-  sideBar: { position: 'absolute', top: 151, left: 23, width: 100, height: 3, backgroundColor: C.lime },
-  sideKind: { position: 'absolute', top: 172, left: 23, width: 105, fontSize: 18, fontWeight: 800, color: C.onDark, lineHeight: 1.3 },
-  sideMeta: { position: 'absolute', top: 297, left: 23, width: 108 },
-  sideMetaLabel: { fontSize: 7.6, fontWeight: 800, color: C.onDarkLabel, letterSpacing: 0.6, lineHeight: 1.3 },
-  sideMetaValue: { fontSize: 9.6, color: C.onDark, lineHeight: 1.4, marginTop: 4, marginBottom: 20 },
-  sideDraft: { alignSelf: 'flex-start', backgroundColor: C.lime, color: C.dark, fontSize: 7.4, fontWeight: 800, letterSpacing: 0.8, paddingVertical: 2.5, paddingHorizontal: 6, marginBottom: 18 },
-  sideCompany: { position: 'absolute', left: 23, width: 103, bottom: H - 772 },
-  sideCompanyLine: { fontSize: 7.8, color: C.onDarkSoft, lineHeight: 1.45, marginBottom: 3 },
-  sideCompanyLegal: { fontSize: 7, color: C.onDarkSoft, lineHeight: 1.45, marginBottom: 3 },
+  kicker: { fontSize: KICK, fontWeight: 600, letterSpacing: KICK * 0.18, color: C.muted, lineHeight: 1.3 },
+  h1: { fontSize: 63, fontWeight: 800, letterSpacing: -63 * 0.035, color: C.ink, lineHeight: 1 },
+  body: { fontSize: 10.5, color: C.ink, lineHeight: 1.6 },
+  small: { fontSize: 9.75, color: C.muted, lineHeight: 1.5 },
+  strong: { fontSize: 10.5, fontWeight: 700, color: C.ink, lineHeight: 1.45 },
+  li: { flexDirection: 'row', marginBottom: 5 },
+  liMark: { width: 4.5, height: 4.5, backgroundColor: C.leaf, marginRight: 10 },
+  pill: { flexShrink: 0, backgroundColor: C.lime, color: C.ink, fontSize: 7, fontWeight: 800, letterSpacing: 0.9, lineHeight: 1.3, paddingVertical: 2.5, paddingHorizontal: 6 },
 
   // table
-  thead: { flexDirection: 'row', backgroundColor: C.dark, paddingVertical: 7.5, paddingHorizontal: 10 },
-  th: { fontSize: 7.2, fontWeight: 800, color: C.onDark, letterSpacing: 0.5 },
-  row: { paddingTop: 11, paddingBottom: 11, paddingHorizontal: 10, borderBottomWidth: 0.6, borderBottomColor: C.rule },
-  rowTop: { flexDirection: 'row' },
-  cNo: { width: 17 },
-  cDesc: { flexGrow: 1, flexBasis: 0, paddingRight: 8 },
-  cQty: { width: 54, textAlign: 'right', paddingRight: 6 },
-  cPrice: { width: 64, textAlign: 'right', paddingRight: 6 },
-  cDisc: { width: 32, textAlign: 'right', paddingRight: 6 },
-  cTax: { width: 32, textAlign: 'right', paddingRight: 6 },
-  cAmt: { width: 70, textAlign: 'right' },
-  no: { fontSize: 9, fontWeight: 800, color: C.label, lineHeight: 1.45 },
-  itemTitle: { fontSize: 11, fontWeight: 800, color: C.ink, lineHeight: 1.35 },
-  itemDesc: { fontSize: 9, color: C.muted, lineHeight: 1.55, marginTop: 5, marginLeft: 17, marginRight: 80 },
-  num: { fontSize: 9.2, color: C.ink, lineHeight: 1.45 },
-  fig: { fontSize: 8.8, color: C.soft, lineHeight: 1.4 },
-  amount: { fontSize: 10, fontWeight: 800, color: C.ink, lineHeight: 1.4 },
-  missing: { fontSize: 8, fontWeight: 800, color: C.warn, lineHeight: 1.4 },
+  th: { backgroundColor: C.lime, paddingVertical: 9, paddingHorizontal: 12 },
+  thText: { fontSize: KICK, fontWeight: 700, letterSpacing: KICK * 0.14, color: C.ink, lineHeight: 1.3 },
+  row: { flexDirection: 'row', paddingVertical: 12, borderBottomWidth: 0.75, borderBottomColor: C.line },
+  code: { width: 18, marginRight: 12, fontSize: 9.75, fontWeight: 700, color: C.leaf, lineHeight: 1.3, paddingTop: 1.5 },
+  itemTitle: { fontSize: 13.5, fontWeight: 600, color: C.ink, lineHeight: 1.3 },
+  itemDesc: { fontSize: 9.75, color: C.muted, lineHeight: 15 / 9.75, marginTop: 3 },
+  qty: { fontSize: 10.5, color: C.ink, lineHeight: 1.4 },
+  fig: { fontSize: 7.8, color: C.muted, lineHeight: 1.45 },
+  amount: { fontSize: 12.75, fontWeight: 600, color: C.ink, lineHeight: 1.3, textAlign: 'right' },
+  missing: { fontSize: 8.25, fontWeight: 800, color: C.warn, lineHeight: 1.4 },
 
   // totals
-  tRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 4.5 },
-  tLabel: { fontSize: 9, color: C.muted, lineHeight: 1.4 },
-  tBase: { fontSize: 7.6, color: C.muted, lineHeight: 1.4 },
-  tValue: { fontSize: 10, color: C.ink, lineHeight: 1.4, textAlign: 'right' },
-  grand: { backgroundColor: C.lime, paddingTop: 13, paddingBottom: 14, paddingHorizontal: 14, marginTop: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-  grandLabel: { fontSize: 7.6, fontWeight: 800, color: C.dark, letterSpacing: 0.6, lineHeight: 1.3 },
-  grandValue: { fontSize: 29, fontWeight: 800, color: C.dark, lineHeight: 1.15, marginTop: 8 },
-  grandCur: { fontSize: 10, fontWeight: 800, color: C.dark, lineHeight: 1.3, marginBottom: 6 },
-  warnBox: { borderWidth: 1, borderColor: C.warn, paddingVertical: 10, paddingHorizontal: 12, marginTop: 18 },
+  tRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  tLabel: { fontSize: 10.5, color: C.muted, lineHeight: 1.4 },
+  tBase: { fontSize: 7.8, color: C.muted, lineHeight: 1.4 },
+  tValue: { fontSize: 10.5, color: C.ink, lineHeight: 1.4, textAlign: 'right' },
+  warnBox: { borderWidth: 1, borderColor: C.warn, paddingVertical: 10, paddingHorizontal: 12, marginTop: 12 },
 
   // footer
-  foot: { position: 'absolute', top: FOOT_LINE, height: 0.6, backgroundColor: C.rule },
-  footText: { position: 'absolute', top: FOOT_LINE + 12, fontSize: 6.6, color: C.muted, letterSpacing: 0.4, lineHeight: 1.3 },
-  pageNo: { position: 'absolute', top: FOOT_LINE + 10, width: 80, textAlign: 'right', fontSize: 9, fontWeight: 800, color: C.ink, lineHeight: 1.3 },
-
-  // letterhead
-  edge: { position: 'absolute', top: 0, left: 0, bottom: 0, width: 14, backgroundColor: C.dark },
-  edgeLime: { position: 'absolute', top: 0, left: 14, width: 5, height: 180, backgroundColor: C.lime },
-  head: { marginTop: -92, marginLeft: -(LX - 19), marginRight: -LR, height: 127, backgroundColor: C.dark, flexDirection: 'row' },
-  headLeft: { flexGrow: 1, paddingLeft: LX - 19, paddingTop: 31 },
-  headKicker: { fontSize: 7.6, fontWeight: 800, color: '#BFC3B9', letterSpacing: 0.6, marginTop: 20, lineHeight: 1.3 },
-  dateBlock: { width: 181, backgroundColor: C.lime, paddingLeft: 20, paddingTop: 14 },
-  dateDay: { fontSize: 49, fontWeight: 800, color: C.dark, lineHeight: 1.1 },
-  dateMonth: { fontSize: 10, fontWeight: 800, color: C.dark, lineHeight: 1.3, marginTop: 6 },
-  cHead: { position: 'absolute', top: 0, left: 19, right: 0, height: 56, backgroundColor: C.dark, flexDirection: 'row', alignItems: 'center' },
-  cDate: { position: 'absolute', top: 0, right: 0, width: 120, height: 56, backgroundColor: C.lime, paddingLeft: 14, justifyContent: 'center' },
-  cDateText: { fontSize: 9, fontWeight: 800, color: C.dark, lineHeight: 1.3 },
-  contactBox: { position: 'absolute', left: LX, right: LR, backgroundColor: C.dark, paddingTop: 12, paddingBottom: 13, paddingHorizontal: 13 },
-  contactLabel: { fontSize: 7.6, fontWeight: 800, color: C.lime, letterSpacing: 0.6, lineHeight: 1.3 },
-  contactText: { fontSize: 9, color: C.onDark, lineHeight: 1.5, marginTop: 7 },
-  legalLine: { position: 'absolute', left: LX, right: LR, fontSize: 6.8, color: C.muted, lineHeight: 1.45 },
+  footName: { fontSize: 9.75, fontWeight: 700, color: C.ink, lineHeight: 1.3 },
+  footText: { fontSize: KICK, color: C.muted, lineHeight: 15 / KICK, marginTop: 3 },
+  footWeb: { flexShrink: 0, fontSize: 11.25, fontWeight: 700, color: C.ink, lineHeight: 1.3 },
+  footPage: { fontSize: 9.75, fontWeight: 700, color: C.ink, lineHeight: 1.3 },
 } as const;
 
 /* ── Shared pieces ────────────────────────────────────────────── */
@@ -285,18 +271,21 @@ type PartT = { type: 'p' | 'li' | 'h'; text: string };
  */
 interface LayoutOpts {
   planBreak?: boolean;
+  /** page count of the previous pass (only places the website next to the page number) */
+  pages?: number;
+  /** vertical spacing factor (1 = Bolt spacing); see renderDocumentPdf */
+  k?: number;
   cont?: Set<string>;
   probe?: { planPage: number; ends: Map<string, number>; order: Map<string, Array<{ key: string; li: boolean }>> };
 }
 
-
-function Part({ p, prev, size = 10, last = false }: { p: PartT; prev?: PartT['type']; size?: number; last?: boolean }) {
-  if (p.type === 'h') return <R.Text style={[st.strong, { fontSize: size + 1, marginTop: prev ? 6 : 0, marginBottom: 6 }]}>{p.text}</R.Text>;
-  if (p.type === 'p') return <R.Text style={[st.body, { fontSize: size, marginBottom: last ? 0 : 9, marginTop: prev === 'li' ? 4 : 0 }]} orphans={2} widows={2}>{p.text}</R.Text>;
+function Part({ p, prev, size, lh, gap, last = false }: { p: PartT; prev?: PartT['type']; size: number; lh: number; gap: number; last?: boolean }) {
+  if (p.type === 'h') return <R.Text style={[st.strong, { fontSize: size + 1.5, fontWeight: 600, marginTop: prev ? 4 : 0, marginBottom: 6 }]}>{p.text}</R.Text>;
+  if (p.type === 'p') return <R.Text style={[st.body, { fontSize: size, lineHeight: lh, marginBottom: last ? 0 : gap, marginTop: prev === 'li' ? 4 : 0 }]} orphans={2} widows={2}>{p.text}</R.Text>;
   return (
     <R.View style={[st.li, last ? { marginBottom: 0 } : {}]} wrap={false}>
-      <R.View style={st.liMark} />
-      <R.Text style={[st.liText, { fontSize: size }]}>{p.text}</R.Text>
+      <R.View style={[st.liMark, { marginTop: (size * lh - 4.5) / 2 }]} />
+      <R.Text style={[st.body, { flexGrow: 1, flexBasis: 0, fontSize: size, lineHeight: lh }]}>{p.text}</R.Text>
     </R.View>
   );
 }
@@ -304,25 +293,23 @@ function Part({ p, prev, size = 10, last = false }: { p: PartT; prev?: PartT['ty
 /**
  * A section whose heading always travels with the start of its content.
  *  - Short sections (estimated ≤ 130 pt) move as one piece.
- *  - Longer ones flow: the heading (and `before`, e.g. the "02 / Plan ve
- *    koşullar" opener) asks for at least two lines of the section below it on
- *    the same page (minPresenceAhead) instead of dragging the whole section to
- *    the next page; paragraphs keep at least two lines on each side of a break;
- *    the last two list items stay together, and `after` (the signature) stays
- *    with the last part.
+ *  - Longer ones flow: the heading (and `before`, e.g. the "Plan ve koşullar"
+ *    opener) asks for at least two lines of the section below it on the same
+ *    page (minPresenceAhead) instead of dragging the whole section to the next
+ *    page; paragraphs keep at least two lines on each side of a break; the last
+ *    two list items stay together, and `after` (the closing block) stays with
+ *    the last part.
  * The last part has no bottom margin; `gap` is the only space after a section.
  */
-function Section({ lay = {}, id, heading, body, list, headingStyle, size = 10, gap = 18, before, after, afterGap = 6, width = MAIN_W, continued }: { lay?: LayoutOpts; id?: string; heading: React.ReactNode; body: string; list: boolean; headingStyle?: 'label' | 'strong'; size?: number; gap?: number; before?: React.ReactNode; after?: React.ReactNode; afterGap?: number; width?: number; continued?: string }) {
+function Section({ lay = {}, id, heading, body, list, size = 10.5, lh = 1.6, pgap = 9, gap = 21, before, after, afterGap = 0, width = CW, continued }: { lay?: LayoutOpts; id?: string; heading: React.ReactNode; body: string; list: boolean; size?: number; lh?: number; pgap?: number; gap?: number; before?: React.ReactNode; after?: React.ReactNode; afterGap?: number; width?: number; continued?: string }) {
   const parts = bodyParts(body, list);
   if (!parts.length) return null;
-  const head = headingStyle === 'strong'
-    ? <R.Text style={[st.strong, { fontSize: 11, marginBottom: 7 }]}>{heading}</R.Text>
-    : <R.Text style={[st.label, { marginBottom: 9 }]}>{heading}</R.Text>;
+  const head = <R.Text style={[st.kicker, { marginBottom: 7.5 }]}>{heading}</R.Text>;
   const n = parts.length;
-  const part = (i: number) => <Part key={i} p={parts[i]} prev={parts[i - 1]?.type} size={size} last={i === n - 1} />;
+  const part = (i: number) => <Part key={i} p={parts[i]} prev={parts[i - 1]?.type} size={size} lh={lh} gap={pgap} last={i === n - 1} />;
   const tailAfter = after ? <R.View style={{ marginTop: afterGap }}>{after}</R.View> : null;
-  const lineH = size * 1.55;
-  const est = parts.reduce((h, p) => h + lines(p.text, p.type === 'li' ? width - 14 : width, size) * lineH + (p.type === 'li' ? 4 : 9), 20);
+  const lineH = size * lh;
+  const est = parts.reduce((h, p) => h + lines(p.text, p.type === 'li' ? width - 15 : width, size) * lineH + (p.type === 'li' ? 5 : pgap), 20);
   if (est <= 130) {
     return (
       <R.View wrap={false} style={{ marginBottom: gap }}>
@@ -349,9 +336,7 @@ function Section({ lay = {}, id, heading, body, list, headingStyle, size = 10, g
   const mark = (k: string) => (sid && lay.probe ? <R.View key={`m${k}`} render={({ pageNumber }) => { lay.probe!.ends.set(`${sid}:${k}`, pageNumber); return null; }} /> : null);
   // The label sits in the free band above the page's text area (negative top
   // margin = its own height), so adding it never moves a page break.
-  const contStyle = headingStyle === 'strong'
-    ? [st.strong, { fontSize: 9.5, color: C.muted, marginBottom: 6, marginTop: -(9.5 * 1.45 + 6) }]
-    : [st.labelMuted, { marginBottom: 8, marginTop: -(7.6 * 1.3 + 8) }];
+  const contStyle = [st.kicker, { marginBottom: 8, marginTop: -(KICK * 1.3 + 8) }];
   const label = (k: string) => (sid && lay.cont?.has(`${sid}:${k}`) ? <R.Text style={contStyle}>{continued}</R.Text> : null);
   return (
     <R.View style={{ marginBottom: gap }}>
@@ -368,55 +353,6 @@ function Section({ lay = {}, id, heading, body, list, headingStyle, size = 10, g
       })}
       {hasTail ? <R.View wrap={false}>{label('t')}{idx.slice(n - tailN).map(part)}{tailAfter}</R.View> : null}
       {hasTail ? mark('t') : null}
-    </R.View>
-  );
-}
-
-/** Company lines (only filled fields, never a label for an empty one). */
-function companyLines(issuer: Issuer, t: Labels): { contact: string[]; legal: string[] } {
-  const contact = [issuer.legalName, issuer.address, issuer.phone, issuer.email, issuer.website?.replace(/^https?:\/\//, '')].map((s) => (s ?? '').trim()).filter(Boolean);
-  const legal = [
-    [issuer.taxOffice, issuer.taxNumber].map((s) => (s ?? '').trim()).filter(Boolean).join(' · '),
-    issuer.mersis?.trim() ? `${t.mersis} ${issuer.mersis.trim()}` : '',
-    issuer.tradeRegistry?.trim() ? `${t.tradeReg} ${issuer.tradeRegistry.trim()}` : '',
-    issuer.kep?.trim() ? `${t.kep} ${issuer.kep.trim()}` : '',
-  ].filter(Boolean);
-  return { contact, legal };
-}
-
-function footerNote(input: RenderInput, t: Labels): string {
-  const status = input.mode === 'draft' ? t.draftLine : input.version ? t.versionLine(input.version, input.versionAt ?? '') : '';
-  return up([input.sample ? t.sample : '', status].filter(Boolean).join(' · '));
-}
-
-function Signature({ input, x = 0, ruleWidth = 172 }: { input: RenderInput; x?: number; ruleWidth?: number }) {
-  const c = input.content;
-  const brand = input.issuer.legalName || input.issuer.brand;
-  const sub = [c.signatory.title, c.signatory.name ? brand : ''].filter(Boolean).join(' · ');
-  return (
-    <R.View wrap={false} style={{ marginLeft: x }}>
-      {c.closing ? <R.Text style={[st.body, { marginTop: 8 }]}>{c.closing}</R.Text> : null}
-      {/* room for a handwritten signature above the rule */}
-      <R.View style={{ width: ruleWidth, height: 0.8, backgroundColor: C.ink, marginTop: 26, marginBottom: 10 }} />
-      <R.Text style={[st.strong, { fontSize: 12 }]}>{c.signatory.name || brand}</R.Text>
-      {sub ? <R.Text style={[st.small, { marginTop: 2 }]}>{sub}</R.Text> : null}
-    </R.View>
-  );
-}
-
-function BankBlock({ banks, t }: { banks: BankAccount[]; t: Labels }) {
-  if (!banks.length) return null;
-  return (
-    <R.View wrap={false}>
-      <R.Text style={[st.label, { marginBottom: 9 }]}>{up(t.bank)}</R.Text>
-      {banks.map((a, i) => (
-        <R.View key={a.id} style={{ marginBottom: i === banks.length - 1 ? 0 : 10 }}>
-          <R.Text style={st.strong}>{[a.bank, a.currency].filter(Boolean).join(' · ')}</R.Text>
-          {a.holder ? <R.Text style={st.body}>{t.holder}: {a.holder}</R.Text> : null}
-          <R.Text style={[st.body, { fontWeight: 700 }]}>{t.iban} {formatIban(a.iban)}</R.Text>
-          {[a.swift ? `${t.swift} ${a.swift}` : '', a.branch ? `${t.branch} ${a.branch}` : ''].filter(Boolean).length ? <R.Text style={st.small}>{[a.swift ? `${t.swift} ${a.swift}` : '', a.branch ? `${t.branch} ${a.branch}` : ''].filter(Boolean).join(' · ')}</R.Text> : null}
-        </R.View>
-      ))}
     </R.View>
   );
 }
@@ -439,83 +375,141 @@ export interface RenderInput {
   sample?: boolean;
 }
 
-/* ── Quote / proforma (side band) ─────────────────────────────── */
+/* ── Page frame: motif, continuation header, footer ───────────── */
 
-function SideBand({ input, t }: { input: RenderInput; t: Labels }) {
-  const c = input.content;
-  const def = KIND_DEF[input.kind];
-  const kind = input.kind === 'quote' ? (c.locale === 'tr' ? 'Fiyat teklifi' : 'Price quotation') : 'Proforma';
-  const meta: Array<[string, string]> = [[t.number, input.number], [t.issued, fmtShort(c.issueDate, c.locale)]];
-  if (def.validity && c.validUntil) meta.push([t.valid, fmtShort(c.validUntil, c.locale)]);
-  meta.push([t.currency, c.currency]);
-  if (input.sourceNumber) meta.push([t.source, input.sourceNumber]);
-  const { contact, legal } = companyLines(input.issuer, t);
+const website = (issuer: Issuer) => (issuer.website ?? '').trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+/** Bolt footerDetails: address · phone · e-mail · Vergi dairesi · VKN (+ MERSİS, sicil, KEP when filled). */
+function footerDetails(issuer: Issuer, t: Labels): string {
+  const f = (s?: string) => (s ?? '').trim();
+  return [
+    f(issuer.address), f(issuer.phone), f(issuer.email),
+    f(issuer.taxOffice) ? `${t.taxOffice}: ${f(issuer.taxOffice)}` : '',
+    f(issuer.taxNumber) ? `${t.vkn}: ${f(issuer.taxNumber)}` : '',
+    f(issuer.mersis) ? `${t.mersis}: ${f(issuer.mersis)}` : '',
+    f(issuer.tradeRegistry) ? `${t.tradeReg}: ${f(issuer.tradeRegistry)}` : '',
+    f(issuer.kep) ? `${t.kep}: ${f(issuer.kep)}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+interface FooterPlan { name: string; details: string; web: string; height: number; reserve: number }
+function footerPlan(input: RenderInput, t: Labels, k = 1): FooterPlan {
+  const name = (input.issuer.legalName ?? '').trim();
+  const details = footerDetails(input.issuer, t);
+  const web = website(input.issuer);
+  const rightW = (web ? web.length * 11.25 * 0.62 + 18 : 0) + 7 * 9.75 * 0.6 + 18;
+  const leftW = CW - rightW - 18;
+  const leftH = (name ? 9.75 * 1.3 : 0) + (details ? 3 + lines(details, leftW, KICK) * 15 : 0);
+  const height = 1.5 + 15 + Math.max(leftH, 11.25 * 1.3);
+  return { name, details, web, height, reserve: BOTTOM + height + 14 * k };
+}
+
+function Frame({ input, t, foot, pages = 1 }: { input: RenderInput; t: Labels; foot: FooterPlan; pages?: number }) {
+  // page number width from the previous pass's page count ("01" or "01 / 03")
+  const pageW = (pages > 1 ? 7 : 2) * 9.75 * 0.6;
+  const head = t.head[input.kind];
+  const badge = input.mode === 'draft' ? up(t.draft) : input.sample ? up(t.sample) : '';
+  const pillW = badge ? badge.length * (7 * 0.72 + 0.9) + 12 + 10 : 0;
   return (
     <>
-      <R.View style={st.side} fixed />
-      <R.View style={{ position: 'absolute', top: 35, left: 23 }} fixed><Logo width={101} /></R.View>
-      <R.Text style={st.sideKicker} fixed>{up(t.brandDocs)}</R.Text>
-      <R.View style={st.sideBar} fixed />
-      <R.Text style={st.sideKind} fixed>{kind}</R.Text>
-      <R.View style={st.sideMeta} fixed>
-        {input.mode === 'draft' ? <R.Text style={st.sideDraft}>{up(t.draft)}</R.Text> : null}
-        {meta.map(([k, v]) => (
-          <R.View key={k}>
-            <R.Text style={st.sideMetaLabel}>{up(k)}</R.Text>
-            <R.Text style={st.sideMetaValue}>{v}</R.Text>
-          </R.View>
-        ))}
-      </R.View>
-      {contact.length || legal.length ? (
-        <R.View style={st.sideCompany} fixed>
-          {contact.map((l, i) => <R.Text key={`c${i}`} style={st.sideCompanyLine}>{l}</R.Text>)}
-          {legal.map((l, i) => <R.Text key={`l${i}`} style={st.sideCompanyLegal}>{l}</R.Text>)}
+      {/* every page: small logo header. Page 1 paints its masthead (white) over it,
+          so it only shows on continuation pages; no render callback (react-pdf
+          draws SVG paths and padded text wrongly inside render callbacks). */}
+      <R.View fixed style={{ position: 'absolute', top: TOP1, left: PX }}><Logo width={66} /></R.View>
+      {/* text only from page 2 on (no hidden duplicate text under the page-1 masthead); dynamic
+          texts must be direct children of the page or react-pdf does not draw them */}
+      <R.Text fixed style={[st.kicker, { position: 'absolute', top: TOP1 + 3.5, right: PX + pillW, width: 330, textAlign: 'right' }]} render={({ pageNumber }) => (pageNumber > 1 ? `${up(head.kicker)}  ·  ${input.number}` : '')} />
+      {badge ? <R.View fixed style={{ position: 'absolute', top: TOP1 + 2.5, right: PX, width: pillW - 10, height: 7 * 1.3 + 5, backgroundColor: C.lime }} /> : null}
+      {badge ? <R.Text fixed style={{ position: 'absolute', top: TOP1 + 5, right: PX, width: pillW - 10, textAlign: 'center', fontSize: 7, fontWeight: 800, letterSpacing: 0.9, lineHeight: 1.3, color: C.ink }} render={({ pageNumber }) => (pageNumber > 1 ? badge : '')} /> : null}
+      {/* every page: footer (explicit position: react-pdf sizes absolute boxes with "bottom" unreliably) */}
+      <R.View fixed style={{ position: 'absolute', left: PX, right: PX, top: H - BOTTOM - foot.height, height: foot.height, borderTopWidth: 1.5, borderTopColor: C.ink, paddingTop: 15, flexDirection: 'row', alignItems: 'flex-end' }}>
+        <R.View style={{ flexGrow: 1, flexBasis: 0, paddingRight: 18, alignSelf: 'flex-start' }}>
+          {foot.name ? <R.Text style={st.footName}>{foot.name}</R.Text> : null}
+          {foot.details ? <R.Text style={[st.footText, foot.name ? {} : { marginTop: 0 }]}>{foot.details}</R.Text> : null}
         </R.View>
-      ) : null}
+        <R.View style={{ flexDirection: 'row', alignItems: 'flex-end', marginRight: pageW + 18 }}>
+          {foot.web ? <R.Text style={st.footWeb}>{foot.web}</R.Text> : <R.Text style={st.footWeb}> </R.Text>}
+        </R.View>
+      </R.View>
+      {/* the page number is a direct child of the page: inside another fixed box react-pdf does not draw it */}
+      <R.Text fixed style={[st.footPage, { position: 'absolute', top: H - BOTTOM - 9.75 * 1.3 - 1, right: PX, width: pageW + 8, textAlign: 'right' }]} render={({ pageNumber, totalPages }) => (totalPages > 1 ? `${two(pageNumber)} / ${two(totalPages)}` : two(pageNumber))} />
     </>
   );
 }
 
+/** Page 1 opening: logo, kicker, headline + dot (and the letter's second line). Pulled up to the page-1 top. */
+function Masthead({ input, t, sub, k = 1 }: { input: RenderInput; t: Labels; sub?: string; k?: number }) {
+  const head = t.head[input.kind];
+  const year = /^(\d{4})/.exec(input.content.issueDate)?.[1] ?? '';
+  const kicker = input.kind === 'letter' ? up(head.kicker) : `${up(head.kicker)}${year ? ` / ${year}` : ''}`;
+  return (
+    // White box from the page-1 top: covers the continuation header; the motif
+    // is its absolute child, pinned to the page corner.
+    <R.View wrap={false} style={{ marginTop: TOP1 - PT, marginLeft: -PX, marginRight: -PX, paddingLeft: PX, backgroundColor: '#FFFFFF' }}>
+      <R.View style={{ position: 'absolute', top: -TOP1, right: 0 }}><BrandSvg file="yoca-motif.svg" width={MOTIF_W} /></R.View>
+      <R.View style={{ width: CW - MOTIF_W + PX - 12 }}>
+      <Logo width={100.5} />
+      <R.View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 36 * k }}>
+        <R.Text style={st.kicker}>{kicker}</R.Text>
+        {input.mode === 'draft' || input.sample ? <R.Text style={[st.pill, { marginLeft: 10 }]}>{up(input.mode === 'draft' ? t.draft : t.sample)}</R.Text> : null}
+      </R.View>
+      <R.View style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: -1 }}>
+        <R.Text style={input.kind === 'letter' ? [st.h1, { fontSize: 60, letterSpacing: -60 * 0.035 }] : st.h1}>{head.h1}</R.Text>
+        <Dot size={15} style={{ marginLeft: 9, marginBottom: 0 }} />
+      </R.View>
+      {sub ? <R.Text style={{ fontSize: 18, fontWeight: 800, color: C.ink, lineHeight: 1.25, marginTop: 16 }}>{sub}</R.Text> : null}
+      </R.View>
+    </R.View>
+  );
+}
+
+function Kicker({ children, style }: { children: React.ReactNode; style?: Sty }) {
+  return <R.Text style={[st.kicker, style ?? {}]}>{children}</R.Text>;
+}
+
+/* ── Teklif / proforma ────────────────────────────────────────── */
+
 /**
- * Detailed table, kit look: dark header bar; each row shows the title on a
- * full-width first line with its amount, then quantity / unit price / discount
- * / tax in their own columns under the header labels, then the description.
- * All data columns stay; titles do not get squeezed into a narrow column.
+ * Bolt table: three lime header cells (service / quantity / amount) repeated on
+ * every page; each row shows the code, title and description, the quantity —
+ * with the unit price, discount and line tax when they add information — and
+ * the net amount. No data column is dropped.
  */
-function ItemsTable({ c, t, tail }: { c: DocContent; t: Labels; tail?: React.ReactNode }) {
+function ItemsTable({ c, t, tail, k = 1 }: { c: DocContent; t: Labels; tail?: React.ReactNode; k?: number }) {
   const { totals } = computeDocument(c);
-  const showDisc = c.items.some((i) => i.discountPct.trim() && i.discountPct.trim() !== '0');
   if (!totals.lines.length) return null;
+  const rates = new Set(totals.lines.map((l) => (l.taxRateBp === null ? '' : String(l.taxRateBp))));
+  const lineTax = rates.size > 1;
   return (
     <R.View>
-      <R.View style={st.thead} fixed>
-        <R.Text style={[st.th, { width: 17 }]}>#</R.Text>
-        <R.Text style={[st.th, st.cDesc]}>{up(t.desc)}</R.Text>
-        <R.Text style={[st.th, st.cQty]}>{up(t.qty)}</R.Text>
-        <R.Text style={[st.th, st.cPrice]}>{up(t.unitPrice)}</R.Text>
-        {showDisc ? <R.Text style={[st.th, st.cDisc]}>{up(t.disc)}</R.Text> : null}
-        <R.Text style={[st.th, st.cTax]}>{up(t.tax)}</R.Text>
-        <R.Text style={[st.th, st.cAmt, { paddingRight: 0 }]}>{up(t.amount)} · {c.currency}</R.Text>
+      <R.View style={{ flexDirection: 'row' }} fixed>
+        <R.View style={[st.th, { flexGrow: 1, flexBasis: 0, marginRight: GAP }]}><R.Text style={st.thText}>{up(t.service)}</R.Text></R.View>
+        <R.View style={[st.th, { width: COL_QTY, marginRight: GAP }]}><R.Text style={st.thText}>{up(t.qty)}</R.Text></R.View>
+        <R.View style={[st.th, { width: COL_AMT }]}><R.Text style={[st.thText, { textAlign: 'right' }]}>{up(t.amount)} / {c.currency}</R.Text></R.View>
       </R.View>
       {totals.lines.map((l, li) => {
         const it = c.items[l.index];
+        const disc = it.discountPct.trim() && it.discountPct.trim() !== '0';
+        const qtyOne = (parseMoney(it.quantity) ?? BigInt(0)) === BigInt(100) || it.quantity.trim() === '1';
+        const showUnit = !l.missingPrice && (!qtyOne || disc);
         const row = (
-          <R.View key={l.id} style={st.row} wrap={false}>
-            <R.View style={st.rowTop}>
-              <R.Text style={[st.no, st.cNo]}>{two(l.index + 1)}</R.Text>
-              <R.Text style={[st.itemTitle, { flexGrow: 1, flexBasis: 0, paddingRight: 12 }]}>{it.title || '—'}</R.Text>
-              {l.missingPrice ? <R.Text style={[st.missing, st.cAmt]}>{t.priceMissing}</R.Text> : <R.Text style={[st.amount, st.cAmt]}>{l.net !== null ? fmtMoney(l.net, c.currency, c.locale, false) : ''}</R.Text>}
+          <R.View key={l.id} style={[st.row, { paddingVertical: 12 * k }]} wrap={false}>
+            <R.View style={{ flexGrow: 1, flexBasis: 0, flexDirection: 'row', paddingHorizontal: 12, marginRight: GAP }}>
+              <R.Text style={st.code}>{two(l.index + 1)}</R.Text>
+              <R.View style={{ flexGrow: 1, flexBasis: 0 }}>
+                <R.Text style={st.itemTitle}>{it.title || '—'}</R.Text>
+                {it.description ? <R.Text style={st.itemDesc}>{it.description}</R.Text> : null}
+              </R.View>
             </R.View>
-            <R.View style={[st.rowTop, { marginTop: 5 }]}>
-              <R.View style={st.cNo} />
-              <R.View style={st.cDesc} />
-              <R.Text style={[st.fig, st.cQty]}>{fmtQty(it.quantity, c.locale)}{it.unit ? ` ${it.unit}` : ''}</R.Text>
-              <R.Text style={[st.fig, st.cPrice]}>{l.missingPrice ? '—' : fmtMoney(parseMoney(it.unitPrice) ?? BigInt(0), c.currency, c.locale, false)}</R.Text>
-              {showDisc ? <R.Text style={[st.fig, st.cDisc]}>{it.discountPct && it.discountPct !== '0' ? pctText(it.discountPct, c.locale) : '—'}</R.Text> : null}
-              <R.Text style={[st.fig, st.cTax]}>{l.taxRateBp !== null ? pct(l.taxRateBp, c.locale) : ''}</R.Text>
-              <R.View style={st.cAmt} />
+            <R.View style={{ width: COL_QTY, paddingHorizontal: 12, paddingTop: 2, marginRight: GAP }}>
+              <R.Text style={st.qty}>{fmtQty(it.quantity, c.locale)}{it.unit ? ` ${it.unit}` : ''}</R.Text>
+              {showUnit ? <R.Text style={st.fig}>× {fmtMoney(parseMoney(it.unitPrice) ?? BigInt(0), c.currency, c.locale, false)}</R.Text> : null}
+              {disc ? <R.Text style={st.fig}>{t.disc} {pctText(it.discountPct, c.locale)}</R.Text> : null}
+              {lineTax && l.taxRateBp !== null ? <R.Text style={st.fig}>{t.tax} {pct(l.taxRateBp, c.locale)}</R.Text> : null}
             </R.View>
-            {it.description ? <R.Text style={st.itemDesc}>{it.description}</R.Text> : null}
+            <R.View style={{ width: COL_AMT, paddingHorizontal: 12, paddingTop: 1 }}>
+              {l.missingPrice ? <R.Text style={[st.missing, { textAlign: 'right' }]}>{t.priceMissing}</R.Text> : <R.Text style={st.amount}>{l.net !== null ? fmtMoney(l.net, c.currency, c.locale, false) : ''}</R.Text>}
+            </R.View>
           </R.View>
         );
         // the totals never start a page on their own: they keep the last row with them
@@ -525,30 +519,37 @@ function ItemsTable({ c, t, tail }: { c: DocContent; t: Labels; tail?: React.Rea
   );
 }
 
-function Totals({ input, t }: { input: RenderInput; t: Labels }) {
+function Totals({ input, t, k = 1 }: { input: RenderInput; t: Labels; k?: number }) {
   const c = input.content;
   const { totals } = computeDocument(c);
-  const money = (m: bigint) => fmtMoney(m, c.currency, c.locale, false) + ` ${c.currency}`;
+  const money = (m: bigint) => fmtMoney(m, c.currency, c.locale, false);
   if (!totals.lines.length) return null;
-  const grandLabel = `${up(input.kind === 'quote' ? t.investment : t.grand)}${totals.tax > BigInt(0) ? ` / ${up(t.taxIncl)}` : ''}`;
+  const multi = totals.taxes.length > 1;
+  const grandText = totals.grand !== null ? money(totals.grand) : '';
+  const kicker = `${up(input.kind === 'quote' ? t.investment : t.grand)} / ${c.currency}`;
+  // 56 px (42 pt) like the sample; long amounts get smaller so they stay on one line
+  const room = CW - 24 - kicker.length * KICK * 0.78 - 30;
+  const size = Math.min(42, Math.floor(room / (Math.max(grandText.length, 1) * 0.62)));
   return (
-    <R.View wrap={false} style={{ marginTop: 20 }}>
-      <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.subtotal}</R.Text><R.Text style={st.tValue}>{money(totals.subtotal)}</R.Text></R.View>
-      {totals.discount > BigInt(0) ? <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.discount}</R.Text><R.Text style={st.tValue}>−{money(totals.discount)}</R.Text></R.View> : null}
-      {totals.discount > BigInt(0) ? <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.net}</R.Text><R.Text style={st.tValue}>{money(totals.net)}</R.Text></R.View> : null}
-      {totals.taxes.map((x) => (
-        <R.View key={String(x.rateBp)} style={st.tRow}>
-          <R.Text style={st.tLabel}>{t.taxLine(fmtPct(x.rateBp, c.locale))} <R.Text style={st.tBase}>({t.base} {money(x.base)})</R.Text></R.Text>
-          <R.Text style={st.tValue}>{money(x.tax)}</R.Text>
-        </R.View>
-      ))}
-      {totals.grand !== null ? (
-        <R.View style={st.grand}>
-          <R.View>
-            <R.Text style={st.grandLabel}>{grandLabel}</R.Text>
-            <R.Text style={st.grandValue}>{fmtMoney(totals.grand, c.currency, c.locale, false)}</R.Text>
+    <R.View>
+      <R.View style={{ alignSelf: 'flex-end', width: 222, paddingHorizontal: 12, marginTop: 18 * k }}>
+        <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.subtotal}</R.Text><R.Text style={st.tValue}>{money(totals.subtotal)}</R.Text></R.View>
+        {totals.discount > BigInt(0) ? <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.discount}</R.Text><R.Text style={st.tValue}>−{money(totals.discount)}</R.Text></R.View> : null}
+        {totals.discount > BigInt(0) ? <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.net}</R.Text><R.Text style={st.tValue}>{money(totals.net)}</R.Text></R.View> : null}
+        {totals.taxes.map((x) => (
+          <R.View key={String(x.rateBp)} style={st.tRow}>
+            <R.Text style={st.tLabel}>{t.taxLine(fmtPct(x.rateBp, c.locale))}{multi ? <R.Text style={st.tBase}>{`  ${t.base} ${money(x.base)}`}</R.Text> : null}</R.Text>
+            <R.Text style={st.tValue}>{money(x.tax)}</R.Text>
           </R.View>
-          <R.Text style={st.grandCur}>{c.currency}</R.Text>
+        ))}
+      </R.View>
+      {totals.grand !== null ? (
+        <R.View style={{ marginTop: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', paddingHorizontal: 12 }}>
+          <Kicker style={{ paddingBottom: 9 }}>{kicker}</Kicker>
+          <R.View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <R.Text style={{ fontSize: size, fontWeight: 800, letterSpacing: -size * 0.02, color: C.ink, lineHeight: 1 }}>{grandText}</R.Text>
+            <Dot size={13.5} style={{ marginLeft: 9 }} />
+          </R.View>
         </R.View>
       ) : (
         <R.View style={st.warnBox}><R.Text style={st.missing}>{t.missingTotal(totals.missingPrices.length + totals.errors.length)}</R.Text></R.View>
@@ -557,129 +558,201 @@ function Totals({ input, t }: { input: RenderInput; t: Labels }) {
   );
 }
 
-function PaymentBlock({ c, t }: { c: DocContent; t: Labels }) {
+function PaymentRows({ c }: { c: DocContent }) {
   const { payment } = computeDocument(c);
-  if (!payment.rows.length) return null;
   const money = (m: bigint) => `${fmtMoney(m, c.currency, c.locale, false)} ${c.currency}`;
-  const allPct = payment.rows.every((r) => r.pctBp !== null);
-  const summary = allPct ? payment.rows.map((r) => `${pct(r.pctBp as bigint, c.locale)} ${r.label.toLocaleLowerCase(UP_LOCALE)}`).join(' / ') : '';
   return (
-    <R.View wrap={false}>
-      <R.View style={[st.rule, { marginBottom: 14 }]} />
-      <R.Text style={[st.labelMuted, { marginBottom: 9 }]}>{up(t.payment)}</R.Text>
-      {summary ? <R.Text style={[st.strong, { fontSize: 12, marginBottom: 10 }]}>{summary}</R.Text> : null}
-      {payment.rows.map((r) => (
-        <R.View key={r.id} style={{ flexDirection: 'row', paddingVertical: 5, borderTopWidth: 0.6, borderTopColor: C.rule }}>
+    <>
+      {payment.rows.map((r, i) => (
+        <R.View key={r.id} style={{ flexDirection: 'row', paddingVertical: 4, borderTopWidth: i ? 0.75 : 0, borderTopColor: C.line }}>
           <R.View style={{ flexGrow: 1, flexBasis: 0, paddingRight: 10 }}>
-            <R.Text style={[st.body, { fontWeight: 700 }]}>{r.pctBp !== null ? `${pct(r.pctBp, c.locale)} · ` : ''}{r.label}</R.Text>
-            {r.due ? <R.Text style={st.small}>{r.due}</R.Text> : null}
+            <R.Text style={[st.body, { lineHeight: 1.5 }]}>{r.pctBp !== null ? `${pct(r.pctBp, c.locale)} · ` : ''}{r.label}</R.Text>
+            {r.due ? <R.Text style={[st.small, { fontSize: 8.6 }]}>{r.due}</R.Text> : null}
           </R.View>
-          <R.Text style={[st.amount, { width: 110, textAlign: 'right' }]}>{r.amount !== null ? money(r.amount) : '—'}</R.Text>
+          <R.Text style={[st.body, { lineHeight: 1.5, fontWeight: 600, width: 110, textAlign: 'right' }]}>{r.amount !== null ? money(r.amount) : '—'}</R.Text>
         </R.View>
       ))}
+    </>
+  );
+}
+
+function BankList({ banks, t }: { banks: BankAccount[]; t: Labels }) {
+  return (
+    <>
+      {banks.map((a, i) => (
+        <R.View key={a.id} style={{ marginTop: i ? 9 : 0 }}>
+          <R.Text style={[st.strong, { fontSize: 10 }]}>{[a.bank, a.currency].filter(Boolean).join(' · ')}</R.Text>
+          {a.holder ? <R.Text style={[st.body, { fontSize: 9.75, lineHeight: 1.5 }]}>{t.holder}: {a.holder}</R.Text> : null}
+          <R.Text style={[st.body, { fontSize: 9.75, lineHeight: 1.5, fontWeight: 600 }]}>{t.iban} {formatIban(a.iban)}</R.Text>
+          {a.swift || a.branch ? <R.Text style={[st.small, { fontSize: 8.6 }]}>{[a.swift ? `${t.swift} ${a.swift}` : '', a.branch ? `${t.branch} ${a.branch}` : ''].filter(Boolean).join(' · ')}</R.Text> : null}
+        </R.View>
+      ))}
+    </>
+  );
+}
+
+/** Signatory under the logo: name, then title · company. Nothing when both are empty. */
+function Signatory({ input, align = 'left' }: { input: RenderInput; align?: 'left' | 'right' }) {
+  const c = input.content;
+  if (!c.signatory.name && !c.signatory.title) return null;
+  const brand = input.issuer.legalName || input.issuer.brand;
+  const sub = [c.signatory.title, c.signatory.name ? brand : ''].filter(Boolean).join(' · ');
+  return (
+    <R.View style={{ marginTop: 12 }}>
+      <R.Text style={[st.strong, { textAlign: align }]}>{c.signatory.name || brand}</R.Text>
+      {sub ? <R.Text style={[st.small, { fontSize: 8.6, textAlign: align }]}>{sub}</R.Text> : null}
     </R.View>
   );
 }
 
-/** Internal layout options for the second rendering pass (see renderDocumentPdf). */
+/** Bolt closing: 1.5 pt ink rule; "Ödeme ve koşullar" (payment plan, bank details, closing text) left, logo right. */
+const CLOSING_LEFT = 330;
 
-function SidebarDocument({ input, layout }: { input: RenderInput; layout?: LayoutOpts }) {
+/**
+ * Proforma: a SHORT Notlar text (the free payment / terms text, at most
+ * TERMS_MAX_LINES lines in the closing column) is printed inside "Ödeme ve
+ * koşullar", right under the payment plan, as in the Bolt sample — and not
+ * again as a separate section, so a few sentences never open a "Plan ve
+ * koşullar" page. Longer notes stay a normal section that flows over pages.
+ */
+const TERMS_MAX_LINES = 9;
+function inlineTerms(kind: DocKind, blocks: Block[]): Block | null {
+  if (kind !== 'proforma') return null;
+  const notes = blocks.filter((b) => b.key === 'notes' && b.body.trim());
+  if (notes.length !== 1) return null;
+  const parts = bodyParts(notes[0].body, BLOCK_LABEL.notes.list);
+  const n = parts.reduce((sum, p) => sum + lines(p.text, p.type === 'li' ? CLOSING_LEFT - 15 : CLOSING_LEFT, 10.5), 0) + Math.max(0, parts.length - 1) * 0.6;
+  return n <= TERMS_MAX_LINES ? notes[0] : null;
+}
+
+function CommercialClosing({ input, t, banks, terms, k = 1 }: { input: RenderInput; t: Labels; banks: BankAccount[]; terms?: Block | null; k?: number }) {
+  const c = input.content;
+  const hasPay = computeDocument(c).payment.rows.length > 0;
+  const termParts = terms ? bodyParts(terms.body, BLOCK_LABEL.notes.list) : [];
+  // the section label is printed only when the admin wrote his own (the default "Notlar" adds nothing here)
+  const ownHeading = terms && terms.heading.trim() && terms.heading.trim() !== BLOCK_LABEL.notes[c.locale] ? terms.heading.trim() : '';
+  const hasTerms = termParts.length > 0;
+  return (
+    <R.View wrap={false} style={{ marginTop: 24 * k, borderTopWidth: 1.5, borderTopColor: C.ink, paddingTop: 18 * k, flexDirection: 'row', justifyContent: 'space-between' }}>
+      <R.View style={{ width: CLOSING_LEFT }}>
+        {hasPay || hasTerms ? <Kicker style={{ marginBottom: 6 }}>{up(t.paymentTerms)}</Kicker> : null}
+        {hasPay ? <PaymentRows c={c} /> : null}
+        {hasTerms ? (
+          <R.View style={{ marginTop: hasPay ? 9 : 0 }}>
+            {ownHeading ? <R.Text style={[st.strong, { fontSize: 10, marginBottom: 3 }]}>{ownHeading}</R.Text> : null}
+            {termParts.map((p, i) => <Part key={i} p={p} prev={termParts[i - 1]?.type} size={10.5} lh={1.55} gap={6} last={i === termParts.length - 1} />)}
+          </R.View>
+        ) : null}
+        {banks.length ? <><Kicker style={{ marginTop: hasPay || hasTerms ? 15 : 0, marginBottom: 6 }}>{up(t.bank)}</Kicker><BankList banks={banks} t={t} /></> : null}
+        {c.closing ? <R.Text style={[st.body, { marginTop: hasPay || hasTerms || banks.length ? 15 : 0 }]}>{c.closing}</R.Text> : null}
+      </R.View>
+      <R.View style={{ width: 130, alignItems: 'flex-end' }}>
+        <Logo width={112.5} />
+        <Signatory input={input} align="right" />
+      </R.View>
+    </R.View>
+  );
+}
+
+function InfoCol({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <R.View style={{ flexGrow: 1, flexBasis: 0 }}>
+      <Kicker>{label}</Kicker>
+      <R.View style={{ marginTop: 8 }}>{children}</R.View>
+    </R.View>
+  );
+}
+
+function recipientDetail(c: DocContent, t: Labels, commercial: boolean): string[] {
+  const r = c.recipient;
+  return [
+    r.company && r.name ? r.name : '', r.attention ? `${t.attention}: ${r.attention}` : '', r.address,
+    commercial ? [r.taxOffice ? `${t.taxOffice}: ${r.taxOffice}` : '', r.taxNumber ? `${t.taxNo}: ${r.taxNumber}` : ''].filter(Boolean).join(' · ') : '',
+    commercial ? [r.email, r.phone].filter(Boolean).join(' · ') : '',
+  ].filter(Boolean);
+}
+
+function statusLine(input: RenderInput, t: Labels): string {
+  return input.mode === 'draft' ? t.draftLine : input.version ? t.versionLine(input.version, input.versionAt ?? '') : '';
+}
+
+function CommercialDocument({ input, layout }: { input: RenderInput; layout?: LayoutOpts }) {
   const c = input.content;
   const t = L[c.locale];
   const def = KIND_DEF[input.kind];
   const r = c.recipient;
   const clientName = r.company || r.name;
-  const recipientLines = [
-    r.company && r.name ? r.name : '', r.attention ? `${t.attention}: ${r.attention}` : '', r.address,
-    [r.taxOffice ? `${t.taxOffice}: ${r.taxOffice}` : '', r.taxNumber ? `${t.taxNo}: ${r.taxNumber}` : ''].filter(Boolean).join(' · '),
-    [r.email, r.phone].filter(Boolean).join(' · '),
-  ].filter(Boolean);
   const blocks = c.blocks.filter((b) => b.body.trim());
   const intro = blocks.find((b) => b.key === 'intro');
-  const terms = blocks.filter((b) => b.key !== 'intro');
+  const inline = inlineTerms(input.kind, blocks);
+  const terms = blocks.filter((b) => b.key !== 'intro' && b !== inline);
   const banks = def.bank ? input.bankAccounts.filter((a) => c.bankAccountIds.includes(a.id)) : [];
-  const hasTerms = terms.length > 0 || computeDocument(c).payment.rows.length > 0 || (def.deliveryTime && c.deliveryTime) || banks.length > 0;
-  let n = 0;
-  const idx = () => `${two(++n)} / `;
-  // Terms: blocks in their order; payment plan after the process blocks, then timeline and the rest (kit order).
+  // Sections in the kit order: process blocks, the timeline, then the rest.
   const processKeys = new Set(['scope', 'deliverables', 'assumptions', 'revisions', 'terms']);
   const process = terms.filter((b) => processKeys.has(b.key) || b.key === 'custom');
-  const after = terms.filter((b) => !processKeys.has(b.key) && b.key !== 'custom');
-  const sectionHeading = (b: Block) => idx() + up(b.heading || BLOCK_LABEL[b.key][c.locale]);
+  const rest = terms.filter((b) => !processKeys.has(b.key) && b.key !== 'custom');
+  const name = (b: Block) => b.heading || BLOCK_LABEL[b.key][c.locale];
+  const meta = [
+    def.validity && c.validUntil ? `${t.valid}: ${fmtShort(c.validUntil, c.locale)}` : '',
+    `${t.currency}: ${c.currency}`,
+  ].filter(Boolean).join(' · ');
+  const k = layout?.k ?? 1;
+  const closing = <CommercialClosing input={input} t={t} banks={banks} terms={inline} k={k} />;
+
+  type Item = (before?: React.ReactNode, after?: React.ReactNode) => React.ReactNode;
+  const items: Item[] = [];
+  for (const b of process) items.push((before, x) => <Section key={b.id} lay={layout} id={b.id} heading={up(name(b))} body={b.body} list={BLOCK_LABEL[b.key].list} before={before} after={x} continued={up(t.continued(name(b)))} />);
+  if (def.deliveryTime && c.deliveryTime) items.push((before, x) => <Section key="delivery" lay={layout} id="delivery" heading={up(t.delivery)} body={c.deliveryTime} list={false} before={before} after={x} continued={up(t.continued(t.delivery))} />);
+  for (const b of rest) items.push((before, x) => <Section key={b.id} lay={layout} id={b.id} heading={up(name(b))} body={b.body} list={BLOCK_LABEL[b.key].list} before={before} after={x} continued={up(t.continued(name(b)))} />);
+
+  const opener = (
+    <R.View style={{ borderTopWidth: 0.75, borderTopColor: C.line, paddingTop: 18, marginBottom: 18 }}>
+      <R.Text style={{ fontSize: 16.5, fontWeight: 600, color: C.ink, lineHeight: 1.3 }}>{t.plan}</R.Text>
+    </R.View>
+  );
 
   return (
     <>
-      <SideBand input={input} t={t} />
-      <R.View style={st.foot} fixed />
-      <R.Text style={[st.footText, { left: MAIN_X }]} fixed>{footerNote(input, t)}</R.Text>
-      <R.Text style={[st.pageNo, { right: MAIN_R + 18 }]} fixed render={({ pageNumber, totalPages }) => `${two(pageNumber)} / ${two(totalPages)}`} />
-
-      {/* 01 — scope and amounts */}
+      <Masthead input={input} t={t} k={k} />
       <R.View wrap={false}>
-        <R.Text style={[st.label, { marginBottom: 14 }]}>01 / {up(input.kind === 'quote' ? t.scope : t.scopeProforma)}</R.Text>
-        <R.Text style={st.headline}>{input.title}</R.Text>
-        {clientName || c.projectName ? <R.Text style={[st.sub, { marginTop: 14 }]}>{[clientName, c.projectName].filter(Boolean).join(' / ')}</R.Text> : null}
-        {input.kind === 'proforma' ? (
-          <R.View style={{ marginTop: 18 }}>
-            <R.Text style={[st.strong, { fontSize: 8.6, letterSpacing: 0.4 }]}>{up(t.proforma)}</R.Text>
-            <R.Text style={[st.small, { marginTop: 3 }]}>{t.proformaSub}</R.Text>
-          </R.View>
-        ) : null}
+        <R.Text style={{ fontSize: 15, fontWeight: 600, color: C.ink, lineHeight: 1.35, marginTop: 25 * k }}>{input.title}</R.Text>
+        {input.kind === 'proforma' ? <Kicker style={{ marginTop: 6 }}>{up(t.notInvoice)}</Kicker> : null}
       </R.View>
-      {intro ? <R.Text style={[st.lead, { marginTop: 22 }]}>{bodyParts(intro.body, false).map((p) => p.text).join('\n\n')}</R.Text> : null}
 
-      {recipientLines.length ? (
-        <R.View wrap={false} style={{ marginTop: 22, flexDirection: 'row' }}>
-          <R.View style={{ flexGrow: 1, flexBasis: 0, paddingRight: 14 }}>
-            <R.Text style={[st.labelMuted, { marginBottom: 6 }]}>{up(t.client)}</R.Text>
-            {clientName ? <R.Text style={st.strong}>{clientName}</R.Text> : null}
-            {recipientLines.map((l, i) => <R.Text key={i} style={st.small}>{l}</R.Text>)}
-          </R.View>
+      <R.View wrap={false} style={{ marginTop: 30 * k, flexDirection: 'row' }}>
+        <InfoCol label={up(t.preparedFor)}>
+          <R.Text style={{ fontSize: 16.5, fontWeight: 600, color: C.ink, lineHeight: 1.3 }}>{clientName || '—'}</R.Text>
+          {recipientDetail(c, t, true).map((l, i) => <R.Text key={i} style={[st.small, { fontSize: 10.5, marginTop: i ? 0 : 3 }]}>{l}</R.Text>)}
+        </InfoCol>
+        <R.View style={{ width: 24 }} />
+        <InfoCol label={up(t.docDate)}>
+          <R.Text style={{ fontSize: 10.5, fontWeight: 600, color: C.ink, lineHeight: 1.4 }}>{input.number} / {fmtShort(c.issueDate, c.locale)}</R.Text>
+          <R.Text style={[st.small, { marginTop: 3 }]}>{meta}</R.Text>
+          {input.sourceNumber ? <R.Text style={st.small}>{t.source}: {input.sourceNumber}</R.Text> : null}
+          {c.projectName ? <R.Text style={st.small}>{t.project}: {c.projectName}</R.Text> : null}
+          {c.reference ? <R.Text style={st.small}>{t.reference}: {c.reference}</R.Text> : null}
+          {statusLine(input, t) ? <R.Text style={st.small}>{statusLine(input, t)}</R.Text> : null}
+        </InfoCol>
+      </R.View>
+
+      {intro ? (
+        <R.View style={{ marginTop: 24 * k }}>
+          {bodyParts(intro.body, false).map((p, i, a) => <Part key={i} p={p} prev={a[i - 1]?.type} size={11.25} lh={1.5} gap={9} last={i === a.length - 1} />)}
         </R.View>
       ) : null}
 
-      <R.View style={{ marginTop: 24 }}>
-        <ItemsTable c={c} t={t} tail={<Totals input={input} t={t} />} />
+      <R.View style={{ marginTop: 30 * k }}>
+        <ItemsTable c={c} t={t} k={k} tail={<Totals input={input} t={t} k={k} />} />
       </R.View>
 
-      {/* 02 — plan and terms: the opener travels with the first item, the signature with the last */}
       {(() => {
-        const sig = <Signature input={input} />;
-        // Each item gets the opener ("02 / Plan ve koşullar") if it is the first
-        // one, and the signature if it is the last one.
-        type Item = (before?: React.ReactNode, after?: React.ReactNode) => React.ReactNode;
-        const items: Item[] = [];
-        const boxed = (key: string, node: React.ReactNode): Item => (before, x) => (
-          <R.View key={key} wrap={false} style={{ marginBottom: 18 }}>{before}{node}{x ? <R.View style={{ marginTop: 6 }}>{x}</R.View> : null}</R.View>
-        );
-        for (const b of process) items.push((before, x) => <Section key={b.id} lay={layout} id={b.id} heading={sectionHeading(b)} body={b.body} list={BLOCK_LABEL[b.key].list} before={before} after={x} continued={up(t.continued(b.heading || BLOCK_LABEL[b.key][c.locale]))} />);
-        if (computeDocument(c).payment.rows.length) items.push(boxed('pay', <PaymentBlock c={c} t={t} />));
-        if (def.deliveryTime && c.deliveryTime) items.push((before, x) => <Section key="delivery" lay={layout} id="delivery" heading={up(t.delivery)} body={c.deliveryTime} list={false} before={before} after={x} continued={up(t.continued(t.delivery))} />);
-        for (const b of after) items.push((before, x) => <Section key={b.id} lay={layout} id={b.id} heading={up(b.heading || BLOCK_LABEL[b.key][c.locale])} body={b.body} list={BLOCK_LABEL[b.key].list} before={before} after={x} continued={up(t.continued(b.heading || BLOCK_LABEL[b.key][c.locale]))} />);
-        // Bank details and the signature share the closing row (bank left, signature right).
-        if (banks.length) {
-          items.push((before) => (
-            <R.View key="closing" wrap={false}>
-              {before}
-              <R.View style={{ flexDirection: 'row' }}>
-                <R.View style={{ flexGrow: 1, flexBasis: 0, paddingRight: 14 }}><BankBlock banks={banks} t={t} /></R.View>
-                <R.View style={{ width: 150, marginTop: -8 }}><Signature input={input} ruleWidth={150} /></R.View>
-              </R.View>
-            </R.View>
-          ));
-        }
-        if (!hasTerms || !items.length) return <R.View style={{ marginTop: 20 }}>{sig}</R.View>;
-        const opener = (
-          <>
-            <R.Text style={[st.label, { marginBottom: 14 }]}>02 / {up(t.plan)}</R.Text>
-            <R.Text style={[st.headline, { marginBottom: 20 }]}>{t.planHeadline}</R.Text>
-          </>
-        );
+        // no sections: the closing block follows the totals (on the next page if it does not fit)
+        if (!items.length) return closing;
         const lastI = items.length - 1;
         return (
-          <R.View style={{ marginTop: layout?.planBreak ? 0 : 28 }} break={layout?.planBreak}>
+          <R.View style={{ marginTop: layout?.planBreak ? 0 : 30 * k }} break={layout?.planBreak}>
             {layout?.probe ? <R.View render={({ pageNumber }) => { layout.probe!.planPage = pageNumber; return null; }} /> : null}
-            {items.map((it, i) => it(i === 0 ? opener : undefined, i === lastI && !banks.length ? sig : undefined))}
+            {items.map((it, i) => it(i === 0 ? opener : undefined, i === lastI ? closing : undefined))}
           </R.View>
         );
       })()}
@@ -687,94 +760,70 @@ function SidebarDocument({ input, layout }: { input: RenderInput; layout?: Layou
   );
 }
 
-/* ── Letter / status report / delivery note (letterhead) ──────── */
+/* ── Antetli yazı / durum raporu / teslim belgesi ─────────────── */
 
-/** Height (pt) reserved at the bottom of every page for the contact block + legal line + footer. */
-function letterBottom(issuer: Issuer, t: Labels): { contact: string; legal: string; boxH: number; legalH: number; bottom: number } {
-  const contact = [issuer.phone, issuer.email, issuer.website?.replace(/^https?:\/\//, '')].map((s) => (s ?? '').trim()).filter(Boolean).join('  /  ');
-  const { legal: legalParts } = companyLines(issuer, t);
-  const legal = [issuer.legalName, issuer.address, ...legalParts].map((s) => (s ?? '').trim()).filter(Boolean).join(' · ');
-  const inner = LETTER_W - 26;
-  const boxH = contact ? 12 + 7.6 * 1.3 + 7 + lines(contact, inner, 9) * 9 * 1.5 + 13 : 0;
-  const legalH = legal ? lines(legal, LETTER_W, 6.8) * 6.8 * 1.45 : 0;
-  // footer zone: from the rule (786) to the page bottom = 56; gaps: legal 6, box 8, body 22
-  const bottom = (H - FOOT_LINE) + (legal ? legalH + 6 : 0) + (contact ? boxH + 8 : 0) + 22;
-  return { contact, legal, boxH, legalH, bottom };
+/** Bolt letter closing: "Saygılarımızla," then the logo (and the signatory when filled). */
+function LetterClosing({ input }: { input: RenderInput }) {
+  const c = input.content;
+  return (
+    <R.View wrap={false} style={{ marginTop: 24 }}>
+      {c.closing ? <R.Text style={[st.body, { fontSize: 11.25, lineHeight: 1.5 }]}>{c.closing}</R.Text> : null}
+      <R.View style={{ marginTop: c.closing ? 15 : 0 }}><Logo width={90} /></R.View>
+      <Signatory input={input} />
+    </R.View>
+  );
 }
 
 function LetterDocument({ input, layout }: { input: RenderInput; layout?: LayoutOpts }) {
   const c = input.content;
   const t = L[c.locale];
   const r = c.recipient;
-  const kindLabel = KIND_LABEL[input.kind][c.locale];
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(c.issueDate);
-  const day = m ? m[3] : '';
-  const monthYear = m ? up(`${MONTHS[c.locale][Number(m[2]) - 1]} ${m[1]}`) : '';
-  const bottom = letterBottom(input.issuer, t);
-  const statusLine = input.mode === 'draft' ? t.draftLine : input.version ? t.versionLine(input.version, input.versionAt ?? '') : '';
-  const extra = [r.company && r.name ? r.name : '', r.attention ? `${t.attention}: ${r.attention}` : '', r.address].filter(Boolean);
+  const SIZE = 11.25; // 15 px
+  const LH = 1.5;
+  const PG = 15;      // space-y-5
   const blocks = c.blocks.filter((b) => b.body.trim());
   const numbered = input.kind === 'status_report';
+  const head = t.head[input.kind];
+  const details = [
+    statusLine(input, t),
+    input.kind === 'status_report' && c.period ? `${t.period}: ${c.period}` : '',
+    c.projectName ? `${t.project}: ${c.projectName}` : '',
+    c.reference ? `${t.reference}: ${c.reference}` : '',
+  ].filter(Boolean);
+  const subjectLine = c.subject && c.subject.trim() !== input.title.trim() ? c.subject : '';
+  const sig = <LetterClosing input={input} />;
+  const salutation = c.salutation?.trim() ? <R.Text style={[st.body, { fontSize: SIZE, lineHeight: LH, marginBottom: PG }]}>{c.salutation}</R.Text> : null;
+
   return (
     <>
-      {/* every page: left brand band, small letterhead (covered on page 1), contact block, footer */}
-      <R.View style={st.edge} fixed />
-      <R.View style={st.edgeLime} fixed />
-      <R.View style={st.cHead} fixed>
-        <R.View style={{ paddingLeft: LX - 19 }}><Logo width={78} /></R.View>
-        <R.Text style={[st.headKicker, { marginTop: 0, marginLeft: 16 }]}>{up(t.brandKind(kindLabel))}  ·  {input.number}</R.Text>
-      </R.View>
-      <R.View style={st.cDate} fixed><R.Text style={st.cDateText}>{day} {monthYear}</R.Text></R.View>
-      {bottom.contact ? (
-        <R.View style={[st.contactBox, { top: FOOT_LINE - (bottom.legal ? bottom.legalH + 6 : 0) - 8 - bottom.boxH }]} fixed>
-          <R.Text style={st.contactLabel}>{up(t.contact)}</R.Text>
-          <R.Text style={st.contactText}>{bottom.contact}</R.Text>
-        </R.View>
-      ) : null}
-      {bottom.legal ? <R.Text style={[st.legalLine, { top: FOOT_LINE - 6 - bottom.legalH }]} fixed>{bottom.legal}</R.Text> : null}
-      <R.View style={[st.foot, { left: LX, right: LR }]} fixed />
-      <R.Text style={[st.footText, { left: LX }]} fixed>{footerNote(input, t)}</R.Text>
-      <R.Text style={[st.pageNo, { right: LR }]} fixed render={({ pageNumber, totalPages }) => `${two(pageNumber)} / ${two(totalPages)}`} />
+      <Masthead input={input} t={t} sub={head.sub} />
 
-      {/* page 1 letterhead */}
-      <R.View style={st.head}>
-        <R.View style={st.headLeft}>
-          <Logo width={128} />
-          <R.Text style={st.headKicker}>{up(t.brandKind(kindLabel))}</R.Text>
-        </R.View>
-        <R.View style={st.dateBlock}>
-          <R.Text style={st.dateDay}>{day}</R.Text>
-          <R.Text style={st.dateMonth}>{monthYear}</R.Text>
-        </R.View>
+      <R.View wrap={false} style={{ marginTop: 30, flexDirection: 'row' }}>
+        <InfoCol label={up(t.recipient)}>
+          <R.Text style={{ fontSize: 11.25, fontWeight: 700, color: C.ink, lineHeight: 1.4 }}>{r.company || r.name || '—'}</R.Text>
+          {recipientDetail(c, t, false).map((l, i) => <R.Text key={i} style={[st.small, { marginTop: i ? 0 : 2 }]}>{l}</R.Text>)}
+        </InfoCol>
+        <R.View style={{ width: 24 }} />
+        <InfoCol label={up(t.refDate)}>
+          <R.Text style={{ fontSize: 11.25, fontWeight: 700, color: C.ink, lineHeight: 1.4 }}>{input.number} / {fmtShort(c.issueDate, c.locale)}</R.Text>
+          {details.map((l, i) => <R.Text key={i} style={[st.small, { marginTop: i ? 0 : 2 }]}>{l}</R.Text>)}
+        </InfoCol>
       </R.View>
 
-      <R.View style={{ flexDirection: 'row', marginTop: 24 }} wrap={false}>
-        <R.View style={{ width: 350 - LX, paddingRight: 14 }}>
-          <R.Text style={[st.labelMuted, { marginBottom: 6 }]}>{up(t.recipient)}</R.Text>
-          <R.Text style={[st.strong, { fontSize: 12 }]}>{r.company || r.name || '—'}</R.Text>
-          {extra.map((l, i) => <R.Text key={i} style={st.small}>{l}</R.Text>)}
-        </R.View>
-        <R.View style={{ flexGrow: 1, flexBasis: 0 }}>
-          <R.Text style={[st.labelMuted, { marginBottom: 6 }]}>{up(t.number)} / {input.number}</R.Text>
-          {statusLine ? <R.Text style={st.small}>{statusLine}</R.Text> : null}
-          {input.kind === 'status_report' && c.period ? <R.Text style={st.small}>{t.period}: {c.period}</R.Text> : null}
-          {c.projectName ? <R.Text style={st.small}>{t.project}: {c.projectName}</R.Text> : null}
-          {c.reference ? <R.Text style={st.small}>{t.reference}: {c.reference}</R.Text> : null}
-        </R.View>
+      <R.View wrap={false} style={{ marginTop: 24, borderTopWidth: 1.125, borderTopColor: C.ink, paddingTop: 24, marginBottom: 24 }} minPresenceAhead={60}>
+        <Kicker>{up(t.subject)}</Kicker>
+        <R.Text style={{ fontSize: 16.5, fontWeight: 600, color: C.ink, lineHeight: 1.3, marginTop: 6 }}>{input.title}</R.Text>
+        {subjectLine ? <R.Text style={[st.small, { fontSize: 10.5, marginTop: 4 }]}>{subjectLine}</R.Text> : null}
       </R.View>
 
-      <R.View wrap={false} style={{ marginTop: 22, marginBottom: 18 }}>
-        <R.Text style={[st.headline, { fontSize: 29 }]}>{input.title}</R.Text>
-        {input.kind === 'letter' && c.subject && c.subject.trim() !== input.title.trim() ? <R.Text style={[st.strong, { fontSize: 10.5, marginTop: 14 }]}>{t.subject}: {c.subject}</R.Text> : null}
-      </R.View>
-
+      {blocks.length === 0 ? <>{salutation}{sig}</> : null}
       {blocks.map((b, i) => {
         const last = i === blocks.length - 1;
-        const sig = last ? <Signature input={input} /> : undefined;
+        const after = last ? sig : undefined;
         if (input.kind === 'letter' && b.key === 'body') {
           const parts = bodyParts(b.body, false);
           // Units that must not split: list runs (≤ 3 items together, otherwise
-          // the last two), and the last part together with the signature.
+          // the last two), and the last part together with the closing.
           type Unit = { from: number; to: number; keep: boolean };
           const units: Unit[] = [];
           for (let j = 0; j < parts.length;) {
@@ -786,7 +835,7 @@ function LetterDocument({ input, layout }: { input: RenderInput; layout?: Layout
               j = k + 1;
             } else { units.push({ from: j, to: j, keep: parts[j].type === 'h' }); j += 1; }
           }
-          if (sig && units.length) units[units.length - 1].keep = true;
+          if (after && units.length) units[units.length - 1].keep = true;
           // a sub-heading joins the unit after it when that unit cannot split;
           // otherwise it asks for two lines of it on the same page
           const merged: Unit[] = [];
@@ -795,24 +844,30 @@ function LetterDocument({ input, layout }: { input: RenderInput; layout?: Layout
             const next = units[u + 1];
             const lead = parts[cur.to];
             // a paragraph that introduces a list ("…duyuyoruz:") stays with the list
-            const intro = lead.type === 'p' && /:\s*$/.test(lead.text) && next && parts[next.from].type === 'li' && lines(lead.text, LETTER_W, 10.5) <= 3;
-            if ((parts[cur.from].type === 'h' && next && (next.keep || u + 1 === units.length - 1)) || intro) { merged.push({ from: cur.from, to: next.to, keep: true }); u += 1; } else merged.push(cur);
+            const introLine = lead.type === 'p' && /:\s*$/.test(lead.text) && next && parts[next.from].type === 'li' && lines(lead.text, CW, SIZE) <= 3;
+            if ((parts[cur.from].type === 'h' && next && (next.keep || u + 1 === units.length - 1)) || introLine) { merged.push({ from: cur.from, to: next.to, keep: true }); u += 1; } else merged.push(cur);
           }
           const out: React.ReactNode[] = merged.map((u, m) => {
             const isLast = m === merged.length - 1;
-            const nodes = parts.slice(u.from, u.to + 1).map((p, q) => <Part key={q} p={p} prev={parts[u.from + q - 1]?.type} size={10.5} last={u.from + q === parts.length - 1} />);
-            if (u.keep || (isLast && sig)) {
+            const nodes = parts.slice(u.from, u.to + 1).map((p, q) => <Part key={q} p={p} prev={parts[u.from + q - 1]?.type} size={SIZE} lh={LH} gap={PG} last={u.from + q === parts.length - 1} />);
+            // the salutation stays with the first lines of the text
+            const sal = m === 0 && i === 0 ? salutation : null;
+            if (u.keep || (isLast && after) || sal) {
               const solo = parts[u.from].type === 'h' && u.from === u.to;
-              return <R.View key={m} wrap={false} minPresenceAhead={solo ? 10.5 * 1.55 * 2 + 6 : undefined}>{nodes}{isLast && sig ? <R.View style={{ marginTop: 6 }}>{sig}</R.View> : null}</R.View>;
+              return <R.View key={m} wrap={u.keep || (isLast && after) ? false : true} minPresenceAhead={solo ? SIZE * LH * 2 + 6 : undefined}>{sal}{nodes}{isLast && after ? after : null}</R.View>;
             }
             return <React.Fragment key={m}>{nodes}</React.Fragment>;
           });
           return <R.View key={b.id}>{out}</R.View>;
         }
-        const heading = `${numbered ? `${two(i + 1)} / ` : ''}${b.heading || BLOCK_LABEL[b.key][c.locale]}`;
-        return <Section key={b.id} lay={layout} id={b.id} heading={heading} body={b.body} list={BLOCK_LABEL[b.key].list} headingStyle="strong" size={10.5} gap={18} after={sig} width={LETTER_W} continued={t.continued(b.heading || BLOCK_LABEL[b.key][c.locale])} />;
+        const heading = `${numbered ? `${two(i + 1)} / ` : ''}${up(b.heading || BLOCK_LABEL[b.key][c.locale])}`;
+        return (
+          <React.Fragment key={b.id}>
+            {i === 0 ? salutation : null}
+            <Section lay={layout} id={b.id} heading={heading} body={b.body} list={BLOCK_LABEL[b.key].list} size={SIZE} lh={LH} pgap={PG - 3} gap={21} after={after} continued={up(t.continued(b.heading || BLOCK_LABEL[b.key][c.locale]))} />
+          </React.Fragment>
+        );
       })}
-      {blocks.length ? null : <Signature input={input} />}
     </>
   );
 }
@@ -823,15 +878,15 @@ export function DocumentPdf(input: RenderInput & { layout?: LayoutOpts }) {
   const c = input.content;
   UP_LOCALE = c.locale === 'tr' ? 'tr-TR' : 'en-GB';
   const t = L[c.locale];
-  const sidebar = input.kind === 'quote' || input.kind === 'proforma';
-  const pageStyle = sidebar
-    ? { fontFamily: 'Manrope', fontSize: 10, color: C.ink, backgroundColor: C.paper, paddingTop: 40, paddingBottom: H - FOOT_LINE + 22, paddingLeft: MAIN_X, paddingRight: MAIN_R }
-    : { fontFamily: 'Manrope', fontSize: 10, color: C.ink, backgroundColor: C.paper, paddingTop: 92, paddingBottom: letterBottom(input.issuer, t).bottom, paddingLeft: LX, paddingRight: LR };
+  const commercial = input.kind === 'quote' || input.kind === 'proforma';
+  const foot = footerPlan(input, t, input.layout?.k ?? 1);
+  const pageStyle = { fontFamily: 'Manrope', fontSize: 10.5, color: C.ink, backgroundColor: '#FFFFFF', paddingTop: PT, paddingBottom: foot.reserve, paddingLeft: PX, paddingRight: PX };
   const issuer = input.issuer;
   return (
     <R.Document title={`${input.number} — ${input.title}`} author={issuer.legalName || issuer.brand} creator="Yoca yönetim paneli" producer="Yoca" language={c.locale === 'tr' ? 'tr-TR' : 'en-GB'}>
       <R.Page size="A4" style={pageStyle}>
-        {sidebar ? <SidebarDocument input={input} layout={input.layout} /> : <LetterDocument input={input} layout={input.layout} />}
+        <Frame input={input} t={t} foot={foot} pages={input.layout?.pages} />
+        {commercial ? <CommercialDocument input={input} layout={input.layout} /> : <LetterDocument input={input} layout={input.layout} />}
       </R.Page>
     </R.Document>
   );
@@ -870,33 +925,156 @@ const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && Array.f
 async function renderLaidOut(input: RenderInput, base: Omit<LayoutOpts, 'cont' | 'probe'>): Promise<RenderedPdf & { planPage: number }> {
   let cont = new Set<string>();
   let last: RenderedPdf & { planPage: number } = { buffer: Buffer.alloc(0), pages: 0, planPage: 0 };
-  for (let pass = 0; pass < 4; pass += 1) {
+  let pages = 1;
+  for (let pass = 0; pass < 5; pass += 1) {
     const probe = newProbe();
-    const r = await renderOnce(input, { ...base, cont, probe });
+    const r = await renderOnce(input, { ...base, cont, probe, pages });
     last = { ...r, planPage: probe.planPage };
     const next = continuations(probe);
-    if (sameSet(next, cont)) return last;
+    const samePages = (r.pages > 1) === (pages > 1);
+    if (sameSet(next, cont) && samePages) return last;
     cont = next;
+    pages = r.pages;
   }
   return last;
 }
 
-/**
- * Teklif / proforma: when "Plan ve koşullar" starts on one page and runs onto
- * the last page (which then often holds only a short remainder), a second
- * layout starts the plan on a fresh page — as in the design kit — and is kept
- * only if the document does not get longer. No page limit is applied.
- * Every layout adds "… — devam" labels where a list continues on a new page.
- */
-export async function renderDocumentPdf(input: RenderInput): Promise<RenderedPdf> {
-  await loadRenderer();
-  registerFonts();
-  const first = await renderLaidOut(input, {});
-  if (input.kind !== 'quote' && input.kind !== 'proforma') return { buffer: first.buffer, pages: first.pages };
+/** Teklif / proforma at one spacing: when "Plan ve koşullar" starts on one page and runs onto the last page, a second layout starts it on a fresh page and is kept if the document does not get longer. */
+async function commercialLayout(input: RenderInput, k: number): Promise<RenderedPdf> {
+  const first = await renderLaidOut(input, { k });
   if (!first.planPage || first.planPage >= first.pages) return { buffer: first.buffer, pages: first.pages };
-  const second = await renderLaidOut(input, { planBreak: true });
+  const second = await renderLaidOut(input, { planBreak: true, k });
   const pick = second.pages <= first.pages ? second : first;
   return { buffer: pick.buffer, pages: pick.pages };
 }
 
-export { MAIN_W, SIDE };
+/**
+ * Every layout adds "… — devam" labels where a list continues on a new page.
+ * Teklif / proforma: a short document that runs onto a second page only by a
+ * little (e.g. three items, totals and the payment terms) is laid out again
+ * with the vertical gaps reduced evenly (×0.85, then ×0.7: margins between
+ * blocks, row padding, the gap above the footer; never the type sizes or the
+ * content). The tighter layout is used only if the whole document then fits on
+ * ONE page; longer documents keep the normal spacing and flow over as many
+ * pages as they need. No page limit is applied.
+ */
+export async function renderDocumentPdf(input: RenderInput): Promise<RenderedPdf> {
+  await loadRenderer();
+  registerFonts();
+  if (input.kind !== 'quote' && input.kind !== 'proforma') {
+    const r = await renderLaidOut(input, {});
+    return { buffer: r.buffer, pages: r.pages };
+  }
+  const normal = await commercialLayout(input, 1);
+  if (normal.pages !== 2) return normal;
+  for (const k of [0.85, 0.7]) {
+    const tight = await commercialLayout(input, k);
+    if (tight.pages === 1) return tight;
+  }
+  return normal;
+}
+
+export { CW as CONTENT_W };
+
+/* ── Kurumsal materyaller: blank letterhead and business card ─── */
+
+/**
+ * Blank letterhead (Boş antet): A4 with the motif, the original logo and the
+ * footer from the CURRENT company profile. No number, no document record.
+ */
+export async function renderLetterheadPdf(issuer: Issuer, locale: 'tr' | 'en' = 'tr'): Promise<RenderedPdf> {
+  await loadRenderer();
+  registerFonts();
+  UP_LOCALE = locale === 'tr' ? 'tr-TR' : 'en-GB';
+  const t = L[locale];
+  const foot = footerPlan({ kind: 'letter', number: '', title: '', content: { locale } as DocContent, issuer, bankAccounts: [], mode: 'final' }, t);
+  const doc = (
+    <R.Document title={locale === 'tr' ? 'Yoca antetli kâğıt' : 'Yoca letterhead'} author={issuer.legalName || issuer.brand} creator="Yoca yönetim paneli" producer="Yoca" language={locale === 'tr' ? 'tr-TR' : 'en-GB'}>
+      <R.Page size="A4" style={{ fontFamily: 'Manrope', backgroundColor: '#FFFFFF', paddingTop: TOP1, paddingLeft: PX, paddingRight: PX, paddingBottom: foot.reserve }}>
+        <R.View fixed style={{ position: 'absolute', top: 0, right: 0 }}><BrandSvg file="yoca-motif.svg" width={MOTIF_W} /></R.View>
+        <Logo width={100.5} />
+        <R.View fixed style={{ position: 'absolute', left: PX, right: PX, top: H - BOTTOM - foot.height, height: foot.height, borderTopWidth: 1.5, borderTopColor: C.ink, paddingTop: 15, flexDirection: 'row', alignItems: 'flex-end' }}>
+          <R.View style={{ flexGrow: 1, flexBasis: 0, paddingRight: 18, alignSelf: 'flex-start' }}>
+            {foot.name ? <R.Text style={st.footName}>{foot.name}</R.Text> : null}
+            {foot.details ? <R.Text style={[st.footText, foot.name ? {} : { marginTop: 0 }]}>{foot.details}</R.Text> : null}
+          </R.View>
+          {foot.web ? <R.Text style={st.footWeb}>{foot.web}</R.Text> : null}
+        </R.View>
+      </R.Page>
+    </R.Document>
+  );
+  const buffer = await R.renderToBuffer(doc);
+  return { buffer, pages: 1 };
+}
+
+export interface CardInput { name: string; title: string; phone: string; email: string; website: string; bleedMm: number }
+
+const MM = 72 / 25.4;
+
+/**
+ * Business card (Kartvizit), Bolt BusinessCard (321 × 208 px = 85 × 55 mm):
+ * page 1 front (ink, white logo, motif, "Fikirden etkiye."), page 2 back
+ * (mist, logo, name, title, phone, e-mail, website, dot). Trim 85 × 55 mm;
+ * the bleed (taşma payı) is given separately; crop marks sit outside the
+ * bleed. RGB — a proof for the print shop, not a print-ready file.
+ */
+export async function renderBusinessCardPdf(card: CardInput): Promise<RenderedPdf> {
+  await loadRenderer();
+  registerFonts();
+  UP_LOCALE = 'tr-TR';
+  const TW = 85 * MM;
+  const TH = 55 * MM;
+  const B = Math.max(0, Math.min(5, card.bleedMm)) * MM;
+  const SLUG = 8 * MM;            // room for the crop marks
+  const PW = TW + 2 * (B + SLUG);
+  const PH = TH + 2 * (B + SLUG);
+  const X0 = SLUG + B;            // trim box origin on the page
+  const Y0 = SLUG + B;
+  const s = TW / 321;             // Bolt px → pt on the card
+  const marks = (
+    <>
+      {[[X0, 0], [X0 + TW, 0], [X0, PH - SLUG + 2 * MM], [X0 + TW, PH - SLUG + 2 * MM]].map(([x, y], i) => <R.View key={`v${i}`} style={{ position: 'absolute', left: x - 0.25, top: y, width: 0.5, height: SLUG - 2 * MM, backgroundColor: '#000000' }} />)}
+      {[[0, Y0], [0, Y0 + TH], [PW - SLUG + 2 * MM, Y0], [PW - SLUG + 2 * MM, Y0 + TH]].map(([x, y], i) => <R.View key={`h${i}`} style={{ position: 'absolute', left: x, top: y - 0.25, width: SLUG - 2 * MM, height: 0.5, backgroundColor: '#000000' }} />)}
+    </>
+  );
+  const slugText = (side: string) => (
+    <R.Text style={{ position: 'absolute', left: X0, top: PH - SLUG + 2.2 * MM, fontFamily: 'Manrope', fontSize: 4.5, color: '#666A65', lineHeight: 1.2 }}>
+      {`Yoca kartvizit · ${side} · kesim 85 × 55 mm · taşma payı ${card.bleedMm} mm · RGB prova (matbaa onayı gerekir)`}
+    </R.Text>
+  );
+  const nameSize = card.name.length > 24 ? 15 : 19.5;
+  const contact = [card.phone.trim(), card.email.trim()].filter(Boolean);
+  const doc = (
+    <R.Document title={`Kartvizit — ${card.name}`} author="Yoca" creator="Yoca yönetim paneli" producer="Yoca">
+      {/* front */}
+      <R.Page size={[PW, PH]} style={{ backgroundColor: '#FFFFFF' }}>
+        <R.View style={{ position: 'absolute', left: SLUG, top: SLUG, width: TW + 2 * B, height: TH + 2 * B, backgroundColor: C.ink, overflow: 'hidden' }}>
+          <R.View style={{ position: 'absolute', left: B + 36 * s, top: B + 36 * s }}><BrandSvg file="yoca-logo-primary.svg" width={156 * s} /></R.View>
+          <R.View style={{ position: 'absolute', right: B - 24 * s, bottom: B - 56 * s }}><BrandSvg file="yoca-motif.svg" width={150 * s} /></R.View>
+          <R.Text style={{ position: 'absolute', left: B + 36 * s, bottom: B + 36 * s, fontFamily: 'Manrope', fontSize: 10 * s, fontWeight: 700, letterSpacing: 10 * s * 0.2, color: '#FFFFFF', lineHeight: 1.2 }}>{up('Fikirden etkiye.')}</R.Text>
+        </R.View>
+        {marks}
+        {slugText('ön yüz')}
+      </R.Page>
+      {/* back */}
+      <R.Page size={[PW, PH]} style={{ backgroundColor: '#FFFFFF' }}>
+        <R.View style={{ position: 'absolute', left: SLUG, top: SLUG, width: TW + 2 * B, height: TH + 2 * B, backgroundColor: C.mist, overflow: 'hidden' }}>
+          <R.View style={{ position: 'absolute', left: B + 36 * s, top: B + 30 * s }}><Logo width={96 * s} /></R.View>
+          <R.View style={{ position: 'absolute', left: B + 36 * s, top: B + 76 * s, width: TW - 72 * s }}>
+            <R.Text style={{ fontFamily: 'Manrope', fontSize: nameSize, fontWeight: 800, letterSpacing: -nameSize * 0.01, color: C.ink, lineHeight: 1.15 }}>{card.name}</R.Text>
+            {card.title.trim() ? <R.Text style={{ fontFamily: 'Manrope', fontSize: 12 * s, color: C.muted, lineHeight: 1.3, marginTop: 3 }}>{card.title}</R.Text> : null}
+          </R.View>
+          <R.View style={{ position: 'absolute', left: B + 36 * s, bottom: B + 30 * s, width: TW - 100 * s }}>
+            {contact.map((l) => <R.Text key={l} style={{ fontFamily: 'Manrope', fontSize: 11 * s, color: C.ink, lineHeight: 1.35 }}>{l}</R.Text>)}
+            {card.website.trim() ? <R.Text style={{ fontFamily: 'Manrope', fontSize: 13 * s, fontWeight: 700, color: C.ink, lineHeight: 1.35 }}>{card.website.trim().replace(/^https?:\/\//, '').replace(/\/$/, '')}</R.Text> : null}
+          </R.View>
+          <R.View style={{ position: 'absolute', right: B + 36 * s, bottom: B + 40 * s }}><Dot size={16 * s} /></R.View>
+        </R.View>
+        {marks}
+        {slugText('arka yüz')}
+      </R.Page>
+    </R.Document>
+  );
+  const buffer = await R.renderToBuffer(doc);
+  return { buffer, pages: 2 };
+}
