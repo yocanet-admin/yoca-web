@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
 import { addDaysIso, blockHeading, KIND_DEF, localId, newContent, sanitizeContent, todayIso, DOC_KINDS, QUOTE_STATES, type DocContent, type DocKind } from '@/lib/documents/model';
-import { docSettingsProblems, sanitizeDocSettings } from '@/lib/documents/settings';
-import { assess, buildSnapshot, contentOf, dbError, DOC_BUCKET, istanbulStamp, loadContext, recipientFromClient, selectedBanks, TEMPLATE_VERSION, type DocRow, type VersionRow } from '@/lib/documents/server';
+import { bankChanges, docSettingsProblems, sanitizeDocSettings } from '@/lib/documents/settings';
+import { assess, buildSnapshot, contentOf, dbError, DOC_BUCKET, istanbulStamp, loadContext, recipientFromClient, selectedBanks, TEMPLATE_VERSION, type DocRow, type VersionRow, type VersionSnapshot } from '@/lib/documents/server';
 import { renderDocumentPdf } from '@/lib/documents/pdf';
 
 /**
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
   if (!isUuid(id)) return json({ ok: false, error: 'bad id' }, 400);
   const [doc, versions, events, clients, renders] = await Promise.all([
     client.from('doc_documents').select('*').eq('id', id).maybeSingle(),
-    client.from('doc_versions').select('id, document_id, version, number, title, total, currency, pdf_path, pdf_bytes, pdf_pages, pdf_sha256, finalized_by, finalized_at').eq('document_id', id).order('version', { ascending: false }),
+    client.from('doc_versions').select('id, document_id, version, number, title, total, currency, pdf_path, pdf_bytes, pdf_pages, pdf_sha256, finalized_by, finalized_at, snapshot').eq('document_id', id).order('version', { ascending: false }),
     client.from('doc_events').select('id, kind, detail, actor, at').eq('document_id', id).order('at', { ascending: false }).limit(100),
     client.from('clients').select(CLIENT_COLUMNS).order('name'),
     client.from('doc_renders').select('id, version, company_revision, template_version, reason, issuer, pdf_pages, pdf_bytes, generated_by, generated_at').eq('document_id', id).order('generated_at', { ascending: false }),
@@ -76,7 +76,14 @@ export async function GET(request: NextRequest) {
   return json({
     ok: true,
     document: { ...row, content },
-    versions: (versions.data ?? []) as VersionRow[],
+    // Versions with the frozen content (for the read-only summary) and the bank check.
+    versions: ((versions.data ?? []) as Array<VersionRow & { snapshot: VersionSnapshot }>).map(({ snapshot, ...v }) => ({
+      ...v,
+      content: sanitizeContent(snapshot?.content, row.kind),
+      bankAccounts: snapshot?.bankAccounts ?? [],
+      sourceNumber: snapshot?.source_number ?? null,
+      bankChanges: bankChanges(snapshot?.bankAccounts ?? [], ctx.settings.bankAccounts),
+    })),
     events: events.data ?? [],
     clients: clients.data ?? [],
     source: source.data ?? null,
@@ -88,7 +95,7 @@ export async function GET(request: NextRequest) {
     templateVersion: TEMPLATE_VERSION,
     // bigint columns may arrive as text depending on the driver: always numbers here.
     renders: ((renders.data ?? []) as Array<Record<string, unknown>>).map((r) => ({ ...r, company_revision: Number(r.company_revision), version: Number(r.version) })),
-    assessment: assess(row.kind, content, ctx.issuer, row.title),
+    assessment: assess(row.kind, content, ctx.issuer, row.title, ctx.settings),
   });
 }
 
@@ -223,7 +230,7 @@ export async function POST(request: NextRequest) {
     if (row.status !== 'draft') return json({ ok: false, error: 'Belge taslak değil; kesinleştirilecek değişiklik yok.' }, 409);
     if (body.expectedUpdatedAt !== row.updated_at) return json({ ok: false, error: 'Kaydedilmemiş ya da başka bir oturumda değişmiş belge kesinleştirilemez. Önce kaydedin.', conflict: true }, 409);
     const content = contentOf(row);
-    const { missing, total } = assess(row.kind, content, ctx.issuer, row.title);
+    const { missing, total } = assess(row.kind, content, ctx.issuer, row.title, ctx.settings);
     if (missing.blocking.length) return json({ ok: false, error: 'Belge kesinleştirilemedi: eksik bilgi var.', missing }, 422);
     if (!ctx.revision) return json({ ok: false, error: 'Şirket profili revizyonları yok: supabase/upgrade-v19-documents.sql çalıştırılmalı.' }, 503);
     let sourceNumber: string | null = null;

@@ -123,3 +123,35 @@ export function issuerFrom(company: CompanyInfo): Issuer {
     kep: company.kep,
   };
 }
+
+/* ── Bank details of a finalized version vs. the current settings ── */
+
+export interface BankChange {
+  id: string;
+  /** "changed": the account still exists but its details differ; "removed": no longer in the settings. */
+  change: 'changed' | 'removed';
+  old: Pick<BankAccount, 'bank' | 'holder' | 'iban' | 'currency' | 'swift' | 'branch'>;
+  now: Pick<BankAccount, 'bank' | 'holder' | 'iban' | 'currency' | 'swift' | 'branch'> | null;
+  /** Field names that differ (Turkish labels). */
+  fields: string[];
+}
+
+const BANK_FIELDS: Array<[keyof BankAccount, string]> = [['iban', 'IBAN'], ['bank', 'banka'], ['holder', 'hesap sahibi'], ['currency', 'para birimi'], ['swift', 'SWIFT'], ['branch', 'şube']];
+const pickBank = (a: BankAccount) => ({ bank: a.bank, holder: a.holder, iban: a.iban, currency: a.currency, swift: a.swift, branch: a.branch });
+const norm = (k: keyof BankAccount, v: string) => (k === 'iban' ? (v ?? '').replace(/\s+/g, '').toUpperCase() : (v ?? '').trim());
+
+/**
+ * Accounts printed on a finalized version compared with the same accounts in
+ * the current settings (matched by id). Only the accounts the version used are
+ * compared: an account added to the settings later is never suggested here.
+ */
+export function bankChanges(printed: BankAccount[], current: BankAccount[]): BankChange[] {
+  const out: BankChange[] = [];
+  for (const a of printed ?? []) {
+    const cur = current.find((x) => x.id === a.id);
+    if (!cur) { out.push({ id: a.id, change: 'removed', old: pickBank(a), now: null, fields: [] }); continue; }
+    const fields = BANK_FIELDS.filter(([k]) => norm(k, a[k]) !== norm(k, cur[k])).map(([, l]) => l);
+    if (fields.length) out.push({ id: a.id, change: 'changed', old: pickBank(a), now: pickBank(cur), fields });
+  }
+  return out;
+}

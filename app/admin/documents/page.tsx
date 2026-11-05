@@ -6,6 +6,8 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { Badge, Empty, Flash, PageHead, field, label, small, fmtDate } from '@/components/admin/ops/ui';
 import { clientDisplay, docAction, draftPdf, loadDoc, loadList, moneyOf, newKey, storedPdf, type ClientLite, type DocList, type DocListRow } from '@/lib/documents/client';
 import { DOC_KINDS, KIND_LABEL, QUOTE_STATE_LABEL, STATUS_LABEL, type DocKind } from '@/lib/documents/model';
+import type { BankChange } from '@/lib/documents/settings';
+import { BankDecision } from '@/components/admin/documents/BankDecision';
 
 /**
  * Yoca — Teklifler ve Belgeler: list.
@@ -85,6 +87,7 @@ function ListInner() {
   const [creating, setCreating] = useState(params.get('new') === '1');
   const [flash, setFlash] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [bankAsk, setBankAsk] = useState<{ doc: DocListRow; version: number; changes: BankChange[] } | null>(null);
 
   const load = () => loadList().then(setData);
   useEffect(() => { void load(); }, []);
@@ -123,15 +126,28 @@ function ListInner() {
     setFlash(r.ok ? { tone: 'ok', text: d.status === 'archived' ? `${d.number} arşivden çıkarıldı.` : `${d.number} arşivlendi.` } : { tone: 'bad', text: r.error ?? 'İşlem yapılamadı.' });
     void load();
   };
-  const download = async (d: DocListRow) => {
+  const download = async (d: DocListRow, keepBank = false) => {
     setBusy(d.id);
-    let err: string | null;
+    let err: string | null = null;
     if (d.status === 'draft' || d.final_version < 1) {
       const full = await loadDoc(d.id);
       err = full.ok ? await draftPdf(d.id, full.document.title, full.document.content, true, d.number) : full.error ?? 'Belge okunamadı.';
-    } else err = await storedPdf({ id: d.id });
+    } else {
+      const r = await storedPdf({ id: d.id }, { keepBank });
+      if (r && 'error' in r) err = r.error;
+      else if (r && 'bankDecision' in r) setBankAsk({ doc: d, ...r.bankDecision });
+      else setBankAsk(null);
+    }
     setBusy(null);
     if (err) setFlash({ tone: 'bad', text: err });
+  };
+  // "Güncel banka bilgileriyle revize et": the document becomes a draft again; the editor opens.
+  const reviseForBank = async (d: DocListRow) => {
+    setBusy(d.id);
+    const r = await docAction({ action: 'revise', id: d.id, expectedUpdatedAt: d.updated_at });
+    setBusy(null);
+    if (!r.ok) return setFlash({ tone: 'bad', text: r.error ?? 'Revizyon açılamadı.' });
+    router.push(`/admin/documents/${d.id}?bank=1`);
   };
 
   if (!data) return <p className="text-[13px] text-subtle">Yükleniyor…</p>;
@@ -210,6 +226,7 @@ function ListInner() {
         </div>
       )}
       <p className="text-[12px] text-subtle">Daha önce indirdiğiniz veya e-postayla gönderdiğiniz PDF dosyaları değişmez. Yeni indirme, o anki şirket bilgileriyle üretilir; belgenin kalemleri, tutarları, alıcısı ve tarihi değişmez.</p>
+      {bankAsk && <BankDecision number={bankAsk.doc.number} version={bankAsk.version} changes={bankAsk.changes} busy={busy === bankAsk.doc.id} canRevise={bankAsk.doc.status === 'final'} onClose={() => setBankAsk(null)} onKeep={() => void download(bankAsk.doc, true)} onRevise={() => void reviseForBank(bankAsk.doc)} />}
       {creating && <NewDocument clients={data.clients} preset={{ clientId: params.get('client') ?? undefined }} onClose={() => setCreating(false)} />}
     </div>
   );

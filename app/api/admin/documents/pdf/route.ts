@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
 import { sanitizeContent } from '@/lib/documents/model';
-import { contentOf, currentRenderOf, dbError, DOC_BUCKET, loadContext, safeFileName, selectedBanks, type DocRow } from '@/lib/documents/server';
+import { contentOf, currentRenderOf, dbError, DOC_BUCKET, loadContext, safeFileName, selectedBanks, type DocRow, type VersionSnapshot } from '@/lib/documents/server';
+import { bankChanges } from '@/lib/documents/settings';
 import { renderDocumentPdf } from '@/lib/documents/pdf';
 
 /**
@@ -13,6 +14,11 @@ import { renderDocumentPdf } from '@/lib/documents/pdf';
  * GET ?id=…[&version=n] → { url } normal download of a finalized version:
  *   frozen content of that version + the CURRENT company profile. Rendered
  *   once per company profile revision and template version and kept.
+ *   If the bank details printed on that version differ from the current
+ *   settings, nothing is rendered unless `bank=keep` is given: the answer is
+ *   { needsBankDecision, bankChanges } so the panel can say so plainly and
+ *   offer "Güncel banka bilgileriyle revize et". The IBAN is never swapped
+ *   silently and an unselected account is never added.
  * GET ?render=<uuid> → { url } a past PDF exactly as it was produced
  *   ("Geçmiş PDF"); never regenerated.
  * Files people already downloaded or sent are not changed by any of this.
@@ -54,9 +60,16 @@ export async function GET(request: NextRequest) {
   const version = sp.get('version') ? Number(sp.get('version')) : doc.final_version;
   if (!Number.isInteger(version) || version < 1 || version > doc.final_version) return fail(404, 'Kesinleşmiş sürüm yok; taslak PDF’i önizlemeden indirin.');
   const ctx = await loadContext(client);
+  if (sp.get('bank') !== 'keep') {
+    const v = await client.from('doc_versions').select('snapshot').eq('document_id', id).eq('version', version).maybeSingle();
+    if (v.error) { const e = dbError(v.error); return fail(e.status, e.error); }
+    const changes = bankChanges(((v.data as { snapshot: VersionSnapshot } | null)?.snapshot?.bankAccounts) ?? [], ctx.settings.bankAccounts);
+    if (changes.length) return NextResponse.json({ ok: true, needsBankDecision: true, version, bankChanges: changes });
+  }
   const out = await currentRenderOf(client, id, version, ctx, getSupabaseServiceRole());
   if (!out.ok) return fail(out.status, out.error);
-  const signed = await client.storage.from(DOC_BUCKET).createSignedUrl(out.path, 300, { download: `${safeFileName(doc.number)}-v${version}.pdf` });
+  // inline=1: for "Önizle" (opens in a tab); otherwise a download with a readable file name.
+  const signed = await client.storage.from(DOC_BUCKET).createSignedUrl(out.path, 300, sp.get('inline') === '1' ? undefined : { download: `${safeFileName(doc.number)}-v${version}.pdf` });
   if (signed.error || !signed.data?.signedUrl) return fail(502, 'İndirme bağlantısı oluşturulamadı.');
   return NextResponse.json({ ok: true, url: signed.data.signedUrl, expiresIn: 300, companyRevision: ctx.revision, reused: out.reused });
 }

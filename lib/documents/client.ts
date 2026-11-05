@@ -3,7 +3,7 @@
 import { getAdminClient } from '@/lib/adminClient';
 import { adminApi, adminPost } from '@/lib/cockpit/client';
 import type { DocContent, DocKind, DocStatus, Issuer, MissingReport, QuoteState } from '@/lib/documents/model';
-import type { DocSettings } from '@/lib/documents/settings';
+import type { BankAccount, BankChange, DocSettings } from '@/lib/documents/settings';
 import type { CompanyInfo } from '@/lib/companyInfo';
 import { fmtMoney, parseMoney } from '@/lib/documents/calc';
 
@@ -28,7 +28,11 @@ export interface DocListRow {
 
 export interface DocFull extends Omit<DocListRow, 'issue_date' | 'valid_until' | 'recipient_company' | 'recipient_name'> { content: DocContent }
 
-export interface VersionRow { id: string; version: number; number: string; title: string; total: string | null; currency: string; pdf_pages: number; pdf_bytes: number; finalized_by: string | null; finalized_at: string }
+export interface VersionRow {
+  id: string; version: number; number: string; title: string; total: string | null; currency: string; pdf_pages: number; pdf_bytes: number; finalized_by: string | null; finalized_at: string;
+  /** Frozen content of this version, the bank accounts printed on it and how they differ from today's settings. */
+  content: DocContent; bankAccounts: BankAccount[]; sourceNumber: string | null; bankChanges: BankChange[];
+}
 export interface RenderRow { id: string; version: number; company_revision: number; template_version: string; reason: 'finalized' | 'download'; issuer: Issuer; pdf_pages: number; pdf_bytes: number; generated_by: string | null; generated_at: string }
 export interface EventRow { id: string; kind: string; detail: Record<string, unknown>; actor: string | null; at: string }
 
@@ -77,12 +81,24 @@ export async function draftPdf(id: string, title: string, content: DocContent, d
   return null;
 }
 
-/** Normal download of a finalized version (current company profile) or a past PDF exactly as produced. */
-export async function storedPdf(q: { id: string; version?: number } | { render: string }): Promise<string | null> {
-  const qs = 'render' in q ? `render=${encodeURIComponent(q.render)}` : `id=${encodeURIComponent(q.id)}${q.version ? `&version=${q.version}` : ''}`;
-  const r = await adminApi<{ ok: boolean; url?: string; error?: string }>(`/api/admin/documents/pdf?${qs}`);
-  if (!r.ok || !r.url) return r.error ?? 'İndirme bağlantısı oluşturulamadı.';
-  window.location.assign(r.url);
+export type StoredPdfResult = null | { error: string } | { bankDecision: { version: number; changes: BankChange[] } };
+
+/**
+ * Normal download of a finalized version (current company profile) or a past
+ * PDF exactly as produced. When the bank details printed on the version differ
+ * from today's settings, nothing is downloaded until the admin decides
+ * (`keepBank` = download with the version's bank details, stated in the panel).
+ */
+export async function storedPdf(q: { id: string; version?: number } | { render: string }, opts: { keepBank?: boolean; preview?: Window | null } = {}): Promise<StoredPdfResult> {
+  const qs = 'render' in q
+    ? `render=${encodeURIComponent(q.render)}`
+    : `id=${encodeURIComponent(q.id)}${q.version ? `&version=${q.version}` : ''}${opts.keepBank ? '&bank=keep' : ''}${opts.preview ? '&inline=1' : ''}`;
+  const r = await adminApi<{ ok: boolean; url?: string; error?: string; needsBankDecision?: boolean; version?: number; bankChanges?: BankChange[] }>(`/api/admin/documents/pdf?${qs}`);
+  if (r.ok && r.needsBankDecision && r.bankChanges) { opts.preview?.close(); return { bankDecision: { version: r.version ?? 0, changes: r.bankChanges } }; }
+  if (!r.ok || !r.url) { opts.preview?.close(); return { error: r.error ?? 'İndirme bağlantısı oluşturulamadı.' }; }
+  // Preview: the tab was opened on the click (so it is not blocked) and now gets the signed link.
+  if (opts.preview) opts.preview.location.href = r.url;
+  else window.location.assign(r.url);
   return null;
 }
 

@@ -217,7 +217,7 @@ const st = {
   // table
   thead: { flexDirection: 'row', backgroundColor: C.dark, paddingVertical: 7.5, paddingHorizontal: 10 },
   th: { fontSize: 7.2, fontWeight: 800, color: C.onDark, letterSpacing: 0.5 },
-  row: { paddingTop: 13, paddingBottom: 13, paddingHorizontal: 10, borderBottomWidth: 0.6, borderBottomColor: C.rule },
+  row: { paddingTop: 11, paddingBottom: 11, paddingHorizontal: 10, borderBottomWidth: 0.6, borderBottomColor: C.rule },
   rowTop: { flexDirection: 'row' },
   cNo: { width: 17 },
   cDesc: { flexGrow: 1, flexBasis: 0, paddingRight: 8 },
@@ -228,7 +228,7 @@ const st = {
   cAmt: { width: 70, textAlign: 'right' },
   no: { fontSize: 9, fontWeight: 800, color: C.label, lineHeight: 1.45 },
   itemTitle: { fontSize: 11, fontWeight: 800, color: C.ink, lineHeight: 1.35 },
-  itemDesc: { fontSize: 9, color: C.muted, lineHeight: 1.55, marginTop: 6, marginLeft: 17, marginRight: 80 },
+  itemDesc: { fontSize: 9, color: C.muted, lineHeight: 1.55, marginTop: 5, marginLeft: 17, marginRight: 80 },
   num: { fontSize: 9.2, color: C.ink, lineHeight: 1.45 },
   fig: { fontSize: 8.8, color: C.soft, lineHeight: 1.4 },
   amount: { fontSize: 10, fontWeight: 800, color: C.ink, lineHeight: 1.4 },
@@ -272,11 +272,11 @@ const st = {
 
 type PartT = { type: 'p' | 'li' | 'h'; text: string };
 
-function Part({ p, prev, size = 10 }: { p: PartT; prev?: PartT['type']; size?: number }) {
+function Part({ p, prev, size = 10, last = false }: { p: PartT; prev?: PartT['type']; size?: number; last?: boolean }) {
   if (p.type === 'h') return <R.Text style={[st.strong, { fontSize: size + 1, marginTop: prev ? 6 : 0, marginBottom: 6 }]}>{p.text}</R.Text>;
-  if (p.type === 'p') return <R.Text style={[st.body, { fontSize: size, marginBottom: 9, marginTop: prev === 'li' ? 4 : 0 }]} orphans={2} widows={2}>{p.text}</R.Text>;
+  if (p.type === 'p') return <R.Text style={[st.body, { fontSize: size, marginBottom: last ? 0 : 9, marginTop: prev === 'li' ? 4 : 0 }]} orphans={2} widows={2}>{p.text}</R.Text>;
   return (
-    <R.View style={st.li} wrap={false}>
+    <R.View style={[st.li, last ? { marginBottom: 0 } : {}]} wrap={false}>
       <R.View style={st.liMark} />
       <R.Text style={[st.liText, { fontSize: size }]}>{p.text}</R.Text>
     </R.View>
@@ -284,33 +284,47 @@ function Part({ p, prev, size = 10 }: { p: PartT; prev?: PartT['type']; size?: n
 }
 
 /**
- * A section whose heading always travels with its first part. Short sections
- * move as one piece; in long ones the last two parts stay together, so a page
- * never starts with one stray line of a list.
+ * A section whose heading always travels with the start of its content.
+ *  - Short sections (estimated ≤ 130 pt) move as one piece.
+ *  - Longer ones flow: the heading (and `before`, e.g. the "02 / Plan ve
+ *    koşullar" opener) asks for at least two lines of the section below it on
+ *    the same page (minPresenceAhead) instead of dragging the whole section to
+ *    the next page; paragraphs keep at least two lines on each side of a break;
+ *    the last two list items stay together, and `after` (the signature) stays
+ *    with the last part.
+ * The last part has no bottom margin; `gap` is the only space after a section.
  */
-function Section({ heading, body, list, headingStyle, size = 10, gap = 18, after }: { heading: React.ReactNode; body: string; list: boolean; headingStyle?: 'label' | 'strong'; size?: number; gap?: number; after?: React.ReactNode }) {
+function Section({ heading, body, list, headingStyle, size = 10, gap = 18, before, after, afterGap = 6, width = MAIN_W }: { heading: React.ReactNode; body: string; list: boolean; headingStyle?: 'label' | 'strong'; size?: number; gap?: number; before?: React.ReactNode; after?: React.ReactNode; afterGap?: number; width?: number }) {
   const parts = bodyParts(body, list);
   if (!parts.length) return null;
   const head = headingStyle === 'strong'
-    ? <R.Text style={[st.strong, { fontSize: 11, marginBottom: 8 }]}>{heading}</R.Text>
+    ? <R.Text style={[st.strong, { fontSize: 11, marginBottom: 7 }]}>{heading}</R.Text>
     : <R.Text style={[st.label, { marginBottom: 9 }]}>{heading}</R.Text>;
-  if (parts.length <= 6) {
+  const n = parts.length;
+  const part = (i: number) => <Part key={i} p={parts[i]} prev={parts[i - 1]?.type} size={size} last={i === n - 1} />;
+  const tailAfter = after ? <R.View style={{ marginTop: afterGap }}>{after}</R.View> : null;
+  const lineH = size * 1.55;
+  const est = parts.reduce((h, p) => h + lines(p.text, p.type === 'li' ? width - 14 : width, size) * lineH + (p.type === 'li' ? 4 : 9), 20);
+  if (est <= 130) {
     return (
       <R.View wrap={false} style={{ marginBottom: gap }}>
+        {before}
         {head}
-        {parts.map((p, i) => <Part key={i} p={p} prev={parts[i - 1]?.type} size={size} />)}
-        {after ? <R.View style={{ marginTop: gap }}>{after}</R.View> : null}
+        {parts.map((_, i) => part(i))}
+        {tailAfter}
       </R.View>
     );
   }
-  const first = parts.slice(0, 2);
-  const tail = parts.slice(-2);
-  const middle = parts.slice(2, -2);
+  const tailN = Math.min(n, parts[n - 1].type === 'li' ? 2 : after ? 1 : 0);
+  const idx = parts.map((_, i) => i);
+  if (n - tailN === 0) {
+    return <R.View wrap={false} style={{ marginBottom: gap }}>{before}{head}{parts.map((_, i) => part(i))}{tailAfter}</R.View>;
+  }
   return (
     <R.View style={{ marginBottom: gap }}>
-      <R.View wrap={false}>{head}{first.map((p, i) => <Part key={`f${i}`} p={p} prev={first[i - 1]?.type} size={size} />)}</R.View>
-      {middle.map((p, i) => <Part key={`m${i}`} p={p} prev={(i ? middle[i - 1] : first[1]).type} size={size} />)}
-      <R.View wrap={false}>{tail.map((p, i) => <Part key={`t${i}`} p={p} prev={(i ? tail[0] : middle[middle.length - 1] ?? first[1]).type} size={size} />)}{after ? <R.View style={{ marginTop: gap }}>{after}</R.View> : null}</R.View>
+      <R.View wrap={false} minPresenceAhead={lineH * 2 + 6}>{before}{head}</R.View>
+      {idx.slice(0, n - tailN).map(part)}
+      {tailN || tailAfter ? <R.View wrap={false}>{idx.slice(n - tailN).map(part)}{tailAfter}</R.View> : null}
     </R.View>
   );
 }
@@ -332,16 +346,17 @@ function footerNote(input: RenderInput, t: Labels): string {
   return up([input.sample ? t.sample : '', status].filter(Boolean).join(' · '));
 }
 
-function Signature({ input, x = 0 }: { input: RenderInput; x?: number }) {
+function Signature({ input, x = 0, ruleWidth = 172 }: { input: RenderInput; x?: number; ruleWidth?: number }) {
   const c = input.content;
   const brand = input.issuer.legalName || input.issuer.brand;
+  const sub = [c.signatory.title, c.signatory.name ? brand : ''].filter(Boolean).join(' · ');
   return (
-    <R.View wrap={false} style={{ marginTop: 8, marginLeft: x }}>
-      {c.closing ? <R.Text style={[st.body, { marginBottom: 26 }]}>{c.closing}</R.Text> : <R.View style={{ height: 18 }} />}
-      <R.View style={{ width: 172, height: 0.8, backgroundColor: C.ink, marginBottom: 12 }} />
+    <R.View wrap={false} style={{ marginLeft: x }}>
+      {c.closing ? <R.Text style={[st.body, { marginTop: 8 }]}>{c.closing}</R.Text> : null}
+      {/* room for a handwritten signature above the rule */}
+      <R.View style={{ width: ruleWidth, height: 0.8, backgroundColor: C.ink, marginTop: 26, marginBottom: 10 }} />
       <R.Text style={[st.strong, { fontSize: 12 }]}>{c.signatory.name || brand}</R.Text>
-      {c.signatory.title ? <R.Text style={[st.small, { marginTop: 3 }]}>{c.signatory.title}</R.Text> : null}
-      {c.signatory.name ? <R.Text style={[st.small, { marginTop: 1 }]}>{brand}</R.Text> : null}
+      {sub ? <R.Text style={[st.small, { marginTop: 2 }]}>{sub}</R.Text> : null}
     </R.View>
   );
 }
@@ -349,10 +364,10 @@ function Signature({ input, x = 0 }: { input: RenderInput; x?: number }) {
 function BankBlock({ banks, t }: { banks: BankAccount[]; t: Labels }) {
   if (!banks.length) return null;
   return (
-    <R.View wrap={false} style={{ marginBottom: 18 }}>
+    <R.View wrap={false}>
       <R.Text style={[st.label, { marginBottom: 9 }]}>{up(t.bank)}</R.Text>
-      {banks.map((a) => (
-        <R.View key={a.id} style={{ marginBottom: 10 }}>
+      {banks.map((a, i) => (
+        <R.View key={a.id} style={{ marginBottom: i === banks.length - 1 ? 0 : 10 }}>
           <R.Text style={st.strong}>{[a.bank, a.currency].filter(Boolean).join(' · ')}</R.Text>
           {a.holder ? <R.Text style={st.body}>{t.holder}: {a.holder}</R.Text> : null}
           <R.Text style={[st.body, { fontWeight: 700 }]}>{t.iban} {formatIban(a.iban)}</R.Text>
@@ -424,7 +439,7 @@ function SideBand({ input, t }: { input: RenderInput; t: Labels }) {
  * / tax in their own columns under the header labels, then the description.
  * All data columns stay; titles do not get squeezed into a narrow column.
  */
-function ItemsTable({ c, t }: { c: DocContent; t: Labels }) {
+function ItemsTable({ c, t, tail }: { c: DocContent; t: Labels; tail?: React.ReactNode }) {
   const { totals } = computeDocument(c);
   const showDisc = c.items.some((i) => i.discountPct.trim() && i.discountPct.trim() !== '0');
   if (!totals.lines.length) return null;
@@ -439,9 +454,9 @@ function ItemsTable({ c, t }: { c: DocContent; t: Labels }) {
         <R.Text style={[st.th, st.cTax]}>{up(t.tax)}</R.Text>
         <R.Text style={[st.th, st.cAmt, { paddingRight: 0 }]}>{up(t.amount)} · {c.currency}</R.Text>
       </R.View>
-      {totals.lines.map((l) => {
+      {totals.lines.map((l, li) => {
         const it = c.items[l.index];
-        return (
+        const row = (
           <R.View key={l.id} style={st.row} wrap={false}>
             <R.View style={st.rowTop}>
               <R.Text style={[st.no, st.cNo]}>{two(l.index + 1)}</R.Text>
@@ -460,6 +475,8 @@ function ItemsTable({ c, t }: { c: DocContent; t: Labels }) {
             {it.description ? <R.Text style={st.itemDesc}>{it.description}</R.Text> : null}
           </R.View>
         );
+        // the totals never start a page on their own: they keep the last row with them
+        return li === totals.lines.length - 1 && tail ? <R.View key={l.id} wrap={false}>{row}{tail}</R.View> : row;
       })}
     </R.View>
   );
@@ -472,7 +489,7 @@ function Totals({ input, t }: { input: RenderInput; t: Labels }) {
   if (!totals.lines.length) return null;
   const grandLabel = `${up(input.kind === 'quote' ? t.investment : t.grand)}${totals.tax > BigInt(0) ? ` / ${up(t.taxIncl)}` : ''}`;
   return (
-    <R.View wrap={false} style={{ marginTop: 26 }}>
+    <R.View wrap={false} style={{ marginTop: 20 }}>
       <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.subtotal}</R.Text><R.Text style={st.tValue}>{money(totals.subtotal)}</R.Text></R.View>
       {totals.discount > BigInt(0) ? <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.discount}</R.Text><R.Text style={st.tValue}>−{money(totals.discount)}</R.Text></R.View> : null}
       {totals.discount > BigInt(0) ? <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.net}</R.Text><R.Text style={st.tValue}>{money(totals.net)}</R.Text></R.View> : null}
@@ -504,8 +521,8 @@ function PaymentBlock({ c, t }: { c: DocContent; t: Labels }) {
   const allPct = payment.rows.every((r) => r.pctBp !== null);
   const summary = allPct ? payment.rows.map((r) => `${pct(r.pctBp as bigint, c.locale)} ${r.label.toLocaleLowerCase(UP_LOCALE)}`).join(' / ') : '';
   return (
-    <R.View wrap={false} style={{ marginBottom: 22 }}>
-      <R.View style={[st.rule, { marginBottom: 16 }]} />
+    <R.View wrap={false}>
+      <R.View style={[st.rule, { marginBottom: 14 }]} />
       <R.Text style={[st.labelMuted, { marginBottom: 9 }]}>{up(t.payment)}</R.Text>
       {summary ? <R.Text style={[st.strong, { fontSize: 12, marginBottom: 10 }]}>{summary}</R.Text> : null}
       {payment.rows.map((r) => (
@@ -521,7 +538,10 @@ function PaymentBlock({ c, t }: { c: DocContent; t: Labels }) {
   );
 }
 
-function SidebarDocument({ input }: { input: RenderInput }) {
+/** Internal layout options for the second rendering pass (see renderDocumentPdf). */
+interface LayoutOpts { planBreak?: boolean; probe?: { planPage: number } }
+
+function SidebarDocument({ input, layout }: { input: RenderInput; layout?: LayoutOpts }) {
   const c = input.content;
   const t = L[c.locale];
   const def = KIND_DEF[input.kind];
@@ -576,32 +596,48 @@ function SidebarDocument({ input }: { input: RenderInput }) {
         </R.View>
       ) : null}
 
-      <R.View style={{ marginTop: 28 }}>
-        <ItemsTable c={c} t={t} />
+      <R.View style={{ marginTop: 24 }}>
+        <ItemsTable c={c} t={t} tail={<Totals input={input} t={t} />} />
       </R.View>
-      <Totals input={input} t={t} />
 
       {/* 02 — plan and terms: the opener travels with the first item, the signature with the last */}
       {(() => {
         const sig = <Signature input={input} />;
-        type Item = (after?: React.ReactNode) => React.ReactNode;
+        // Each item gets the opener ("02 / Plan ve koşullar") if it is the first
+        // one, and the signature if it is the last one.
+        type Item = (before?: React.ReactNode, after?: React.ReactNode) => React.ReactNode;
         const items: Item[] = [];
-        for (const b of process) items.push((after) => <Section key={b.id} heading={sectionHeading(b)} body={b.body} list={BLOCK_LABEL[b.key].list} after={after} />);
-        if (computeDocument(c).payment.rows.length) items.push((after) => <R.View key="pay" wrap={false}><PaymentBlock c={c} t={t} />{after}</R.View>);
-        if (def.deliveryTime && c.deliveryTime) items.push((after) => <Section key="delivery" heading={up(t.delivery)} body={c.deliveryTime} list={false} after={after} />);
-        for (const b of after) items.push((x) => <Section key={b.id} heading={up(b.heading || BLOCK_LABEL[b.key][c.locale])} body={b.body} list={BLOCK_LABEL[b.key].list} after={x} />);
-        if (banks.length) items.push((after) => <R.View key="bank" wrap={false}><BankBlock banks={banks} t={t} />{after}</R.View>);
-        if (!hasTerms || !items.length) return <R.View style={{ marginTop: 26 }}>{sig}</R.View>;
+        const boxed = (key: string, node: React.ReactNode): Item => (before, x) => (
+          <R.View key={key} wrap={false} style={{ marginBottom: 18 }}>{before}{node}{x ? <R.View style={{ marginTop: 6 }}>{x}</R.View> : null}</R.View>
+        );
+        for (const b of process) items.push((before, x) => <Section key={b.id} heading={sectionHeading(b)} body={b.body} list={BLOCK_LABEL[b.key].list} before={before} after={x} />);
+        if (computeDocument(c).payment.rows.length) items.push(boxed('pay', <PaymentBlock c={c} t={t} />));
+        if (def.deliveryTime && c.deliveryTime) items.push((before, x) => <Section key="delivery" heading={up(t.delivery)} body={c.deliveryTime} list={false} before={before} after={x} />);
+        for (const b of after) items.push((before, x) => <Section key={b.id} heading={up(b.heading || BLOCK_LABEL[b.key][c.locale])} body={b.body} list={BLOCK_LABEL[b.key].list} before={before} after={x} />);
+        // Bank details and the signature share the closing row (bank left, signature right).
+        if (banks.length) {
+          items.push((before) => (
+            <R.View key="closing" wrap={false}>
+              {before}
+              <R.View style={{ flexDirection: 'row' }}>
+                <R.View style={{ flexGrow: 1, flexBasis: 0, paddingRight: 14 }}><BankBlock banks={banks} t={t} /></R.View>
+                <R.View style={{ width: 150, marginTop: -8 }}><Signature input={input} ruleWidth={150} /></R.View>
+              </R.View>
+            </R.View>
+          ));
+        }
+        if (!hasTerms || !items.length) return <R.View style={{ marginTop: 20 }}>{sig}</R.View>;
         const opener = (
           <>
             <R.Text style={[st.label, { marginBottom: 14 }]}>02 / {up(t.plan)}</R.Text>
-            <R.Text style={[st.headline, { marginBottom: 26 }]}>{t.planHeadline}</R.Text>
+            <R.Text style={[st.headline, { marginBottom: 20 }]}>{t.planHeadline}</R.Text>
           </>
         );
+        const lastI = items.length - 1;
         return (
-          <R.View style={{ marginTop: 40 }}>
-            <R.View wrap={false}>{opener}{items[0](items.length === 1 ? sig : undefined)}</R.View>
-            {items.slice(1).map((it, i) => it(i === items.length - 2 ? sig : undefined))}
+          <R.View style={{ marginTop: layout?.planBreak ? 0 : 28 }} break={layout?.planBreak}>
+            {layout?.probe ? <R.View render={({ pageNumber }) => { layout.probe!.planPage = pageNumber; return null; }} /> : null}
+            {items.map((it, i) => it(i === 0 ? opener : undefined, i === lastI && !banks.length ? sig : undefined))}
           </R.View>
         );
       })()}
@@ -670,8 +706,8 @@ function LetterDocument({ input }: { input: RenderInput }) {
         </R.View>
       </R.View>
 
-      <R.View style={{ flexDirection: 'row', marginTop: 28 }} wrap={false}>
-        <R.View style={{ width: 306 - LX, paddingRight: 16 }}>
+      <R.View style={{ flexDirection: 'row', marginTop: 24 }} wrap={false}>
+        <R.View style={{ width: 350 - LX, paddingRight: 14 }}>
           <R.Text style={[st.labelMuted, { marginBottom: 6 }]}>{up(t.recipient)}</R.Text>
           <R.Text style={[st.strong, { fontSize: 12 }]}>{r.company || r.name || '—'}</R.Text>
           {extra.map((l, i) => <R.Text key={i} style={st.small}>{l}</R.Text>)}
@@ -685,7 +721,7 @@ function LetterDocument({ input }: { input: RenderInput }) {
         </R.View>
       </R.View>
 
-      <R.View wrap={false} style={{ marginTop: 30, marginBottom: 20 }}>
+      <R.View wrap={false} style={{ marginTop: 22, marginBottom: 18 }}>
         <R.Text style={[st.headline, { fontSize: 29 }]}>{input.title}</R.Text>
         {input.kind === 'letter' && c.subject && c.subject.trim() !== input.title.trim() ? <R.Text style={[st.strong, { fontSize: 10.5, marginTop: 14 }]}>{t.subject}: {c.subject}</R.Text> : null}
       </R.View>
@@ -695,20 +731,44 @@ function LetterDocument({ input }: { input: RenderInput }) {
         const sig = last ? <Signature input={input} /> : undefined;
         if (input.kind === 'letter' && b.key === 'body') {
           const parts = bodyParts(b.body, false);
-          const out: React.ReactNode[] = [];
-          for (let j = 0; j < parts.length; j += 1) {
-            const p = parts[j];
-            const isLast = j === parts.length - 1 || (p.type === 'h' && j + 1 === parts.length - 1);
-            // a sub-heading travels with the paragraph after it; the signature with the last paragraph
-            const group = p.type === 'h' && parts[j + 1] ? [p, parts[j + 1]] : [p];
-            const node = group.map((g, k) => <Part key={k} p={g} prev={k ? 'h' : parts[j - 1]?.type} size={10.5} />);
-            out.push(group.length > 1 || (isLast && sig) ? <R.View key={j} wrap={false}>{node}{isLast && sig ? <R.View style={{ marginTop: 10 }}>{sig}</R.View> : null}</R.View> : <React.Fragment key={j}>{node}</React.Fragment>);
-            j += group.length - 1;
+          // Units that must not split: list runs (≤ 3 items together, otherwise
+          // the last two), and the last part together with the signature.
+          type Unit = { from: number; to: number; keep: boolean };
+          const units: Unit[] = [];
+          for (let j = 0; j < parts.length;) {
+            if (parts[j].type === 'li') {
+              let k = j;
+              while (k + 1 < parts.length && parts[k + 1].type === 'li') k += 1;
+              if (k - j < 3) units.push({ from: j, to: k, keep: true });
+              else { for (let q = j; q < k - 1; q += 1) units.push({ from: q, to: q, keep: true }); units.push({ from: k - 1, to: k, keep: true }); }
+              j = k + 1;
+            } else { units.push({ from: j, to: j, keep: parts[j].type === 'h' }); j += 1; }
           }
+          if (sig && units.length) units[units.length - 1].keep = true;
+          // a sub-heading joins the unit after it when that unit cannot split;
+          // otherwise it asks for two lines of it on the same page
+          const merged: Unit[] = [];
+          for (let u = 0; u < units.length; u += 1) {
+            const cur = units[u];
+            const next = units[u + 1];
+            const lead = parts[cur.to];
+            // a paragraph that introduces a list ("…duyuyoruz:") stays with the list
+            const intro = lead.type === 'p' && /:\s*$/.test(lead.text) && next && parts[next.from].type === 'li' && lines(lead.text, LETTER_W, 10.5) <= 3;
+            if ((parts[cur.from].type === 'h' && next && (next.keep || u + 1 === units.length - 1)) || intro) { merged.push({ from: cur.from, to: next.to, keep: true }); u += 1; } else merged.push(cur);
+          }
+          const out: React.ReactNode[] = merged.map((u, m) => {
+            const isLast = m === merged.length - 1;
+            const nodes = parts.slice(u.from, u.to + 1).map((p, q) => <Part key={q} p={p} prev={parts[u.from + q - 1]?.type} size={10.5} last={u.from + q === parts.length - 1} />);
+            if (u.keep || (isLast && sig)) {
+              const solo = parts[u.from].type === 'h' && u.from === u.to;
+              return <R.View key={m} wrap={false} minPresenceAhead={solo ? 10.5 * 1.55 * 2 + 6 : undefined}>{nodes}{isLast && sig ? <R.View style={{ marginTop: 6 }}>{sig}</R.View> : null}</R.View>;
+            }
+            return <React.Fragment key={m}>{nodes}</React.Fragment>;
+          });
           return <R.View key={b.id}>{out}</R.View>;
         }
         const heading = `${numbered ? `${two(i + 1)} / ` : ''}${b.heading || BLOCK_LABEL[b.key][c.locale]}`;
-        return <Section key={b.id} heading={heading} body={b.body} list={BLOCK_LABEL[b.key].list} headingStyle="strong" size={10.5} gap={14} after={sig} />;
+        return <Section key={b.id} heading={heading} body={b.body} list={BLOCK_LABEL[b.key].list} headingStyle="strong" size={10.5} gap={18} after={sig} width={LETTER_W} />;
       })}
       {blocks.length ? null : <Signature input={input} />}
     </>
@@ -717,7 +777,7 @@ function LetterDocument({ input }: { input: RenderInput }) {
 
 /* ── Document ─────────────────────────────────────────────────── */
 
-export function DocumentPdf(input: RenderInput) {
+export function DocumentPdf(input: RenderInput & { layout?: LayoutOpts }) {
   const c = input.content;
   UP_LOCALE = c.locale === 'tr' ? 'tr-TR' : 'en-GB';
   const t = L[c.locale];
@@ -729,7 +789,7 @@ export function DocumentPdf(input: RenderInput) {
   return (
     <R.Document title={`${input.number} — ${input.title}`} author={issuer.legalName || issuer.brand} creator="Yoca yönetim paneli" producer="Yoca" language={c.locale === 'tr' ? 'tr-TR' : 'en-GB'}>
       <R.Page size="A4" style={pageStyle}>
-        {sidebar ? <SidebarDocument input={input} /> : <LetterDocument input={input} />}
+        {sidebar ? <SidebarDocument input={input} layout={input.layout} /> : <LetterDocument input={input} />}
       </R.Page>
     </R.Document>
   );
@@ -737,12 +797,27 @@ export function DocumentPdf(input: RenderInput) {
 
 export interface RenderedPdf { buffer: Buffer; pages: number }
 
+async function renderOnce(input: RenderInput, layout?: LayoutOpts): Promise<RenderedPdf> {
+  const buffer = await R.renderToBuffer(<DocumentPdf {...input} layout={layout} />);
+  const pages = (buffer.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+  return { buffer, pages };
+}
+
+/**
+ * Teklif / proforma: when "Plan ve koşullar" starts on one page and runs onto
+ * the last page (which then often holds only a short remainder), a second pass
+ * starts the plan on a fresh page — as in the design kit — and is kept only if
+ * the document does not get longer. No page limit is applied.
+ */
 export async function renderDocumentPdf(input: RenderInput): Promise<RenderedPdf> {
   await loadRenderer();
   registerFonts();
-  const buffer = await R.renderToBuffer(<DocumentPdf {...input} />);
-  const pages = (buffer.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length;
-  return { buffer, pages };
+  if (input.kind !== 'quote' && input.kind !== 'proforma') return renderOnce(input);
+  const probe = { planPage: 0 };
+  const first = await renderOnce(input, { probe });
+  if (!probe.planPage || probe.planPage >= first.pages) return first;
+  const second = await renderOnce(input, { planBreak: true });
+  return second.pages <= first.pages ? second : first;
 }
 
 export { MAIN_W, SIDE };

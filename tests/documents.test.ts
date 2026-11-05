@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computePayment, computeTotals, divRound, fmtMoney, fmtPct, fmtQty, parseMoney, parseScaled } from '../lib/documents/calc';
 import { bodyParts, missingFor, newContent, newItem, sanitizeContent, type LineItem, type PaymentStep } from '../lib/documents/model';
-import { docSettingsProblems, ibanValid, sanitizeDocSettings } from '../lib/documents/settings';
+import { bankChanges, docSettingsProblems, ibanValid, sanitizeDocSettings, type BankAccount } from '../lib/documents/settings';
 import { sampleLetter, sampleQuote, SAMPLE_ISSUER } from './fixtures-documents';
 
 const B = (n: number | string) => BigInt(n);
@@ -162,4 +162,18 @@ test('IBAN checksum; settings never keep an invalid account silently', () => {
   assert.equal(s.validityDays, 30);
   assert.equal(s.defaultTaxRate, '20');
   assert.ok(docSettingsProblems(s).some((x) => /IBAN geçersiz/.test(x)));
+});
+
+test('bank details of a version vs. today: changed / removed, never suggests other accounts', () => {
+  const acc = (over: Partial<BankAccount>): BankAccount => ({ id: 'a', label: '', bank: 'Banka', holder: 'Yoca', iban: 'TR33 0006 1005 1978 6457 8413 26', currency: 'TRY', swift: '', branch: '', ...over });
+  const printed = [acc({})];
+  assert.deepEqual(bankChanges(printed, [acc({ iban: 'TR330006100519786457841326' })]), []); // spacing only
+  const changed = bankChanges(printed, [acc({ iban: 'TR32 0010 0099 9999 9999 9999 01', holder: 'Yoca Ltd.' })]);
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].change, 'changed');
+  assert.deepEqual(changed[0].fields, ['IBAN', 'hesap sahibi']);
+  const removed = bankChanges(printed, [acc({ id: 'b' })]);
+  assert.equal(removed[0].change, 'removed');
+  assert.equal(removed[0].now, null);
+  assert.deepEqual(bankChanges([], [acc({ id: 'new' })]), []); // an account added later is never suggested
 });

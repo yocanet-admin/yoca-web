@@ -24,12 +24,20 @@ Bu modülün yapmadıkları:
 - Dil seçilir.
 - Elle doldurma ya da yapay zekâ ile ilk taslak seçilir.
 
-**Düzenleyici** (`/admin/documents/[id]`)
+**Taslak düzenleyici** (`/admin/documents/[id]`, durum: taslak)
 - Alanlar türe göre değişir: antetli yazıda kalem ve ödeme alanı yoktur.
+- Alanlar açılır/kapanır gruplardadır: Belge bilgileri, Alıcı, İş kalemleri, Ödeme planı, Banka bilgileri, Bölümler, Kapanış ve imza. Kapalı grubun başlığında özet görünür (ör. "5 kalem · genel toplam …", "toplamla uyuşmuyor"). "Tümünü aç / kapat" vardır.
+- Uzun belgelerde dolu metin bölümleri kapalı açılır, ilk satırları önizleme olarak görünür.
+- Grup kapatmak yazılanı silmez. Kaydedilmemiş değişiklikler ayrıca bu tarayıcıda saklanır (`yoca-doc-unsaved:<id>`). Sayfa yenilenir veya panelde başka sayfaya geçilirse, dönüşte "Geri yükle / Sil" sorulur; kendiliğinden uygulanmaz. Kaydedince yedek silinir.
 - Canlı toplam ve eksik bilgi listesi gösterilir.
 - Önizle: taslak PDF yeni sekmede açılır.
-- Diğer işlemler: Kaydet, PDF indir, Kesinleştir, Revize et, Çoğalt, Proforma oluştur (tekliften), Arşivle.
-- Teklif takibi ve sürüm/PDF geçmişi buradadır.
+- İşlemler: Kaydet, Önizle, PDF indir, Kesinleştir, Çoğalt, Arşivle; daha önce kesinleşmiş sürüm varsa Sürüm geçmişi ve (teklifte) Proforma oluştur.
+
+**Kesinleşmiş belge** (durum: kesinleştirildi veya arşivlendi)
+- Form alanı yerine okunur özet gösterilir: belge bilgileri, alıcı, kalemler ve toplamlar, ödeme planı, belgede basılı banka bilgisi, bölümler. Özet, son sürümün dondurulmuş içeriğinden gelir.
+- Üstte: PDF indir, Önizle (kayıtlı PDF yeni sekmede), Sürüm geçmişi, Revize et, Proforma oluştur, Çoğalt, Arşivle.
+- Düzenleme "Revize et" ile açılır.
+- Teklif takibi ve sürüm/PDF geçmişi yan sütundadır.
 
 **Belge ayarları** (`/admin/documents/settings`)
 - Banka hesapları (IBAN kontrol hanesi doğrulanır).
@@ -56,6 +64,13 @@ Telefon alanı bu sürümde bu ekrana eklendi.
 5. **Geçmiş PDF'ler:** Hiçbir PDF ezilmez. Kesinleştirme anındaki PDF ve sonraki her üretim, sürüm, profil revizyonu, şablon sürümü ve tarihle "Geçmiş PDF" olarak açılabilir.
 6. **Daha önce gönderilen dosyalar:** Önceden indirilen veya e-postayla gönderilen dosyalar değişmez; yeni indirme güncel bilgilerle üretilir.
 7. **Boş alanlar:** Belgede hiç görünmez. Etiket, ayırıcı, kutu ya da "telefon giriniz" gibi yer tutucu basılmaz. Yapay zekâ şirket bilgisi doldurmaz.
+8. **Banka bilgileri:** Şirket profilinden farklı olarak, sürümde basılı banka bilgisi ödeme koşulunun parçasıdır ve kendiliğinden değişmez.
+   - Kesinleşmiş bir sürüm indirilirken, basılı hesap Belge ayarlarında değişmiş veya kaldırılmışsa PDF üretilmez; panel farkı gösterir (belgedeki IBAN ↔ şimdiki IBAN, değişen alanlar) ve sorar:
+     - **Sürümdeki bilgilerle indir:** PDF sürümdeki (eski) banka bilgisini taşır; bu durum panelde açıkça yazılıdır.
+     - **Güncel banka bilgileriyle revize et:** belge taslak olur, aynı hesapların güncel bilgileri kullanılır, kesinleştirince yeni sürüm oluşur. Önceki sürüm ve PDF'leri saklanır.
+   - Belgeye yalnızca işaretlenen hesaplar basılır. Sonradan eklenen bir hesap kendiliğinden eklenmez.
+   - Seçili bir hesap ayarlardan kaldırılmışsa taslak kesinleştirilemez; yönetici seçimi kaldırır ya da başka hesap seçer.
+   - Karşılaştırma yalnızca hesap kimliğiyle eşleşen hesaplar arasında yapılır (`bankChanges`, `lib/documents/settings.ts`).
 
 ## Tutarlar
 
@@ -130,8 +145,12 @@ Referans: "Yoca kurumsal belge tasarım kiti" (5 Kasım 2026).
 
 Uygulama `lib/documents/pdf.tsx` içindedir:
 - `@react-pdf/renderer` kullanılır.
-- Sayfa sonları otomatik ayarlanır. Tablo başlığı devam sayfasında tekrarlanır.
-- Bölüm başlığı ilk paragrafıyla, imza son içerikle birlikte kalır.
+- Sayfa sonları otomatik ayarlanır; sayfa sayısına sınır yoktur. Tablo başlığı devam sayfasında tekrarlanır.
+- Kısa bölümler (yaklaşık 130 pt'ye kadar) tek parça taşınır. Uzun bölümler akar: başlık altında en az iki satır ister (`minPresenceAhead`), paragraflar sayfa sonunda en az iki satır bırakır, son iki madde birlikte kalır.
+- İmza son içerikle birlikte kalır. Liste öncesi "…:" ile biten kısa paragraf listeyle birlikte kalır.
+- Toplam bloğu son kalemle birlikte taşınır; tek başına sayfa açmaz.
+- Teklif/proformada banka bilgileri ve imza aynı satırdadır (banka solda, imza sağda).
+- Teklif/proforma iki geçişle üretilir: "Plan ve koşullar" bir sayfada başlayıp son sayfaya taşıyorsa ikinci geçişte yeni sayfada başlatılır. Sayfa sayısı artmıyorsa ikinci sonuç kullanılır (kitteki "plan sayfası" düzeni).
 - Altlıktaki iletişim bloğunun yüksekliği metin alanından ayrılır.
 
 Kitteki `render.py` sabit örnekler içindir ve kullanılmaz.
@@ -140,6 +159,17 @@ Diğer ayrıntılar:
 - **Logo:** `public/brand/yoca-logo-primary.svg`, dosyanın kendi oranıyla.
 - **Font:** Manrope (OFL, `lib/documents/fonts/OFL.txt`).
 - **Şablon sürümü:** `TEMPLATE_VERSION`. Tasarım değişirse artırılır; böylece yeni indirmeler yeni şablonla üretilir.
+
+## Yönetici panelinde çerezler
+
+Yönetim paneli yalnızca çalışması için gerekli tarayıcı depolamasını kullanır, kendi çerezini koymaz:
+- `yoca-admin-auth`: oturum;
+- `yoca-doc-unsaved:*`, `yoca-insight-unsaved:*`, çeviri işi listesi: kaydedilmemiş işin bu cihazdaki yedeği;
+- `yoca_consent`: çerez tercihi.
+
+Panelde Google Analytics yüklenmez. Vercel Web Analytics çerezsizdir ve panel olaylarını göndermeden düşürür.
+
+Ziyaretçi sitesindeki İngilizce, sağ altta duran tercih kutusu `/admin` altında gösterilmez. Panelde onun yerine sayfa sonunda Türkçe bir bilgi kutusu çıkar (`components/admin/AdminPrivacyNotice.tsx`). Formun üzerine binmez ve yalnızca tercih yapılmamışsa görünür. Seçim, sitenin kullandığı aynı `yoca_consent` anahtarına yazılır; ziyaretçi sitesindeki tercih mekanizması değişmedi.
 
 ## Kurulum sırası (production)
 

@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/adminClient';
+import AdminPrivacyNotice from '@/components/admin/AdminPrivacyNotice';
 
 /**
  * Yoca — admin shell (Client Component).
@@ -242,6 +243,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               tanımlanır.
             </p>
           </form>
+          <AdminPrivacyNotice />
         </div>
       </div>
     );
@@ -355,6 +357,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           </div>
         )}
         {children}
+        <AdminPrivacyNotice />
       </main>
     </div>
   );

@@ -54,7 +54,7 @@ export interface VersionRow {
 }
 
 /** Template version stored with every PDF render (bump when the PDF design changes). */
-export const TEMPLATE_VERSION = 'belge-2026-11-b';
+export const TEMPLATE_VERSION = 'belge-2026-11-c';
 
 export interface DocContext {
   ready: boolean;
@@ -109,7 +109,7 @@ export function contentOf(row: Pick<DocRow, 'content' | 'kind'>): DocContent {
 }
 
 /** Totals + what is missing, for the editor and for finalizing. */
-export function assess(kind: DocKind, content: DocContent, issuer: Issuer, title: string): { missing: MissingReport; total: string | null } {
+export function assess(kind: DocKind, content: DocContent, issuer: Issuer, title: string, settings?: DocSettings): { missing: MissingReport; total: string | null } {
   const { totals, payment } = computeDocument(content);
   const def = KIND_DEF[kind];
   const missing = missingFor(kind, content, issuer, {
@@ -117,6 +117,10 @@ export function assess(kind: DocKind, content: DocContent, issuer: Issuer, title
     missingPrices: def.items ? [...totals.missingPrices, ...totals.errors] : [],
     paymentProblem: def.payment ? payment.problem : null,
   });
+  // A selected bank account that is no longer in the settings is never dropped
+  // (or replaced) silently: the admin chooses again before finalizing.
+  const gone = settings && def.bank ? content.bankAccountIds.filter((id) => !settings.bankAccounts.some((a) => a.id === id)) : [];
+  if (gone.length) missing.blocking.push(`Seçili ${gone.length} banka hesabı Belge ayarlarında artık yok; banka bilgilerini yeniden seçin.`);
   return { missing, total: def.items && totals.grand !== null ? minorToNumeric(totals.grand) : null };
 }
 
