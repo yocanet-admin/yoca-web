@@ -5,7 +5,10 @@ const nextConfig = {
   experimental: {
     // Document PDFs read the embedded fonts and the original logo SVG from disk.
     outputFileTracingIncludes: {
-      '/api/admin/documents/**': ['./lib/documents/fonts/**', './public/brand/*.svg'],
+      // pdfkit loads its built-in font metrics (Helvetica, used as the initial
+      // font of every PDF) through package "imports" at runtime; the file tracer
+      // does not see them, so they are listed here.
+      '/api/admin/documents/**': ['./lib/documents/fonts/**', './public/brand/*.svg', './node_modules/pdfkit/js/standard-fonts/**', './node_modules/pdfkit/js/data/**'],
     },
   },
   images: {
