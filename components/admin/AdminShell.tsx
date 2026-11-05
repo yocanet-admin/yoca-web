@@ -6,6 +6,8 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/adminClient';
+import AdminPrivacyNotice from '@/components/admin/AdminPrivacyNotice';
+import { clearDocBackups } from '@/lib/documents/backup';
 
 /**
  * Yoca — admin shell (Client Component).
@@ -31,6 +33,7 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
       { href: '/admin/ops/clients', label: 'Müşteriler ve firmalar', icon: '◎' },
       { href: '/admin/ops/services', label: 'Hizmetler ve varlıklar', icon: '▤' },
       { href: '/admin/ops/finance', label: 'Ödemeler ve yenilemeler', icon: '₺' },
+      { href: '/admin/documents', label: 'Teklifler ve Belgeler', icon: '❐' },
       { href: '/admin/ops/providers', label: 'Sağlayıcılar', icon: '⌂' },
       { href: '/admin/ops/licenses', label: 'Lisanslar', icon: '⚿' },
       { href: '/admin/ops/settings', label: 'Operasyon ayarları', icon: '⚙' },
@@ -132,11 +135,17 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
+    // Unsaved-document backups in this browser belong to one user: other users'
+    // entries are removed when someone is signed in, all of them on sign-out.
+    const scopeBackups = (s: Session | null) => clearDocBackups(s?.user.id);
     supabase.auth.getSession().then(({ data }) => {
+      if (data.session) scopeBackups(data.session);
       setSession(data.session);
       setLoading(false);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
+      if (event === 'SIGNED_OUT') clearDocBackups();
+      else if (newSession) scopeBackups(newSession);
       setSession(newSession);
     });
     return () => sub.subscription.unsubscribe();
@@ -157,6 +166,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const handleLogout = async () => {
     if (!supabase) return;
     setMenuOpen(false);
+    clearDocBackups();
     await supabase.auth.signOut();
   };
 
@@ -241,6 +251,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               tanımlanır.
             </p>
           </form>
+          <AdminPrivacyNotice />
         </div>
       </div>
     );
@@ -354,6 +365,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           </div>
         )}
         {children}
+        <AdminPrivacyNotice />
       </main>
     </div>
   );

@@ -42,6 +42,12 @@ const GROUPS: Array<{ title: string; fields: Array<{ key: TextKey; label: string
     ],
   },
   {
+    title: 'Belgelerde görünen iletişim',
+    fields: [
+      { key: 'phone', label: 'Telefon', hint: 'Teklif, proforma ve yazıların antet / altlığında görünür. Boş bırakılırsa belgede telefon satırı hiç yer almaz. Belgeler ayrıca yukarıdaki unvan, resmî adres ve e-postayı, aşağıdaki vergi ve MERSİS bilgilerini kullanır; değişiklikler sonraki PDF indirmelerine yansır.' },
+    ],
+  },
+  {
     title: 'Sicil bilgileri (isteğe bağlı)',
     fields: [
       { key: 'kep', label: 'KEP adresi' },

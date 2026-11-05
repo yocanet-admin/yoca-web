@@ -132,6 +132,54 @@ export function mockStructured(schemaName: string, input: string): unknown {
       return { ozet: 'Mock özet', ihtiyaclar: [], butce: 'belirtilmemiş', aciliyet: 'orta', uygunluk: 3, uygunluk_nedeni: 'mock', spam_olasiligi: 'düşük', sonraki_adim: 'mock', sorular: [] };
     case 'lead_reply':
       return { konu: 'Mock konu', metin: 'Mock metin' };
+    // Teklifler ve Belgeler. "[mock-hata]" in the brief/text simulates a failed AI call (local tests only).
+    case 'doc_draft': {
+      if (input.includes('[mock-hata]')) throw new Error('Mock: yapay zekâ isteği başarısız (test).');
+      return {
+        title: 'Marka kimliği ve iki dilli web sitesi teklifi',
+        subject: '',
+        blocks: [
+          { key: 'intro', heading: 'Giriş', body: 'Bu teklif, marka kimliği ve iki dilli web sitesi çalışmasının kapsamını ve koşullarını içerir.' },
+          { key: 'scope', heading: 'Kapsam', body: 'Çalışma strateji, kimlik ve web olmak üzere üç aşamada yürür. Toplam süre altı haftadır.' },
+          { key: 'deliverables', heading: 'Teslimatlar', body: 'Logo ve kimlik dosyaları\nİki dilli (TR/EN) web sitesi' },
+          { key: 'assumptions', heading: 'Varsayımlar', body: 'Metinler ve görseller müşteri tarafından sağlanır.' },
+          { key: 'out_of_scope', heading: 'Kapsam dışı', body: 'Fotoğraf çekimi\nReklam yönetimi' },
+          { key: 'revisions', heading: 'Revizyon koşulları', body: 'Her aşama için iki revizyon turu dahildir.' },
+          { key: 'notes', heading: 'Notlar', body: 'Müşterinin vergi numarası: [EKSİK: müşterinin vergi numarası]. Örnek tutar ₺10.000 (mock uyarı testi).' },
+          { key: 'body', heading: 'Metin', body: 'Mock yazı gövdesi. Tarih: [EKSİK: yeni yayın tarihi].' },
+          { key: 'summary', heading: 'Özet', body: 'Mock rapor özeti.' },
+          { key: 'done', heading: 'Tamamlananlar', body: 'Mock tamamlanan iş' },
+          { key: 'delivered', heading: 'Teslim edilenler', body: 'Mock teslim edilen' },
+        ],
+        items: [
+          { title: 'Marka kimliği', description: 'Logo, renk, tipografi ve kullanım kılavuzu.', quantity: '1', unit: 'paket' },
+          { title: 'İki dilli web sitesi', description: 'Türkçe ve İngilizce, mobil uyumlu site.', quantity: '1', unit: 'proje' },
+        ],
+        payment: [
+          { label: 'Başlangıç ödemesi', percent: 50, due: 'Başlangıçta' },
+          { label: 'Kalan ödeme', percent: null, due: '[EKSİK: kalan ödemenin zamanı]' },
+        ],
+        deliveryTime: '6 hafta',
+        missing: ['Kalem fiyatları', 'Kalan ödemenin zamanı', 'Müşterinin vergi numarası'],
+      };
+    }
+    case 'doc_rewrite': {
+      if (input.includes('[mock-hata]')) throw new Error('Mock: yapay zekâ isteği başarısız (test).');
+      const text = /<TEXT>\n([\s\S]*?)\n<\/TEXT>/.exec(input)?.[1] ?? input;
+      return { text: `${text.split(/(?<=[.!?])\s+/)[0]} (mock düzenleme)`, changes: ['Mock: metin kısaltıldı'] };
+    }
+    case 'doc_translate': {
+      const raw = /<TEXT>\n([\s\S]*?)\n<\/TEXT>/.exec(input)?.[1] ?? '{}';
+      let p: { title?: string; subject?: string; deliveryTime?: string; blocks?: Array<{ id: string; heading: string; body: string }>; items?: Array<{ id: string; title: string; description: string; unit: string }>; payment?: Array<{ id: string; label: string; due: string }> } = {};
+      try { p = JSON.parse(raw); } catch { p = {}; }
+      const t = (x: string) => (x ? `[EN] ${x}` : '');
+      return {
+        title: t(p.title ?? ''), subject: t(p.subject ?? ''), deliveryTime: t(p.deliveryTime ?? ''),
+        blocks: (p.blocks ?? []).map((b) => ({ id: b.id, heading: t(b.heading), body: t(b.body) })),
+        items: (p.items ?? []).map((i) => ({ id: i.id, title: t(i.title), description: t(i.description), unit: i.unit })),
+        payment: (p.payment ?? []).map((x) => ({ id: x.id, label: t(x.label), due: t(x.due) })),
+      };
+    }
     default:
       return {};
   }

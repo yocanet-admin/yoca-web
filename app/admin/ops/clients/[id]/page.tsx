@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import ClientDocuments from '@/components/admin/documents/ClientDocuments';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { Badge, DateOr, Details, Documents, Empty, EntityLink, Flash, PageHead, field, fmtDate, fmtDateTime, label, small, toList } from '@/components/admin/ops/ui';
@@ -134,7 +135,7 @@ function ClientDetail() {
       {tab === 'hizmetler' && <ServicesTab party={party} services={rel.services} direct={rel.direct} viaProject={rel.viaProject} projects={rel.projects} data={data} today={today} provided={rel.provided} />}
       {tab === 'finans' && <Finance services={rel.services} data={data} today={today} clientId={party.id} />}
       {tab === 'lisanslar' && <Licenses rows={rel.licenses} data={data} />}
-      {tab === 'belgeler' && <section className="admin-card !p-4"><Documents entity="client" entityId={party.id} /></section>}
+      {tab === 'belgeler' && <><ClientDocuments clientId={party.id} /><section className="admin-card !p-4" aria-label="Yüklenen dosyalar"><h2 className="mb-2 text-[13px] font-bold uppercase tracking-[0.08em] text-muted">Yüklenen dosyalar</h2><Documents entity="client" entityId={party.id} /></section></>}
       {tab === 'gecmis' && <History clientId={party.id} contactIds={rel.contacts.map((c) => c.id)} projectIds={rel.projects.map((p) => p.id)} />}
     </div>
   );

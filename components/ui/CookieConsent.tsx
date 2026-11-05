@@ -1,11 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 
 /**
  * Yoca — cookie consent banner.
  * Analytics (GA4 via NEXT_PUBLIC_GA4_ID) loads only after the visitor
  * accepts optional cookies. The choice persists in localStorage.
+ * The admin panel (/admin) never loads analytics and never shows this
+ * floating banner over its forms; it has its own Turkish, in-page notice
+ * (components/admin/AdminPrivacyNotice) that stores the same choice.
  */
 
 interface CookieConsentProps {
@@ -14,7 +18,9 @@ interface CookieConsentProps {
   essentialOnly: string;
 }
 
-const STORAGE_KEY = 'yoca_consent';
+export const CONSENT_STORAGE_KEY = 'yoca_consent';
+const STORAGE_KEY = CONSENT_STORAGE_KEY;
+const isAdminPath = (p: string | null) => Boolean(p && (p === '/admin' || p.startsWith('/admin/')));
 const GA4_ID = process.env.NEXT_PUBLIC_GA4_ID ?? '';
 
 declare global {
@@ -42,8 +48,11 @@ function loadAnalytics(): void {
 
 export default function CookieConsent({ text, acceptAll, essentialOnly }: CookieConsentProps) {
   const [visible, setVisible] = useState(false);
+  const pathname = usePathname();
+  const admin = isAdminPath(pathname);
 
   useEffect(() => {
+    if (admin) { setVisible(false); return; }
     let stored: { analytics: boolean } | null = null;
     try {
       stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
@@ -55,7 +64,7 @@ export default function CookieConsent({ text, acceptAll, essentialOnly }: Cookie
     } else if (stored.analytics) {
       loadAnalytics();
     }
-  }, []);
+  }, [admin]);
 
   const decide = (analytics: boolean) => {
     try {
@@ -67,7 +76,7 @@ export default function CookieConsent({ text, acceptAll, essentialOnly }: Cookie
     if (analytics) loadAnalytics();
   };
 
-  if (!visible) return null;
+  if (!visible || admin) return null;
 
   return (
     <div
