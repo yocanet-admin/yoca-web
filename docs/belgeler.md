@@ -180,6 +180,7 @@ Sayfalama (`lib/documents/pdf.tsx`, `@react-pdf/renderer`):
 - Kısa bölümler (≈130 pt'ye kadar) tek parça taşınır; uzunlar akar: başlık en az iki satırla kalır, paragraflar sayfa sonunda en az iki satır bırakır, son iki madde birlikte kalır, listesi yeni sayfaya geçen bölümde “… — DEVAM” etiketi çıkar.
 - Toplam bloğu son kalemle birlikte taşınır. Kapanış bloğu son bölümle birlikte kalır; bölüm yoksa toplamdan sonra gelir, sığmazsa bir sonraki sayfaya geçer (kesilmez).
 - Teklif/proforma iki geçişle üretilir: “Plan ve koşullar” bir sayfada başlayıp son sayfaya taşıyorsa yeni sayfada başlatılır; sayfa sayısı artmıyorsa bu sonuç kullanılır.
+- Kısa teklif/proforma ikinci sayfaya yalnızca biraz taşıyorsa (ör. üç kalem, toplam ve ödeme koşulları) dikey boşluklar dengeli azaltılarak yeniden dizilir (×0,85, gerekirse ×0,7: bloklar arası boşluk, satır iç boşluğu, altbilgi üstü boşluk; yazı boyutları ve içerik değişmez). Bu düzen yalnızca belgenin tamamı TEK sayfaya sığıyorsa kullanılır; uzun belgeler normal aralıkla gerektiği kadar sayfaya akar.
 - Altbilginin yüksekliği metin alanından ayrılır.
 
 Şablon değişince ne olur:
@@ -212,7 +213,8 @@ Ziyaretçi sitesindeki İngilizce, sağ altta duran tercih kutusu `/admin` altı
    - Mevcut satırları değiştirmez.
    - İlk şirket profili revizyonunu mevcut ayarlardan oluşturur.
 4. **Uygulamayı yayınla.** Eski uygulama bu tabloları okumadığı için sıra bozulsa da mevcut ekranlar çalışır.
-5. **Canlı kontroller:**
+5. **Şirket bilgileri:** resmî unvan alanında “Yoca Teknoloji Ltd Şti” yazdığını kontrol et (PDF ve e-posta altbilgisi bu alandan okunur; kodda sabit değildir). Bilinmeyen diğer alanlar boş bırakılır, boş alan basılmaz.
+6. **Canlı kontroller:**
    - Belge ekranları açılıyor mu?
    - Şirket bilgileri sayfasında telefon alanı görünüyor mu?
    - `[TEST]` işaretli, müşteriye bağlı olmayan bir antetli yazı taslağının önizlemesi açılıyor mu?

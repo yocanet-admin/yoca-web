@@ -273,6 +273,8 @@ interface LayoutOpts {
   planBreak?: boolean;
   /** page count of the previous pass (only places the website next to the page number) */
   pages?: number;
+  /** vertical spacing factor (1 = Bolt spacing); see renderDocumentPdf */
+  k?: number;
   cont?: Set<string>;
   probe?: { planPage: number; ends: Map<string, number>; order: Map<string, Array<{ key: string; li: boolean }>> };
 }
@@ -391,7 +393,7 @@ function footerDetails(issuer: Issuer, t: Labels): string {
 }
 
 interface FooterPlan { name: string; details: string; web: string; height: number; reserve: number }
-function footerPlan(input: RenderInput, t: Labels): FooterPlan {
+function footerPlan(input: RenderInput, t: Labels, k = 1): FooterPlan {
   const name = (input.issuer.legalName ?? '').trim();
   const details = footerDetails(input.issuer, t);
   const web = website(input.issuer);
@@ -399,7 +401,7 @@ function footerPlan(input: RenderInput, t: Labels): FooterPlan {
   const leftW = CW - rightW - 18;
   const leftH = (name ? 9.75 * 1.3 : 0) + (details ? 3 + lines(details, leftW, KICK) * 15 : 0);
   const height = 1.5 + 15 + Math.max(leftH, 11.25 * 1.3);
-  return { name, details, web, height, reserve: BOTTOM + height + 14 };
+  return { name, details, web, height, reserve: BOTTOM + height + 14 * k };
 }
 
 function Frame({ input, t, foot, pages = 1 }: { input: RenderInput; t: Labels; foot: FooterPlan; pages?: number }) {
@@ -436,7 +438,7 @@ function Frame({ input, t, foot, pages = 1 }: { input: RenderInput; t: Labels; f
 }
 
 /** Page 1 opening: logo, kicker, headline + dot (and the letter's second line). Pulled up to the page-1 top. */
-function Masthead({ input, t, sub }: { input: RenderInput; t: Labels; sub?: string }) {
+function Masthead({ input, t, sub, k = 1 }: { input: RenderInput; t: Labels; sub?: string; k?: number }) {
   const head = t.head[input.kind];
   const year = /^(\d{4})/.exec(input.content.issueDate)?.[1] ?? '';
   const kicker = input.kind === 'letter' ? up(head.kicker) : `${up(head.kicker)}${year ? ` / ${year}` : ''}`;
@@ -447,7 +449,7 @@ function Masthead({ input, t, sub }: { input: RenderInput; t: Labels; sub?: stri
       <R.View style={{ position: 'absolute', top: -TOP1, right: 0 }}><BrandSvg file="yoca-motif.svg" width={MOTIF_W} /></R.View>
       <R.View style={{ width: CW - MOTIF_W + PX - 12 }}>
       <Logo width={100.5} />
-      <R.View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 36 }}>
+      <R.View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 36 * k }}>
         <R.Text style={st.kicker}>{kicker}</R.Text>
         {input.mode === 'draft' || input.sample ? <R.Text style={[st.pill, { marginLeft: 10 }]}>{up(input.mode === 'draft' ? t.draft : t.sample)}</R.Text> : null}
       </R.View>
@@ -473,7 +475,7 @@ function Kicker({ children, style }: { children: React.ReactNode; style?: Sty })
  * with the unit price, discount and line tax when they add information — and
  * the net amount. No data column is dropped.
  */
-function ItemsTable({ c, t, tail }: { c: DocContent; t: Labels; tail?: React.ReactNode }) {
+function ItemsTable({ c, t, tail, k = 1 }: { c: DocContent; t: Labels; tail?: React.ReactNode; k?: number }) {
   const { totals } = computeDocument(c);
   if (!totals.lines.length) return null;
   const rates = new Set(totals.lines.map((l) => (l.taxRateBp === null ? '' : String(l.taxRateBp))));
@@ -491,7 +493,7 @@ function ItemsTable({ c, t, tail }: { c: DocContent; t: Labels; tail?: React.Rea
         const qtyOne = (parseMoney(it.quantity) ?? BigInt(0)) === BigInt(100) || it.quantity.trim() === '1';
         const showUnit = !l.missingPrice && (!qtyOne || disc);
         const row = (
-          <R.View key={l.id} style={st.row} wrap={false}>
+          <R.View key={l.id} style={[st.row, { paddingVertical: 12 * k }]} wrap={false}>
             <R.View style={{ flexGrow: 1, flexBasis: 0, flexDirection: 'row', paddingHorizontal: 12, marginRight: GAP }}>
               <R.Text style={st.code}>{two(l.index + 1)}</R.Text>
               <R.View style={{ flexGrow: 1, flexBasis: 0 }}>
@@ -517,7 +519,7 @@ function ItemsTable({ c, t, tail }: { c: DocContent; t: Labels; tail?: React.Rea
   );
 }
 
-function Totals({ input, t }: { input: RenderInput; t: Labels }) {
+function Totals({ input, t, k = 1 }: { input: RenderInput; t: Labels; k?: number }) {
   const c = input.content;
   const { totals } = computeDocument(c);
   const money = (m: bigint) => fmtMoney(m, c.currency, c.locale, false);
@@ -530,7 +532,7 @@ function Totals({ input, t }: { input: RenderInput; t: Labels }) {
   const size = Math.min(42, Math.floor(room / (Math.max(grandText.length, 1) * 0.62)));
   return (
     <R.View>
-      <R.View style={{ alignSelf: 'flex-end', width: 222, paddingHorizontal: 12, marginTop: 18 }}>
+      <R.View style={{ alignSelf: 'flex-end', width: 222, paddingHorizontal: 12, marginTop: 18 * k }}>
         <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.subtotal}</R.Text><R.Text style={st.tValue}>{money(totals.subtotal)}</R.Text></R.View>
         {totals.discount > BigInt(0) ? <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.discount}</R.Text><R.Text style={st.tValue}>−{money(totals.discount)}</R.Text></R.View> : null}
         {totals.discount > BigInt(0) ? <R.View style={st.tRow}><R.Text style={st.tLabel}>{t.net}</R.Text><R.Text style={st.tValue}>{money(totals.net)}</R.Text></R.View> : null}
@@ -604,11 +606,11 @@ function Signatory({ input, align = 'left' }: { input: RenderInput; align?: 'lef
 }
 
 /** Bolt closing: 1.5 pt ink rule; "Ödeme ve koşullar" (payment plan, bank details, closing text) left, logo right. */
-function CommercialClosing({ input, t, banks }: { input: RenderInput; t: Labels; banks: BankAccount[] }) {
+function CommercialClosing({ input, t, banks, k = 1 }: { input: RenderInput; t: Labels; banks: BankAccount[]; k?: number }) {
   const c = input.content;
   const hasPay = computeDocument(c).payment.rows.length > 0;
   return (
-    <R.View wrap={false} style={{ marginTop: 24, borderTopWidth: 1.5, borderTopColor: C.ink, paddingTop: 18, flexDirection: 'row', justifyContent: 'space-between' }}>
+    <R.View wrap={false} style={{ marginTop: 24 * k, borderTopWidth: 1.5, borderTopColor: C.ink, paddingTop: 18 * k, flexDirection: 'row', justifyContent: 'space-between' }}>
       <R.View style={{ width: 330 }}>
         {hasPay ? <><Kicker style={{ marginBottom: 6 }}>{up(t.paymentTerms)}</Kicker><PaymentRows c={c} /></> : null}
         {banks.length ? <><Kicker style={{ marginTop: hasPay ? 15 : 0, marginBottom: 6 }}>{up(t.bank)}</Kicker><BankList banks={banks} t={t} /></> : null}
@@ -663,7 +665,8 @@ function CommercialDocument({ input, layout }: { input: RenderInput; layout?: La
     def.validity && c.validUntil ? `${t.valid}: ${fmtShort(c.validUntil, c.locale)}` : '',
     `${t.currency}: ${c.currency}`,
   ].filter(Boolean).join(' · ');
-  const closing = <CommercialClosing input={input} t={t} banks={banks} />;
+  const k = layout?.k ?? 1;
+  const closing = <CommercialClosing input={input} t={t} banks={banks} k={k} />;
 
   type Item = (before?: React.ReactNode, after?: React.ReactNode) => React.ReactNode;
   const items: Item[] = [];
@@ -679,13 +682,13 @@ function CommercialDocument({ input, layout }: { input: RenderInput; layout?: La
 
   return (
     <>
-      <Masthead input={input} t={t} />
+      <Masthead input={input} t={t} k={k} />
       <R.View wrap={false}>
-        <R.Text style={{ fontSize: 15, fontWeight: 600, color: C.ink, lineHeight: 1.35, marginTop: 25 }}>{input.title}</R.Text>
+        <R.Text style={{ fontSize: 15, fontWeight: 600, color: C.ink, lineHeight: 1.35, marginTop: 25 * k }}>{input.title}</R.Text>
         {input.kind === 'proforma' ? <Kicker style={{ marginTop: 6 }}>{up(t.notInvoice)}</Kicker> : null}
       </R.View>
 
-      <R.View wrap={false} style={{ marginTop: 30, flexDirection: 'row' }}>
+      <R.View wrap={false} style={{ marginTop: 30 * k, flexDirection: 'row' }}>
         <InfoCol label={up(t.preparedFor)}>
           <R.Text style={{ fontSize: 16.5, fontWeight: 600, color: C.ink, lineHeight: 1.3 }}>{clientName || '—'}</R.Text>
           {recipientDetail(c, t, true).map((l, i) => <R.Text key={i} style={[st.small, { fontSize: 10.5, marginTop: i ? 0 : 3 }]}>{l}</R.Text>)}
@@ -702,13 +705,13 @@ function CommercialDocument({ input, layout }: { input: RenderInput; layout?: La
       </R.View>
 
       {intro ? (
-        <R.View style={{ marginTop: 24 }}>
+        <R.View style={{ marginTop: 24 * k }}>
           {bodyParts(intro.body, false).map((p, i, a) => <Part key={i} p={p} prev={a[i - 1]?.type} size={11.25} lh={1.5} gap={9} last={i === a.length - 1} />)}
         </R.View>
       ) : null}
 
-      <R.View style={{ marginTop: 30 }}>
-        <ItemsTable c={c} t={t} tail={<Totals input={input} t={t} />} />
+      <R.View style={{ marginTop: 30 * k }}>
+        <ItemsTable c={c} t={t} k={k} tail={<Totals input={input} t={t} k={k} />} />
       </R.View>
 
       {(() => {
@@ -716,7 +719,7 @@ function CommercialDocument({ input, layout }: { input: RenderInput; layout?: La
         if (!items.length) return closing;
         const lastI = items.length - 1;
         return (
-          <R.View style={{ marginTop: layout?.planBreak ? 0 : 30 }} break={layout?.planBreak}>
+          <R.View style={{ marginTop: layout?.planBreak ? 0 : 30 * k }} break={layout?.planBreak}>
             {layout?.probe ? <R.View render={({ pageNumber }) => { layout.probe!.planPage = pageNumber; return null; }} /> : null}
             {items.map((it, i) => it(i === 0 ? opener : undefined, i === lastI ? closing : undefined))}
           </R.View>
@@ -845,7 +848,7 @@ export function DocumentPdf(input: RenderInput & { layout?: LayoutOpts }) {
   UP_LOCALE = c.locale === 'tr' ? 'tr-TR' : 'en-GB';
   const t = L[c.locale];
   const commercial = input.kind === 'quote' || input.kind === 'proforma';
-  const foot = footerPlan(input, t);
+  const foot = footerPlan(input, t, input.layout?.k ?? 1);
   const pageStyle = { fontFamily: 'Manrope', fontSize: 10.5, color: C.ink, backgroundColor: '#FFFFFF', paddingTop: PT, paddingBottom: foot.reserve, paddingLeft: PX, paddingRight: PX };
   const issuer = input.issuer;
   return (
@@ -905,22 +908,39 @@ async function renderLaidOut(input: RenderInput, base: Omit<LayoutOpts, 'cont' |
   return last;
 }
 
+/** Teklif / proforma at one spacing: when "Plan ve koşullar" starts on one page and runs onto the last page, a second layout starts it on a fresh page and is kept if the document does not get longer. */
+async function commercialLayout(input: RenderInput, k: number): Promise<RenderedPdf> {
+  const first = await renderLaidOut(input, { k });
+  if (!first.planPage || first.planPage >= first.pages) return { buffer: first.buffer, pages: first.pages };
+  const second = await renderLaidOut(input, { planBreak: true, k });
+  const pick = second.pages <= first.pages ? second : first;
+  return { buffer: pick.buffer, pages: pick.pages };
+}
+
 /**
- * Teklif / proforma: when "Plan ve koşullar" starts on one page and runs onto
- * the last page (which then often holds only a short remainder), a second
- * layout starts the plan on a fresh page and is kept only if the document does
- * not get longer. No page limit is applied. Every layout adds "… — devam"
- * labels where a list continues on a new page.
+ * Every layout adds "… — devam" labels where a list continues on a new page.
+ * Teklif / proforma: a short document that runs onto a second page only by a
+ * little (e.g. three items, totals and the payment terms) is laid out again
+ * with the vertical gaps reduced evenly (×0.85, then ×0.7: margins between
+ * blocks, row padding, the gap above the footer; never the type sizes or the
+ * content). The tighter layout is used only if the whole document then fits on
+ * ONE page; longer documents keep the normal spacing and flow over as many
+ * pages as they need. No page limit is applied.
  */
 export async function renderDocumentPdf(input: RenderInput): Promise<RenderedPdf> {
   await loadRenderer();
   registerFonts();
-  const first = await renderLaidOut(input, {});
-  if (input.kind !== 'quote' && input.kind !== 'proforma') return { buffer: first.buffer, pages: first.pages };
-  if (!first.planPage || first.planPage >= first.pages) return { buffer: first.buffer, pages: first.pages };
-  const second = await renderLaidOut(input, { planBreak: true });
-  const pick = second.pages <= first.pages ? second : first;
-  return { buffer: pick.buffer, pages: pick.pages };
+  if (input.kind !== 'quote' && input.kind !== 'proforma') {
+    const r = await renderLaidOut(input, {});
+    return { buffer: r.buffer, pages: r.pages };
+  }
+  const normal = await commercialLayout(input, 1);
+  if (normal.pages !== 2) return normal;
+  for (const k of [0.85, 0.7]) {
+    const tight = await commercialLayout(input, k);
+    if (tight.pages === 1) return tight;
+  }
+  return normal;
 }
 
 export { CW as CONTENT_W };
