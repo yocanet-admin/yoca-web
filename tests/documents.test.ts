@@ -177,3 +177,30 @@ test('bank details of a version vs. today: changed / removed, never suggests oth
   assert.equal(removed[0].now, null);
   assert.deepEqual(bankChanges([], [acc({ id: 'new' })]), []); // an account added later is never suggested
 });
+
+test('letter fields: salutation and project are kept, old content without them still loads', () => {
+  const fresh = newContent('letter', { now: new Date('2026-11-05T09:00:00Z') });
+  assert.equal(fresh.salutation, 'Sayın Yetkili,');
+  assert.equal(fresh.projectId, null);
+  const old = sanitizeContent({ blocks: [{ id: 'b', key: 'body', heading: 'Metin', body: 'Sayın Yıldız,\n\nMetin.' }] }, 'letter');
+  assert.equal(old.salutation, '', 'an old letter gets no extra salutation (its text already has one)');
+  const withProject = sanitizeContent({ ...fresh, projectId: '11111111-2222-4333-8444-555555555555', salutation: 'Sayın Yıldız,' }, 'letter');
+  assert.equal(withProject.projectId, '11111111-2222-4333-8444-555555555555');
+  assert.equal(withProject.salutation, 'Sayın Yıldız,');
+  assert.equal(sanitizeContent({ ...fresh, projectId: 'x; drop table' }, 'letter').projectId, null);
+});
+
+test('AI letter: invented dates, numbers and promises are flagged; repeated salutation/closing removed', async () => {
+  const { cleanLetter, newFacts } = await import('../lib/ai/documents');
+  const given = 'Konu: test ortamı\nAna sayfa test ortamına alındı. Katalog bekleniyor.';
+  assert.deepEqual(newFacts(given, 'Ana sayfa test ortamına alındı.'), []);
+  const flagged = newFacts(given, 'Yayın 12 Aralık tarihinde yapılacak ve sorunsuz çalışmasını garanti ediyoruz.');
+  assert.ok(flagged.includes('12'));
+  assert.ok(flagged.some((x) => /aralık/i.test(x)));
+  assert.ok(flagged.some((x) => /garanti/i.test(x)));
+  const r = cleanLetter(given, { title: 'Bilgilendirme', salutation: 'Sayın Yetkili,', body: 'Sayın Yetkili,\n\nAna sayfa test ortamına alındı. Tarih: [EKSİK: yayın tarihi]\n\nSaygılarımızla,', closing: 'Saygılarımızla,', missing: ['Yayın tarihi'] });
+  assert.equal(r.body, 'Ana sayfa test ortamına alındı. Tarih: [EKSİK: yayın tarihi]');
+  assert.deepEqual(r.warnings, [], 'an [EKSİK] marker is not an invented fact');
+  const bad = cleanLetter(given, { title: 'x', salutation: '', body: 'Testlerin %100’ü başarılı oldu, ₺5.000 ek ücret yoktur.', closing: '', missing: [] });
+  assert.equal(bad.warnings.length, 2);
+});

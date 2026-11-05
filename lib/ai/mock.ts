@@ -163,6 +163,17 @@ export function mockStructured(schemaName: string, input: string): unknown {
         missing: ['Kalem fiyatları', 'Kalan ödemenin zamanı', 'Müşterinin vergi numarası'],
       };
     }
+    case 'doc_letter': {
+      if (input.includes('[mock-hata]')) throw new Error('Mock: yapay zekâ isteği başarısız (test).');
+      const facts = /<FACTS>\n([\s\S]*?)\n<\/FACTS>/.exec(input)?.[1] ?? '';
+      return {
+        title: 'Çalışma hakkında bilgilendirme',
+        salutation: 'Sayın Yetkili,',
+        body: `Sizi yürüttüğümüz çalışma hakkında bilgilendirmek isteriz.\n\n${facts.split(/\n+/)[0] ?? ''}\n\nBir sonraki adımın tarihi: [EKSİK: bir sonraki adımın tarihi].`,
+        closing: 'Saygılarımızla,',
+        missing: ['Bir sonraki adımın tarihi'],
+      };
+    }
     case 'doc_rewrite': {
       if (input.includes('[mock-hata]')) throw new Error('Mock: yapay zekâ isteği başarısız (test).');
       const text = /<TEXT>\n([\s\S]*?)\n<\/TEXT>/.exec(input)?.[1] ?? input;

@@ -31,7 +31,7 @@ export type QuoteState = (typeof QUOTE_STATES)[number];
 export const KIND_LABEL: Record<DocKind, { tr: string; en: string; short: string }> = {
   quote: { tr: 'Fiyat teklifi', en: 'Price quotation', short: 'Teklif' },
   proforma: { tr: 'Proforma', en: 'Proforma', short: 'Proforma' },
-  letter: { tr: 'Antetli yazı', en: 'Letter', short: 'Yazı' },
+  letter: { tr: 'Antetli yazı / Bilgilendirme', en: 'Letter', short: 'Yazı' },
   status_report: { tr: 'Proje durum raporu', en: 'Project status report', short: 'Durum raporu' },
   delivery: { tr: 'Teslim belgesi', en: 'Delivery note', short: 'Teslim' },
 };

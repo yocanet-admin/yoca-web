@@ -18,6 +18,8 @@ export interface ClientLite {
   contact_name: string; email: string; phone: string; address: string | null; billing: Record<string, string> | null; archived_at: string | null;
 }
 
+export interface ProjectLite { id: string; client_id: string | null; name: string; status: string; archived_at: string | null }
+
 export interface DocListRow {
   id: string; kind: DocKind; number: string; title: string; status: DocStatus; client_id: string | null; source_id: string | null;
   locale: 'tr' | 'en'; currency: string; total: string | null; final_version: number; final_total: string | null; final_at: string | null;
@@ -38,13 +40,13 @@ export interface EventRow { id: string; kind: string; detail: Record<string, unk
 
 export interface DocDetail {
   ok: boolean; error?: string;
-  document: DocFull; versions: VersionRow[]; renders: RenderRow[]; events: EventRow[]; clients: ClientLite[];
+  document: DocFull; versions: VersionRow[]; renders: RenderRow[]; events: EventRow[]; clients: ClientLite[]; projects: ProjectLite[];
   source: { id: string; number: string; title: string } | null; derived: Array<{ id: string; number: string; title: string; kind: DocKind; status: DocStatus }>;
   settings: DocSettings; issuer: Issuer; company: CompanyInfo; companyRevision: number; templateVersion: string;
   assessment: { missing: MissingReport; total: string | null };
 }
 
-export interface DocList { ok: boolean; error?: string; documents: DocListRow[]; clients: ClientLite[]; settings: DocSettings; issuer: Issuer; companyRevision: number }
+export interface DocList { ok: boolean; error?: string; documents: DocListRow[]; clients: ClientLite[]; projects: ProjectLite[]; settings: DocSettings; issuer: Issuer; companyRevision: number }
 
 export const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now().toString(16)}-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`);
 

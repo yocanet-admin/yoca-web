@@ -37,6 +37,13 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID.test(v);
 
 const CLIENT_COLUMNS = 'id, name, legal_name, brand_name, party_type, roles, contact_name, email, phone, address, billing, archived_at';
+const PROJECT_COLUMNS = 'id, client_id, name, status, archived_at';
+type Sb = NonNullable<ReturnType<typeof getSupabaseAsUser>>;
+/** Operations projects (optional link for a document). Missing table / no rights → empty list, never an error. */
+async function projectsOf(client: Sb) {
+  const r = await client.from('ops_projects').select(PROJECT_COLUMNS).order('name');
+  return r.error ? [] : (r.data ?? []);
+}
 
 export async function GET(request: NextRequest) {
   if (!(await requireAdmin(request))) return unauthorized();
@@ -45,9 +52,10 @@ export async function GET(request: NextRequest) {
   const id = request.nextUrl.searchParams.get('id');
   const ctx = await loadContext(client);
   if (!id) {
-    const [docs, clients] = await Promise.all([
+    const [docs, clients, projects] = await Promise.all([
       client.from('doc_documents').select('*').order('created_at', { ascending: false }).limit(1000),
       client.from('clients').select(CLIENT_COLUMNS).order('name'),
+      projectsOf(client),
     ]);
     if (docs.error) { const e = dbError(docs.error); return json({ ok: false, error: e.error }, e.status); }
     // List rows without the full content (only what the list shows).
@@ -55,15 +63,16 @@ export async function GET(request: NextRequest) {
       const c = (content && typeof content === 'object' ? content : {}) as { issueDate?: string; validUntil?: string; recipient?: { company?: string; name?: string } };
       return { ...row, issue_date: c.issueDate ?? null, valid_until: c.validUntil ?? null, recipient_company: c.recipient?.company ?? '', recipient_name: c.recipient?.name ?? '' };
     });
-    return json({ ok: true, documents, clients: clients.data ?? [], settings: ctx.settings, issuer: ctx.issuer, companyRevision: ctx.revision });
+    return json({ ok: true, documents, clients: clients.data ?? [], projects, settings: ctx.settings, issuer: ctx.issuer, companyRevision: ctx.revision });
   }
   if (!isUuid(id)) return json({ ok: false, error: 'bad id' }, 400);
-  const [doc, versions, events, clients, renders] = await Promise.all([
+  const [doc, versions, events, clients, renders, projects] = await Promise.all([
     client.from('doc_documents').select('*').eq('id', id).maybeSingle(),
     client.from('doc_versions').select('id, document_id, version, number, title, total, currency, pdf_path, pdf_bytes, pdf_pages, pdf_sha256, finalized_by, finalized_at, snapshot').eq('document_id', id).order('version', { ascending: false }),
     client.from('doc_events').select('id, kind, detail, actor, at').eq('document_id', id).order('at', { ascending: false }).limit(100),
     client.from('clients').select(CLIENT_COLUMNS).order('name'),
     client.from('doc_renders').select('id, version, company_revision, template_version, reason, issuer, pdf_pages, pdf_bytes, generated_by, generated_at').eq('document_id', id).order('generated_at', { ascending: false }),
+    projectsOf(client),
   ]);
   if (doc.error) { const e = dbError(doc.error); return json({ ok: false, error: e.error }, e.status); }
   if (!doc.data) return json({ ok: false, error: 'Belge bulunamadı.' }, 404);
@@ -86,6 +95,7 @@ export async function GET(request: NextRequest) {
     })),
     events: events.data ?? [],
     clients: clients.data ?? [],
+    projects,
     source: source.data ?? null,
     derived: derived.data ?? [],
     settings: ctx.settings,
@@ -141,6 +151,21 @@ export async function POST(request: NextRequest) {
       if ((c.data as { archived_at: string | null }).archived_at) return json({ ok: false, error: 'Arşivlenmiş müşteri için yeni belge açılamaz.' }, 409);
       clientId = body.clientId as string;
       content.recipient = recipientFromClient(c.data as Record<string, unknown>);
+    } else if (body.recipient && typeof body.recipient === 'object') {
+      // Not linked to a client: the recipient typed in the "Yeni belge" dialog.
+      const rc = body.recipient as Record<string, unknown>;
+      const t = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+      content.recipient = { ...content.recipient, company: t(rc.company, 200), name: t(rc.name, 200) };
+    }
+    // Optional operations project: its id and name are copied into the document.
+    if (body.projectId) {
+      if (!isUuid(body.projectId)) return json({ ok: false, error: 'Geçersiz proje.' }, 400);
+      const pr = await client.from('ops_projects').select(PROJECT_COLUMNS).eq('id', body.projectId).maybeSingle();
+      if (!pr.data) return json({ ok: false, error: 'Proje bulunamadı.' }, 404);
+      const pd = pr.data as { id: string; client_id: string | null; name: string };
+      if (clientId && pd.client_id && pd.client_id !== clientId) return json({ ok: false, error: 'Seçilen proje bu müşteriye ait değil.' }, 409);
+      content.projectId = pd.id;
+      content.projectName = pd.name;
     }
     const r = await client.rpc('doc_create', {
       p_kind: kind, p_title: '', p_client_id: clientId, p_source_id: null, p_locale: content.locale, p_currency: content.currency,
@@ -175,7 +200,7 @@ export async function POST(request: NextRequest) {
       content = {
         ...base,
         recipient: q.recipient, currency: q.currency, items: q.items.map((i) => ({ ...i, id: localId('i') })), payment: q.payment.map((p) => ({ ...p, id: localId('p') })),
-        deliveryTime: q.deliveryTime, bankAccountIds: q.bankAccountIds, projectName: q.projectName, reference: q.reference,
+        deliveryTime: q.deliveryTime, bankAccountIds: q.bankAccountIds, projectName: q.projectName, projectId: q.projectId, reference: q.reference,
         signatory: q.signatory,
         blocks: [{ id: localId('b'), key: 'notes', heading: blockHeading('notes', q.locale), body: q.locale === 'tr'
           ? `Bu proforma, ${row.number} numaralı teklifin ${(v.data as { version: number }).version}. sürümüne dayanır.${ctx.settings.proformaNote ? `\n\n${ctx.settings.proformaNote}` : ''}`
