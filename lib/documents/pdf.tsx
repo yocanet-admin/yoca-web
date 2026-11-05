@@ -1,7 +1,7 @@
 /**
  * Yoca — Teklifler ve Belgeler: A4 PDF template (server only, @react-pdf/renderer).
  *
- * Template "belge-2026-11-e": the Yoca corporate set chosen in Bolt
+ * Template "belge-2026-11-f" (Bolt set; "f": short proforma notes inside "Ödeme ve koşullar"): the Yoca corporate set chosen in Bolt
  * (yoca-kurumsal-claude-teslim, ProformaDocument / LetterDocument / A4Sheet /
  * DocumentFooter). The Bolt preview is a fixed 794 × 1123 px stage; this file
  * rebuilds the same look on the real document data with automatic page
@@ -606,15 +606,45 @@ function Signatory({ input, align = 'left' }: { input: RenderInput; align?: 'lef
 }
 
 /** Bolt closing: 1.5 pt ink rule; "Ödeme ve koşullar" (payment plan, bank details, closing text) left, logo right. */
-function CommercialClosing({ input, t, banks, k = 1 }: { input: RenderInput; t: Labels; banks: BankAccount[]; k?: number }) {
+const CLOSING_LEFT = 330;
+
+/**
+ * Proforma: a SHORT Notlar text (the free payment / terms text, at most
+ * TERMS_MAX_LINES lines in the closing column) is printed inside "Ödeme ve
+ * koşullar", right under the payment plan, as in the Bolt sample — and not
+ * again as a separate section, so a few sentences never open a "Plan ve
+ * koşullar" page. Longer notes stay a normal section that flows over pages.
+ */
+const TERMS_MAX_LINES = 9;
+function inlineTerms(kind: DocKind, blocks: Block[]): Block | null {
+  if (kind !== 'proforma') return null;
+  const notes = blocks.filter((b) => b.key === 'notes' && b.body.trim());
+  if (notes.length !== 1) return null;
+  const parts = bodyParts(notes[0].body, BLOCK_LABEL.notes.list);
+  const n = parts.reduce((sum, p) => sum + lines(p.text, p.type === 'li' ? CLOSING_LEFT - 15 : CLOSING_LEFT, 10.5), 0) + Math.max(0, parts.length - 1) * 0.6;
+  return n <= TERMS_MAX_LINES ? notes[0] : null;
+}
+
+function CommercialClosing({ input, t, banks, terms, k = 1 }: { input: RenderInput; t: Labels; banks: BankAccount[]; terms?: Block | null; k?: number }) {
   const c = input.content;
   const hasPay = computeDocument(c).payment.rows.length > 0;
+  const termParts = terms ? bodyParts(terms.body, BLOCK_LABEL.notes.list) : [];
+  // the section label is printed only when the admin wrote his own (the default "Notlar" adds nothing here)
+  const ownHeading = terms && terms.heading.trim() && terms.heading.trim() !== BLOCK_LABEL.notes[c.locale] ? terms.heading.trim() : '';
+  const hasTerms = termParts.length > 0;
   return (
     <R.View wrap={false} style={{ marginTop: 24 * k, borderTopWidth: 1.5, borderTopColor: C.ink, paddingTop: 18 * k, flexDirection: 'row', justifyContent: 'space-between' }}>
-      <R.View style={{ width: 330 }}>
-        {hasPay ? <><Kicker style={{ marginBottom: 6 }}>{up(t.paymentTerms)}</Kicker><PaymentRows c={c} /></> : null}
-        {banks.length ? <><Kicker style={{ marginTop: hasPay ? 15 : 0, marginBottom: 6 }}>{up(t.bank)}</Kicker><BankList banks={banks} t={t} /></> : null}
-        {c.closing ? <R.Text style={[st.body, { marginTop: hasPay || banks.length ? 15 : 0 }]}>{c.closing}</R.Text> : null}
+      <R.View style={{ width: CLOSING_LEFT }}>
+        {hasPay || hasTerms ? <Kicker style={{ marginBottom: 6 }}>{up(t.paymentTerms)}</Kicker> : null}
+        {hasPay ? <PaymentRows c={c} /> : null}
+        {hasTerms ? (
+          <R.View style={{ marginTop: hasPay ? 9 : 0 }}>
+            {ownHeading ? <R.Text style={[st.strong, { fontSize: 10, marginBottom: 3 }]}>{ownHeading}</R.Text> : null}
+            {termParts.map((p, i) => <Part key={i} p={p} prev={termParts[i - 1]?.type} size={10.5} lh={1.55} gap={6} last={i === termParts.length - 1} />)}
+          </R.View>
+        ) : null}
+        {banks.length ? <><Kicker style={{ marginTop: hasPay || hasTerms ? 15 : 0, marginBottom: 6 }}>{up(t.bank)}</Kicker><BankList banks={banks} t={t} /></> : null}
+        {c.closing ? <R.Text style={[st.body, { marginTop: hasPay || hasTerms || banks.length ? 15 : 0 }]}>{c.closing}</R.Text> : null}
       </R.View>
       <R.View style={{ width: 130, alignItems: 'flex-end' }}>
         <Logo width={112.5} />
@@ -654,7 +684,8 @@ function CommercialDocument({ input, layout }: { input: RenderInput; layout?: La
   const clientName = r.company || r.name;
   const blocks = c.blocks.filter((b) => b.body.trim());
   const intro = blocks.find((b) => b.key === 'intro');
-  const terms = blocks.filter((b) => b.key !== 'intro');
+  const inline = inlineTerms(input.kind, blocks);
+  const terms = blocks.filter((b) => b.key !== 'intro' && b !== inline);
   const banks = def.bank ? input.bankAccounts.filter((a) => c.bankAccountIds.includes(a.id)) : [];
   // Sections in the kit order: process blocks, the timeline, then the rest.
   const processKeys = new Set(['scope', 'deliverables', 'assumptions', 'revisions', 'terms']);
@@ -666,7 +697,7 @@ function CommercialDocument({ input, layout }: { input: RenderInput; layout?: La
     `${t.currency}: ${c.currency}`,
   ].filter(Boolean).join(' · ');
   const k = layout?.k ?? 1;
-  const closing = <CommercialClosing input={input} t={t} banks={banks} k={k} />;
+  const closing = <CommercialClosing input={input} t={t} banks={banks} terms={inline} k={k} />;
 
   type Item = (before?: React.ReactNode, after?: React.ReactNode) => React.ReactNode;
   const items: Item[] = [];

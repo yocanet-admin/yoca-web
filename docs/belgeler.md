@@ -164,10 +164,11 @@ Kurallar:
 
 ## PDF tasarımı
 
-Şablon: Bolt'ta seçilen Yoca kurumsal set (`yoca-kurumsal-claude-teslim`), `TEMPLATE_VERSION = 'belge-2026-11-e'`. Bolt önizlemesi sabit 794 × 1123 px'lik bir sahnedir; burada aynı görünüm gerçek verilerle ve otomatik sayfalamayla yeniden kurulur (1 px = 0,75 pt).
+Şablon: Bolt'ta seçilen Yoca kurumsal set (`yoca-kurumsal-claude-teslim`), `TEMPLATE_VERSION = 'belge-2026-11-f'`. Bolt önizlemesi sabit 794 × 1123 px'lik bir sahnedir; burada aynı görünüm gerçek verilerle ve otomatik sayfalamayla yeniden kurulur (1 px = 0,75 pt).
 
 - Beyaz sayfa, 42 pt kenar boşluğu. İlk sayfa: sağ üstte marka motifi, orijinal açık zemin logosu, küçük büyük-harf üst başlık, büyük başlık ve yeşil marka noktası. Devam sayfalarında motif yerine küçük logo ve “TÜR · NUMARA” satırı.
 - **Teklif / proforma:** belge başlığı alt başlık olarak; proformada “FATURA YERİNE GEÇMEZ”. “Hazırlanan” ve “Belge / tarih” sütunları. Üç lime hücreli tablo başlığı her sayfada tekrarlanır. Satırda kod, başlık, açıklama, miktar ve tutar; birim fiyat, indirim ve (birden çok KDV oranı varsa) satır KDV'si miktarın altında. Ara toplam, indirim, KDV ve büyük genel toplam + nokta. Sonda 1,5 pt mürekkep çizgili kapanış: solda “Ödeme ve koşullar” (ödeme planı), banka bilgileri, kapanış cümlesi; sağda logo ve imza yetkilisi.
+- **Proformada kısa Notlar:** serbest ödeme/koşul metni mevcut “Notlar” alanından gelir. Kapanış sütununda yaklaşık 9 satıra kadar ise “Ödeme ve koşullar” içinde, ödeme planının hemen altında basılır ve ayrıca bölüm olarak tekrarlanmaz; bu yüzden birkaç cümle için “Plan ve koşullar” sayfası açılmaz. Daha uzun Notlar normal bölüm olarak kalır ve gerekirse sonraki sayfaya akar. Başlık varsayılan “Notlar” değilse metnin üstünde gösterilir. Diğer belge türleri değişmedi.
 - **Antetli yazı / durum raporu / teslim belgesi:** “Alıcı” ve “Sayı / tarih” sütunları, mürekkep çizgi, “Konu” + başlık, hitap, metin, “Saygılarımızla,” ve logo (imza yetkilisi doluysa altında). Antetli yazının büyük başlığı Bolt'taki “Birlikte. / bir sonraki adıma.”; rapor “Rapor.”, teslim belgesi “Teslim.”.
 - **Her sayfa:** altbilgide 1,5 pt çizgi, solda resmî unvan ve şirket bilgileri (adres · telefon · e-posta · vergi dairesi · VKN · MERSİS …), sağda web sitesi ve sayfa numarası (“01” ya da “01 / 03”). Taslak ve örnek belgelerde lime “TASLAK / ÖRNEK” etiketi.
 - Şirket bilgileri yalnızca o anki şirket profilinden gelir; boş alan ve etiketi basılmaz. Resmî unvan (“Yoca Teknoloji Ltd Şti”) profilde girilmelidir; koda yazılmadı.
