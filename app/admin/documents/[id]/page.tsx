@@ -8,7 +8,7 @@ import { aiAction, clientDisplay, docAction, draftPdf, loadDoc, moneyOf, newKey,
 import { BankDecision } from '@/components/admin/documents/BankDecision';
 import { EmailDialog } from '@/components/admin/documents/EmailDialog';
 import { adminPost } from '@/lib/cockpit/client';
-import { documentEmailDefaults, EMAIL_STATUS_LABEL } from '@/lib/documents/mail';
+import { documentEmailDefaults, EMAIL_STATUS_LABEL, EMAIL_THEME_LABEL } from '@/lib/documents/mail';
 import { DocSummary } from '@/components/admin/documents/DocSummary';
 import { Group } from '@/components/admin/documents/Group';
 import type { BankChange } from '@/lib/documents/settings';
@@ -754,6 +754,7 @@ function EditorInner() {
                 <p className="text-white">Sürüm {m.version} · {m.pdf_name}</p>
                 <p className="text-muted">Alıcı: {m.to_addrs.join(', ')}{m.cc_addrs.length ? ` · CC: ${m.cc_addrs.join(', ')}` : ''}</p>
                 <p className="text-muted">Konu: {m.subject}</p>
+                <p className="text-muted">E-posta teması: {EMAIL_THEME_LABEL[m.theme === 'dark' ? 'dark' : 'light']}</p>
                 {m.error && m.status !== 'accepted' ? <p className="text-yellow-200">{m.error}</p> : null}
                 {m.status_checked_at ? <p className="text-subtle">Durum kontrolü: {fmtDateTime(m.status_checked_at)}{m.last_event ? ` (${m.last_event})` : ''}</p> : null}
                 <div className="flex flex-wrap gap-1.5">
@@ -810,7 +811,7 @@ function EditorInner() {
         const defaults = documentEmailDefaults({ kind, locale: vc.locale, number: doc.number, title: v?.title ?? draft.title, recipient: vc.recipient, signatory: vc.signatory, issuer: data.issuer });
         return (
           <EmailDialog docId={doc.id} number={doc.number} versions={data.versions.map((x) => ({ version: x.version, finalized_at: x.finalized_at }))} defaultVersion={doc.final_version}
-            defaults={defaults} from={data.mail.from} replyTo={data.issuer.email}
+            defaults={defaults} from={data.mail.from} replyTo={data.issuer.email} issuer={data.issuer} locale={vc.locale} themeReady={data.mail.themeReady}
             onClose={() => { setMailing(false); void refreshEmails(); }} onSent={() => void refreshEmails()} />
         );
       })()}

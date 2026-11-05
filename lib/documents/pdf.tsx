@@ -1,7 +1,7 @@
 /**
  * Yoca — Teklifler ve Belgeler: A4 PDF template (server only, @react-pdf/renderer).
  *
- * Template "belge-2026-11-f" (Bolt set; "f": short proforma notes inside "Ödeme ve koşullar"): the Yoca corporate set chosen in Bolt
+ * Template "belge-2026-11-g" (Bolt set; "f": short proforma notes inside "Ödeme ve koşullar"; "g": ×0.6 spacing step): the Yoca corporate set chosen in Bolt
  * (yoca-kurumsal-claude-teslim, ProformaDocument / LetterDocument / A4Sheet /
  * DocumentFooter). The Bolt preview is a fixed 794 × 1123 px stage; this file
  * rebuilds the same look on the real document data with automatic page
@@ -952,12 +952,15 @@ async function commercialLayout(input: RenderInput, k: number): Promise<Rendered
  * Every layout adds "… — devam" labels where a list continues on a new page.
  * Teklif / proforma: a short document that runs onto a second page only by a
  * little (e.g. three items, totals and the payment terms) is laid out again
- * with the vertical gaps reduced evenly (×0.85, then ×0.7: margins between
- * blocks, row padding, the gap above the footer; never the type sizes or the
- * content). The tighter layout is used only if the whole document then fits on
+ * with the vertical gaps reduced evenly (×0.85, ×0.7, then ×0.6: margins
+ * between blocks, row padding, the gap above the footer; never the type sizes
+ * or the content). ×0.6 covers the live case: the footer's e-mail line and the
+ * draft status line together. The tighter layout is used only if the whole document then fits on
  * ONE page; longer documents keep the normal spacing and flow over as many
  * pages as they need. No page limit is applied.
  */
+/** Spacing factors tried, in order, for a short teklif / proforma (never below 0.6: tighter reads cramped). */
+export const COMPACT_STEPS: number[] = [0.85, 0.7, 0.6];
 export async function renderDocumentPdf(input: RenderInput): Promise<RenderedPdf> {
   await loadRenderer();
   registerFonts();
@@ -967,7 +970,7 @@ export async function renderDocumentPdf(input: RenderInput): Promise<RenderedPdf
   }
   const normal = await commercialLayout(input, 1);
   if (normal.pages !== 2) return normal;
-  for (const k of [0.85, 0.7]) {
+  for (const k of COMPACT_STEPS) {
     const tight = await commercialLayout(input, k);
     if (tight.pages === 1) return tight;
   }

@@ -17,8 +17,26 @@ import { KIND_LABEL } from '@/lib/documents/model';
 export const SITE = 'https://yoca.net';
 /** Original light-background logo as PNG (public/brand/email/yoca-logo-light.png, 500 × 138). */
 export const EMAIL_LOGO = `${SITE}/brand/email/yoca-logo-light.png`;
+/** Original logo with the white wordmark, for the dark theme (public/brand/email/yoca-logo.png, 500 × 140). */
+export const EMAIL_LOGO_DARK = `${SITE}/brand/email/yoca-logo.png`;
+
+/** E-mail body theme. Only the e-mail body changes; the attached PDF never does. */
+export type EmailTheme = 'light' | 'dark';
+export const EMAIL_THEMES: readonly EmailTheme[] = ['light', 'dark'];
+export const EMAIL_THEME_LABEL: Record<EmailTheme, string> = { light: 'Açık', dark: 'Koyu' };
+export const emailThemeOf = (value: unknown): EmailTheme => (value === 'dark' ? 'dark' : 'light');
 
 const C = { ink: '#0D0E12', lime: '#A2FF00', leaf: '#40C401', mist: '#F3F5EF', line: '#DCE0D8', muted: '#666A65', body: '#2B2E29' };
+
+/**
+ * Colours per theme. Light is the corporate set as before (white card on mist).
+ * Dark: Yoca ink #0D0E12 as the whole ground, white headings, light grey text
+ * (contrast ≥ 7:1 on the ground), lime / leaf accents, lime links.
+ */
+const THEME = {
+  light: { page: C.mist, card: '#FFFFFF', heading: C.ink, text: C.body, muted: C.muted, line: C.line, footTop: C.ink, link: '', footLink: '' },
+  dark: { page: C.ink, card: C.ink, heading: '#FFFFFF', text: '#E4E7E1', muted: '#A4AAA2', line: '#2C3038', footTop: '#FFFFFF', link: C.lime, footLink: '#D9DDD6' },
+} as const;
 const FONT = "Manrope, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif";
 
 export function esc(value: string): string {
@@ -40,10 +58,34 @@ export function companyFooter(issuer: Issuer, locale: DocLocale = 'tr'): { top: 
   return { top, details };
 }
 
-/** Plain text → paragraphs (blank line) and line breaks, escaped. */
-export function textToHtml(text: string, style: string): string {
+/** Plain text → paragraphs (blank line) and line breaks, escaped. With a link style, web and e-mail addresses become styled links. */
+export function textToHtml(text: string, style: string, linkStyle?: string): string {
   return text.replace(/\r\n?/g, '\n').trim().split(/\n{2,}/).filter((p) => p.trim())
-    .map((p) => `<p style="margin:0 0 16px 0;${style}">${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('');
+    .map((p) => `<p style="margin:0 0 16px 0;${style}">${linkStyle ? p.trim().split('\n').map((line) => linkify(line, linkStyle)).join('<br>') : esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('');
+}
+
+const LINK_RE = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|[^\s@<>(),;:"'[\]]+@[^\s@<>(),;:"'[\]]+\.[A-Za-z]{2,})/g;
+
+/**
+ * One line of plain text, escaped, with web / e-mail addresses as links in the
+ * given style. Mail apps link bare addresses themselves (often in blue, hard to
+ * read on a dark ground); explicit links keep the theme's colour.
+ */
+export function linkify(line: string, linkStyle: string): string {
+  let out = '';
+  let last = 0;
+  const re = new RegExp(LINK_RE.source, 'g');
+  for (let m = re.exec(line); m; m = re.exec(line)) {
+    const start = m.index;
+    const raw = m[0];
+    const core = raw.replace(/[.,;:!?)\]]+$/, '');
+    const tail = raw.slice(core.length);
+    const isMail = !/^(https?:\/\/|www\.)/i.test(core);
+    const href = isMail ? `mailto:${core}` : safeLink(/^www\./i.test(core) ? `https://${core}` : core);
+    out += esc(line.slice(last, start)) + (href ? `<a href="${esc(href)}" style="${linkStyle}">${esc(core)}</a>` : esc(core)) + esc(tail);
+    last = start + raw.length;
+  }
+  return out + esc(line.slice(last));
 }
 
 /** Only http(s) links are put in a button. */
@@ -67,44 +109,65 @@ export interface BrandedEmail {
   /** small grey note under the message (e.g. the attachment name) */
   note?: string;
   logoUrl?: string;
+  /** e-mail body theme (default light); never affects an attachment */
+  theme?: EmailTheme;
 }
 
 export function brandedEmailHtml(m: BrandedEmail): string {
+  const dark = m.theme === 'dark';
+  const T = THEME[dark ? 'dark' : 'light'];
+  // Dark: explicit bgcolor attributes as well (Outlook for Windows ignores some CSS backgrounds).
+  const bg = (color: string) => (dark ? ` bgcolor="${color}"` : '');
   const foot = companyFooter(m.issuer, m.locale);
   const href = m.cta ? safeLink(m.cta.href) : null;
   const cta = href && m.cta?.label.trim()
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0 0 0;"><tr><td bgcolor="${C.lime}" style="background:${C.lime};"><a href="${esc(href)}" style="display:inline-block;padding:14px 28px;font-family:${FONT};font-size:15px;font-weight:800;line-height:1;color:${C.ink};text-decoration:none;">${esc(m.cta.label.trim())}</a></td></tr></table>`
     : '';
   const headline = clean(m.headline);
+  const bodyLink = dark ? `color:${T.link};text-decoration:underline;` : undefined;
+  const footLink = `color:${T.footLink};text-decoration:none;`;
+  const web = websiteOf(m.issuer);
+  const footTop = dark ? [esc(clean(m.issuer.legalName)), web ? `<a href="${esc(`https://${web}`)}" style="${footLink}">${esc(web)}</a>` : ''].filter(Boolean).join(' · ') : esc(foot.top);
+  const footDetails = dark ? linkify(foot.details, footLink) : esc(foot.details);
+  const darkHead = dark
+    ? `<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+`
+    : '';
+  const darkStyle = dark
+    ? `  :root { color-scheme: dark; supported-color-schemes: dark; }
+  a[x-apple-data-detectors] { color: inherit !important; text-decoration: none !important; font-size: inherit !important; font-family: inherit !important; font-weight: inherit !important; line-height: inherit !important; }
+`
+    : '';
   return `<!doctype html>
 <html lang="${m.locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="x-apple-disable-message-reformatting">
-<title>${esc(headline || m.preheader)}</title>
+${darkHead}<title>${esc(headline || m.preheader)}</title>
 <style>
-  @media only screen and (max-width: 620px) {
+${darkStyle}  @media only screen and (max-width: 620px) {
     .container { width: 100% !important; }
     .pad-x { padding-left: 24px !important; padding-right: 24px !important; }
     .headline { font-size: 30px !important; }
   }
 </style>
 </head>
-<body style="margin:0;padding:0;background:${C.mist};">
+<body style="margin:0;padding:0;background:${T.page};"${bg(T.page)}>
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(m.preheader)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${C.mist};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${T.page};"${bg(T.page)}>
   <tr>
-    <td align="center" style="padding:32px 16px;">
-      <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#FFFFFF;">
-        <tr><td class="pad-x" style="padding:40px 48px 0 48px;"><img src="${esc(m.logoUrl ?? EMAIL_LOGO)}" alt="Yoca" width="132" style="display:block;width:132px;height:auto;border:0;outline:none;text-decoration:none;"></td></tr>
+    <td align="center" style="padding:32px 16px;"${bg(T.page)}>
+      <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:${T.card};"${bg(T.card)}>
+        <tr><td class="pad-x" style="padding:40px 48px 0 48px;"><img src="${esc(m.logoUrl ?? (dark ? EMAIL_LOGO_DARK : EMAIL_LOGO))}" alt="Yoca" width="132" style="display:block;width:132px;height:auto;border:0;outline:none;text-decoration:none;"></td></tr>
         <tr><td class="pad-x" style="padding:28px 48px 0 48px;"><div style="width:40px;height:3px;background:${C.lime};font-size:0;line-height:0;">&nbsp;</div></td></tr>
-        ${headline ? `<tr><td class="pad-x" style="padding:28px 48px 0 48px;"><h1 class="headline" style="margin:0;font-family:${FONT};font-size:36px;line-height:1.15;font-weight:800;color:${C.ink};">${esc(headline)}<span style="display:inline-block;width:11px;height:11px;margin-left:8px;background:${C.leaf};"></span></h1></td></tr>` : ''}
-        ${clean(m.greeting) ? `<tr><td class="pad-x" style="padding:28px 48px 0 48px;font-family:${FONT};font-size:16px;line-height:1.5;font-weight:800;color:${C.ink};">${esc(clean(m.greeting))}</td></tr>` : ''}
-        <tr><td class="pad-x" style="padding:${clean(m.greeting) ? 12 : 28}px 48px 0 48px;">${textToHtml(m.body, `font-family:${FONT};font-size:16px;line-height:1.5;color:${C.body};`)}${cta}</td></tr>
-        ${clean(m.note) ? `<tr><td class="pad-x" style="padding:8px 48px 0 48px;font-family:${FONT};font-size:13px;line-height:1.5;color:${C.muted};">${esc(clean(m.note))}</td></tr>` : ''}
+        ${headline ? `<tr><td class="pad-x" style="padding:28px 48px 0 48px;"><h1 class="headline" style="margin:0;font-family:${FONT};font-size:36px;line-height:1.15;font-weight:800;color:${T.heading};">${esc(headline)}<span style="display:inline-block;width:11px;height:11px;margin-left:8px;background:${C.leaf};"></span></h1></td></tr>` : ''}
+        ${clean(m.greeting) ? `<tr><td class="pad-x" style="padding:28px 48px 0 48px;font-family:${FONT};font-size:16px;line-height:1.5;font-weight:800;color:${T.heading};">${esc(clean(m.greeting))}</td></tr>` : ''}
+        <tr><td class="pad-x" style="padding:${clean(m.greeting) ? 12 : 28}px 48px 0 48px;">${textToHtml(m.body, `font-family:${FONT};font-size:16px;line-height:1.5;color:${T.text};`, bodyLink)}${cta}</td></tr>
+        ${clean(m.note) ? `<tr><td class="pad-x" style="padding:8px 48px 0 48px;font-family:${FONT};font-size:13px;line-height:1.5;color:${T.muted};">${esc(clean(m.note))}</td></tr>` : ''}
         <tr><td style="padding:32px 0 0 0;font-size:0;line-height:0;">&nbsp;</td></tr>
-        ${foot.top || foot.details ? `<tr><td class="pad-x" style="padding:24px 48px 32px 48px;border-top:1px solid ${C.line};font-family:${FONT};font-size:12px;line-height:1.6;color:${C.muted};">${foot.top ? `<b style="color:${C.ink};">${esc(foot.top)}</b>` : ''}${foot.top && foot.details ? '<br>' : ''}${esc(foot.details)}</td></tr>` : ''}
+        ${foot.top || foot.details ? `<tr><td class="pad-x" style="padding:24px 48px 32px 48px;border-top:1px solid ${T.line};font-family:${FONT};font-size:12px;line-height:1.6;color:${T.muted};">${foot.top ? `<b style="color:${T.footTop};">${footTop}</b>` : ''}${foot.top && foot.details ? '<br>' : ''}${footDetails}</td></tr>` : ''}
       </table>
     </td>
   </tr>

@@ -33,6 +33,26 @@ test('short proforma (3 items, totals, payment terms) fits on one page with the 
   assert.equal(r.pages, 1);
 });
 
+test('live case: short proforma DRAFT with the footer e-mail line and the draft status line still fits on one page', async () => {
+  const p = shortProforma();
+  p.blocks = [{ id: 'n', key: 'notes', heading: 'Notlar', body: TERMS }];
+  const live = { ...issuer, email: 'connect@yoca.net' };
+  const r = await renderDocumentPdf({ kind: 'proforma', number: 'PRF-2026-0001', title: 'Proforma önizleme kontrolü', content: p, issuer: live, bankAccounts: [], mode: 'draft' });
+  assert.equal(r.pages, 1);
+  const txt = pdfText(r.buffer);
+  if (txt) assert.ok(txt.includes('connect@yoca.net') && txt.includes('180.000,00') && txt.includes('%50 · Teslimde'), 'footer e-mail, total and payment plan all present');
+});
+
+test('fuller company profile (multi-line address, tax facts, MERSİS, KEP): nothing dropped, the document flows instead of overlapping', async () => {
+  const p = shortProforma();
+  p.blocks = [{ id: 'n', key: 'notes', heading: 'Notlar', body: TERMS }];
+  const full = { ...issuer, email: 'connect@yoca.net', phone: '+90 212 555 01 23', address: 'Örnek Mahallesi Örnek Caddesi No: 1\nİş Merkezi B Blok\nŞişli / İstanbul', taxOffice: 'Örnek', taxNumber: '1234567890', mersis: '0123456789000015', tradeRegistry: '123456-5', kep: 'ornek@hs01.kep.tr' };
+  const r = await renderDocumentPdf({ kind: 'proforma', number: 'PRF-2026-0001', title: 'Proforma', content: p, issuer: full, bankAccounts: [SAMPLE_BANK], mode: 'draft' });
+  assert.ok(r.pages >= 1 && r.pages <= 2, `pages=${r.pages}`);
+  const txt = pdfText(r.buffer);
+  if (txt) for (const s of ['180.000,00', '%50 · Teslimde', 'Kapsam dışı talepler', 'İş Merkezi B Blok', 'ornek@hs01.kep.tr']) assert.ok(txt.includes(s), s);
+});
+
 test('long documents still flow over several pages (no forced single page)', async () => {
   const q = sampleQuote();
   q.items = Array.from({ length: 24 }, (_, i) => ({ ...newItem('20'), id: `x${i}`, title: `İş paketi ${i + 1}`, description: 'Atölye, araştırma ve iki revizyon turu; PDF ve kaynak dosyalarla teslim.', quantity: '1', unit: 'gün', unitPrice: '1.000,00' }));

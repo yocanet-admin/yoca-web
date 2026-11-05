@@ -49,6 +49,7 @@ Bu modülün yapmadıkları:
 **E-postayla gönder** (kesinleşmiş belge; v20 gerekir)
 - Pencerede alıcı (en fazla 10), CC (isteğe bağlı), konu, mesaj ve eklenecek kesinleşmiş sürüm görünür ve düzenlenir. Varsayılan konu “NUMARA — başlık”, mesaj kısa bir ek yazısıdır.
 - Ek, “PDF indir” ile aynı dosyadır: sürümün sabit içeriği + güncel şirket profili + onaylı şablon. Dosya `doc_renders`'ta saklıdır; gönderim kaydı o dosyanın kimliğini ve SHA-256 özetini tutar. “Gönderilen PDF” tam o dosyayı açar.
+- **E-posta teması:** “Açık” (varsayılan; beyaz kart, açık zemin logosu) veya “Koyu” (Yoca #0D0E12 zemini, orijinal beyaz logo, lime çizgi ve bağlantılar, açık gri metin; tüm metin renkleri zeminde en az 7:1 kontrast). Pencerede seçilen temanın önizlemesi görünür; önizleme gönderilecek HTML'in kendisidir. Tema yalnızca e-posta gövdesini değiştirir, ekteki PDF iki temada da aynı dosyadır. Seçilen tema gönderim kaydında (`doc_emails.theme`, v22) saklanır, geçmişte görünür ve sonradan değiştirilemez; “Yeniden dene” aynı temayla gönderir. Koyu temada e-posta istemcilerinin kendi koyu mod dönüşümleri (ör. Gmail iOS) renkleri yine de değiştirebilir.
 - Sürümdeki banka bilgisi güncel ayarlardan farklıysa hiçbir şey gönderilmez; “Sürümdeki bilgilerle göndermeyi seç” ya da revizyon seçilir (indirmedeki kararla aynı).
 - Tek pencere = tek istek anahtarı. Çift tıklama, aynı anda birkaç basış veya “Yeniden dene” ikinci e-posta göndermez (Resend `Idempotency-Key` = istek anahtarı; servis anahtarı 24 saat hatırlar; 23 saatten eski belirsiz gönderim kendiliğinden tekrarlanmaz).
 - Sonuç olduğu gibi gösterilir: **Servis kabul etti** (teslim edildi demek değildir) · **Gönderilemedi** (servis reddetti; hiçbir şey gönderilmedi) · **Sonuç belirsiz** (zaman aşımı / bağlantı / 5xx; aynı gönderim güvenle yeniden denenebilir). Hata hiçbir zaman başarı olarak gösterilmez.
@@ -164,7 +165,7 @@ Kurallar:
 
 ## PDF tasarımı
 
-Şablon: Bolt'ta seçilen Yoca kurumsal set (`yoca-kurumsal-claude-teslim`), `TEMPLATE_VERSION = 'belge-2026-11-f'`. Bolt önizlemesi sabit 794 × 1123 px'lik bir sahnedir; burada aynı görünüm gerçek verilerle ve otomatik sayfalamayla yeniden kurulur (1 px = 0,75 pt).
+Şablon: Bolt'ta seçilen Yoca kurumsal set (`yoca-kurumsal-claude-teslim`), `TEMPLATE_VERSION = 'belge-2026-11-g'`. Bolt önizlemesi sabit 794 × 1123 px'lik bir sahnedir; burada aynı görünüm gerçek verilerle ve otomatik sayfalamayla yeniden kurulur (1 px = 0,75 pt).
 
 - Beyaz sayfa, 42 pt kenar boşluğu. İlk sayfa: sağ üstte marka motifi, orijinal açık zemin logosu, küçük büyük-harf üst başlık, büyük başlık ve yeşil marka noktası. Devam sayfalarında motif yerine küçük logo ve “TÜR · NUMARA” satırı.
 - **Teklif / proforma:** belge başlığı alt başlık olarak; proformada “FATURA YERİNE GEÇMEZ”. “Hazırlanan” ve “Belge / tarih” sütunları. Üç lime hücreli tablo başlığı her sayfada tekrarlanır. Satırda kod, başlık, açıklama, miktar ve tutar; birim fiyat, indirim ve (birden çok KDV oranı varsa) satır KDV'si miktarın altında. Ara toplam, indirim, KDV ve büyük genel toplam + nokta. Sonda 1,5 pt mürekkep çizgili kapanış: solda “Ödeme ve koşullar” (ödeme planı), banka bilgileri, kapanış cümlesi; sağda logo ve imza yetkilisi.
@@ -181,8 +182,8 @@ Sayfalama (`lib/documents/pdf.tsx`, `@react-pdf/renderer`):
 - Kısa bölümler (≈130 pt'ye kadar) tek parça taşınır; uzunlar akar: başlık en az iki satırla kalır, paragraflar sayfa sonunda en az iki satır bırakır, son iki madde birlikte kalır, listesi yeni sayfaya geçen bölümde “… — DEVAM” etiketi çıkar.
 - Toplam bloğu son kalemle birlikte taşınır. Kapanış bloğu son bölümle birlikte kalır; bölüm yoksa toplamdan sonra gelir, sığmazsa bir sonraki sayfaya geçer (kesilmez).
 - Teklif/proforma iki geçişle üretilir: “Plan ve koşullar” bir sayfada başlayıp son sayfaya taşıyorsa yeni sayfada başlatılır; sayfa sayısı artmıyorsa bu sonuç kullanılır.
-- Kısa teklif/proforma ikinci sayfaya yalnızca biraz taşıyorsa (ör. üç kalem, toplam ve ödeme koşulları) dikey boşluklar dengeli azaltılarak yeniden dizilir (×0,85, gerekirse ×0,7: bloklar arası boşluk, satır iç boşluğu, altbilgi üstü boşluk; yazı boyutları ve içerik değişmez). Bu düzen yalnızca belgenin tamamı TEK sayfaya sığıyorsa kullanılır; uzun belgeler normal aralıkla gerektiği kadar sayfaya akar.
-- Altbilginin yüksekliği metin alanından ayrılır.
+- Kısa teklif/proforma ikinci sayfaya yalnızca biraz taşıyorsa (ör. üç kalem, toplam ve ödeme koşulları) dikey boşluklar dengeli azaltılarak yeniden dizilir (×0,85, ×0,7, gerekirse ×0,6 — en alt sınır; canlıdaki altbilgi e-posta satırı ve taslak durum satırı birlikteyken bile kısa proforma tek sayfaya sığar: bloklar arası boşluk, satır iç boşluğu, altbilgi üstü boşluk; yazı boyutları ve içerik değişmez). Bu düzen yalnızca belgenin tamamı TEK sayfaya sığıyorsa kullanılır; uzun belgeler normal aralıkla gerektiği kadar sayfaya akar.
+- Altbilginin yüksekliği metin alanından ayrılır; çok satırlı adres, vergi bilgileri, MERSİS, ticaret sicil ve KEP eklendikçe altbilgi büyür ve metin alanı buna göre küçülür (üst üste binme olmaz). Bilgiler arttığında kısa proforma tek sayfaya sığmayabilir; o zaman kapanış bloğu bütün halde ikinci sayfaya akar, hiçbir şey kesilmez.
 
 Şablon değişince ne olur:
 - “Önizle” ve “PDF indir”, kesinleşmiş belgelerde de güncel onaylı şablonu ve güncel şirket profilini kullanır. Kalemler, tutarlar, alıcı, numara, tarih ve onay geçmişi değişmez; yeni numara veya içerik sürümü oluşmaz.
@@ -232,6 +233,10 @@ Ziyaretçi sitesindeki İngilizce, sağ altta duran tercih kutusu `/admin` altı
 ### v21 — belge tablolarında TRUNCATE yetkisi kapatıldı (5 Kasım 2026, production'a uygulandı)
 - `supabase/upgrade-v21-document-grants.sql`: `anon` ve `authenticated` rollerinden doc_* tablolarındaki TRUNCATE yetkisini kaldırır. TRUNCATE satır güvenliğine (RLS) ve satır düzeyindeki “silinemez” korumalarına takılmadığı için istemci rollerinde bulunmamalı.
 - Başka hiçbir şey değişmez: tablo boşaltılmaz, kayıt silinmez; panelin kullandığı SELECT / UPDATE ve `service_role` yetkileri yerinde kalır. Tekrar çalıştırılabilir.
+
+### v22 — e-posta teması kaydı (yayından önce uygulanır)
+- `supabase/upgrade-v22-document-email-theme.sql`: `doc_emails.theme` (`'light'` | `'dark'`, varsayılan `'light'`), `doc_email_begin`'e varsayılanlı `p_theme` parametresi, temanın sonradan değiştirilemesini engelleyen koruma. Mevcut kayıtlar `light` olur (zaten açık temayla gönderilmişlerdi); satır silinmez veya yeniden yazılmaz. Tekrar çalıştırılabilir.
+- Önceki uygulama sürümüyle uyumludur (`p_theme` göndermez, sütunun varsayılanı vardır). Bu yüzden önce v22 uygulanır, sonra yeni sürüm yayına alınır. v22 yoksa yeni sürümde koyu tema “veritabanı güncellemesi uygulanmadı” der ve göndermez; açık tema çalışır.
 
 ## Geri dönüş
 

@@ -38,3 +38,15 @@ test('v21 only revokes TRUNCATE from client roles (no data change, service role 
   assert.match(body[0], /^revoke truncate on (public\.doc_[a-z_]+, )*public\.doc_[a-z_]+ from anon, authenticated$/);
   assert.ok(!/service_role|delete from|truncate table|drop /.test(sql));
 });
+
+test('v22 only adds the e-mail theme (column with default, function parameter with default, guard); nothing deleted', () => {
+  const raw = fs.readFileSync(path.join(root, 'supabase/upgrade-v22-document-email-theme.sql'), 'utf8');
+  const sql = raw.replace(/--.*$/gm, '').toLowerCase();
+  assert.match(sql, /add column if not exists theme text not null default 'light'/);
+  assert.match(sql, /check \(theme in \('light', 'dark'\)\)/);
+  assert.match(sql, /p_request_key uuid, p_theme text default 'light'/);
+  assert.match(sql, /new\.created_at, new\.theme\)/, 'theme cannot change after sending');
+  assert.match(sql, /grant execute on function public\.doc_email_begin\(uuid, integer, uuid, text, text\[\], text\[\], text, text, text, uuid, text\) to authenticated/);
+  assert.ok(!/delete from|truncate|drop table|drop column|update public\.doc_emails/.test(sql), 'no data change');
+  assert.ok(!/grant [a-z, ]* on (table )?public\.doc_emails to (anon|authenticated)/.test(sql.replace('grant select on public.doc_emails to authenticated', '')), 'no new table grants');
+});

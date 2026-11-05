@@ -5,13 +5,16 @@ import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
 import { sanitizeContent, type DocKind } from '@/lib/documents/model';
 import { currentRenderOf, dbError, DOC_BUCKET, loadContext, safeFileName, type DocContext, type VersionSnapshot } from '@/lib/documents/server';
 import { bankChanges } from '@/lib/documents/settings';
-import { brandedEmailHtml, brandedEmailText, parseAddresses, statusFromEvent, testRecipientProblem } from '@/lib/documents/mail';
+import { brandedEmailHtml, brandedEmailText, emailThemeOf, parseAddresses, statusFromEvent, testRecipientProblem } from '@/lib/documents/mail';
 import { CAPTURE_MODE, lookupDelivery, mailReady, sendDocumentMail, type SendOutcome } from '@/lib/documents/emailSend';
 
 /**
  * Yoca — "E-postayla gönder" for a finalized document version (admin only).
  *
- * POST { action: 'send', id, version, to, cc?, subject, message, keepBank?, requestKey }
+ * POST { action: 'send', id, version, to, cc?, subject, message, theme?, keepBank?, requestKey }
+ *   theme 'light' (default) | 'dark' changes only the e-mail body; it is kept
+ *   on the doc_emails row (v22), so a retry sends the same look. The attached
+ *   PDF is the same file in both themes.
  *   Attaches the stored PDF of that version made with the current company
  *   profile and template (the same file "PDF indir" gives; rendered and kept
  *   if it does not exist yet). If the version's bank details differ from the
@@ -30,9 +33,10 @@ const json = (body: unknown, status = 200) => NextResponse.json(body, { status }
 const fail = (status: number, error: string, extra: Record<string, unknown> = {}) => json({ ok: false, error, ...extra }, status);
 
 type Sb = NonNullable<ReturnType<typeof getSupabaseAsUser>>;
-interface EmailRow { id: string; document_id: string; version: number; render_id: string; pdf_sha256: string; pdf_name: string; to_addrs: string[]; cc_addrs: string[]; subject: string; body: string; reply_to: string | null; status: string; provider_id: string | null; error: string | null; created_at: string }
+interface EmailRow { id: string; document_id: string; version: number; render_id: string; pdf_sha256: string; pdf_name: string; to_addrs: string[]; cc_addrs: string[]; subject: string; body: string; reply_to: string | null; status: string; provider_id: string | null; error: string | null; created_at: string; theme?: string }
 
 const MISSING_TABLE = 'E-posta gönderimi için veritabanı güncellemesi (supabase/upgrade-v20-document-emails.sql) henüz uygulanmadı. Hiçbir şey gönderilmedi.';
+const MISSING_THEME = 'Koyu tema için veritabanı güncellemesi (supabase/upgrade-v22-document-email-theme.sql) henüz uygulanmadı. Hiçbir şey gönderilmedi; açık temayla gönderebilirsiniz.';
 
 function dbFail(error: { code?: string; message?: string }) {
   if (error.code === '42P01' || error.code === 'PGRST205' || error.code === '42883' || error.code === 'PGRST202') return fail(503, MISSING_TABLE);
@@ -59,7 +63,7 @@ async function deliver(client: Sb, row: EmailRow, ctx: DocContext, locale: 'tr' 
   let outcome: SendOutcome;
   if (!pdf.ok) outcome = { status: 'failed', error: pdf.error };
   else {
-    const mail = { issuer: ctx.issuer, locale, preheader: row.subject, body: row.body, note: `${locale === 'tr' ? 'Ek' : 'Attachment'}: ${row.pdf_name}` };
+    const mail = { issuer: ctx.issuer, locale, preheader: row.subject, body: row.body, note: `${locale === 'tr' ? 'Ek' : 'Attachment'}: ${row.pdf_name}`, theme: emailThemeOf(row.theme) };
     outcome = await sendDocumentMail({
       to: row.to_addrs, cc: row.cc_addrs, replyTo: row.reply_to ?? undefined, subject: row.subject,
       html: brandedEmailHtml(mail), text: brandedEmailText(mail), attachment: { filename: row.pdf_name, content: pdf.buffer },
@@ -140,6 +144,8 @@ export async function POST(request: NextRequest) {
   const message = typeof body.message === 'string' ? body.message.trim() : '';
   if (!subject || subject.length > 300) return fail(400, 'Konu 1–300 karakter olmalı.');
   if (!message || message.length > 20_000) return fail(400, 'Mesaj boş olamaz (en fazla 20.000 karakter).');
+  if (body.theme !== undefined && body.theme !== 'light' && body.theme !== 'dark') return fail(400, 'Geçersiz e-posta teması.');
+  const theme = emailThemeOf(body.theme);
 
   const guard = testRecipientProblem({ vercelEnv: process.env.VERCEL_ENV, nodeEnv: process.env.NODE_ENV, capture: CAPTURE_MODE, allow: process.env.DOCUMENTS_EMAIL_TEST_ALLOW }, [...to.list, ...cc.list]);
   if (guard) return fail(422, guard);
@@ -164,8 +170,13 @@ export async function POST(request: NextRequest) {
   const begin = await client.rpc('doc_email_begin', {
     p_id: doc.id, p_version: version, p_render_id: rendered.id, p_pdf_name: pdfName, p_to: to.list, p_cc: cc.list,
     p_subject: subject, p_body: message, p_reply_to: parseAddresses(replyTo).list[0] ?? '', p_request_key: requestKey,
+    // Light is the column default, so a light send also works before v22.
+    ...(theme === 'dark' ? { p_theme: theme } : {}),
   });
-  if (begin.error) return dbFail(begin.error);
+  if (begin.error) {
+    if (theme === 'dark' && (begin.error.code === 'PGRST202' || begin.error.code === '42883')) return fail(503, MISSING_THEME);
+    return dbFail(begin.error);
+  }
   const b = begin.data as { id: string; status: string; replay: boolean };
   const rowRes = await client.from('doc_emails').select('*').eq('id', b.id).maybeSingle();
   if (rowRes.error || !rowRes.data) return fail(500, 'Gönderim kaydı okunamadı; hiçbir şey gönderilmedi.');

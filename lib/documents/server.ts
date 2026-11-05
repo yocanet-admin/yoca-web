@@ -54,7 +54,7 @@ export interface VersionRow {
 }
 
 /** Template version stored with every PDF render (bump when the PDF design changes). */
-export const TEMPLATE_VERSION = 'belge-2026-11-f';
+export const TEMPLATE_VERSION = 'belge-2026-11-g';
 
 export interface DocContext {
   ready: boolean;
