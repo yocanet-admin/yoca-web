@@ -1,7 +1,7 @@
 /**
  * Yoca — Teklifler ve Belgeler: A4 PDF template (server only, @react-pdf/renderer).
  *
- * Template "belge-2026-11-g" (Bolt set; "f": short proforma notes inside "Ödeme ve koşullar"; "g": ×0.6 spacing step): the Yoca corporate set chosen in Bolt
+ * Template "belge-2026-11-h" (Bolt set; "f": short proforma notes inside "Ödeme ve koşullar"; "g": ×0.6 spacing step; "h": proforma closing with plan and bank side by side, no second logo): the Yoca corporate set chosen in Bolt
  * (yoca-kurumsal-claude-teslim, ProformaDocument / LetterDocument / A4Sheet /
  * DocumentFooter). The Bolt preview is a fixed 794 × 1123 px stage; this file
  * rebuilds the same look on the real document data with automatic page
@@ -654,6 +654,59 @@ function CommercialClosing({ input, t, banks, terms, k = 1 }: { input: RenderInp
   );
 }
 
+/**
+ * Proforma closing (approved 6 Kas 2026): under the 1.5 pt ink rule the payment
+ * plan ("Ödeme ve koşullar") and the bank details side by side, the short terms
+ * text under both, then the closing sentence and the signatory. No second logo
+ * (the original logo stays at the top of the page). Type sizes are the same as
+ * in the teklif closing. A few accounts keep the block together (it moves to
+ * the next page whole if it does not fit); with many accounts it may break
+ * between rows so nothing is cut. Teklif and the other types are unchanged.
+ */
+const PF_GAP = 24;
+const PF_COL = (CW - PF_GAP) / 2;
+const PF_KEEP_BANKS = 3;
+function ProformaClosing({ input, t, banks, terms, k = 1 }: { input: RenderInput; t: Labels; banks: BankAccount[]; terms?: Block | null; k?: number }) {
+  const c = input.content;
+  const hasPay = computeDocument(c).payment.rows.length > 0;
+  const hasBank = banks.length > 0;
+  const termParts = terms ? bodyParts(terms.body, BLOCK_LABEL.notes.list) : [];
+  const ownHeading = terms && terms.heading.trim() && terms.heading.trim() !== BLOCK_LABEL.notes[c.locale] ? terms.heading.trim() : '';
+  const hasTerms = termParts.length > 0;
+  // one column alone keeps the teklif column width; both share the content width
+  const colW = hasPay && hasBank ? PF_COL : CLOSING_LEFT;
+  return (
+    <R.View wrap={banks.length > PF_KEEP_BANKS} style={{ marginTop: 24 * k, borderTopWidth: 1.5, borderTopColor: C.ink, paddingTop: 18 * k }}>
+      {hasPay || hasBank ? (
+        <R.View style={{ flexDirection: 'row' }}>
+          {hasPay ? (
+            <R.View style={{ width: colW }}>
+              <Kicker style={{ marginBottom: 6 }}>{up(t.paymentTerms)}</Kicker>
+              <PaymentRows c={c} />
+            </R.View>
+          ) : null}
+          {hasPay && hasBank ? <R.View style={{ width: PF_GAP }} /> : null}
+          {hasBank ? (
+            <R.View style={{ width: colW }}>
+              <Kicker style={{ marginBottom: 6 }}>{up(t.bank)}</Kicker>
+              <BankList banks={banks} t={t} />
+            </R.View>
+          ) : null}
+        </R.View>
+      ) : null}
+      {hasTerms ? (
+        <R.View style={{ marginTop: hasPay || hasBank ? 12 : 0 }}>
+          {!hasPay && !hasBank ? <Kicker style={{ marginBottom: 6 }}>{up(t.paymentTerms)}</Kicker> : null}
+          {ownHeading ? <R.Text style={[st.strong, { fontSize: 10, marginBottom: 3 }]}>{ownHeading}</R.Text> : null}
+          {termParts.map((p, i) => <Part key={i} p={p} prev={termParts[i - 1]?.type} size={10.5} lh={1.55} gap={6} last={i === termParts.length - 1} />)}
+        </R.View>
+      ) : null}
+      {c.closing ? <R.Text style={[st.body, { marginTop: hasPay || hasBank || hasTerms ? 15 : 0 }]}>{c.closing}</R.Text> : null}
+      <R.View style={{ alignItems: 'flex-end' }}><Signatory input={input} align="right" /></R.View>
+    </R.View>
+  );
+}
+
 function InfoCol({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <R.View style={{ flexGrow: 1, flexBasis: 0 }}>
@@ -697,7 +750,9 @@ function CommercialDocument({ input, layout }: { input: RenderInput; layout?: La
     `${t.currency}: ${c.currency}`,
   ].filter(Boolean).join(' · ');
   const k = layout?.k ?? 1;
-  const closing = <CommercialClosing input={input} t={t} banks={banks} terms={inline} k={k} />;
+  const closing = input.kind === 'proforma'
+    ? <ProformaClosing input={input} t={t} banks={banks} terms={inline} k={k} />
+    : <CommercialClosing input={input} t={t} banks={banks} terms={inline} k={k} />;
 
   type Item = (before?: React.ReactNode, after?: React.ReactNode) => React.ReactNode;
   const items: Item[] = [];
