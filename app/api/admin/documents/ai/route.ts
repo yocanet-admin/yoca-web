@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
       const subject = String(body.subject ?? '').slice(0, 300);
       const recipient = String(body.recipient ?? '').slice(0, 300);
       const projectName = String(body.projectName ?? '').slice(0, 200);
-      const r = await letterText(model, { locale, subject, facts, recipient, projectName });
+      const r = await letterText(model, { locale, subject, facts, recipient, projectName, format: body.format === 'email' ? 'email' : 'letter' });
       result = { suggestion: cleanLetter([subject, facts, recipient, projectName].join('\n'), r.data) };
       usage = r.usage; requestId = r.requestId; isMock = Boolean(r.mock);
     } else if (mode === 'rewrite') {

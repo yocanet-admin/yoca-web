@@ -183,6 +183,7 @@ function ListInner() {
         title="Teklifler ve Belgeler"
         sub="Teklif, proforma, antetli yazı, durum raporu ve teslim belgesi. PDF’ler güncel şirket bilgileriyle üretilir; kesinleşmiş sürümlerin önceki PDF’leri saklanır. Bu modül e-fatura veya muhasebe kaydı değildir."
         actions={<>
+          <Link href="/admin/documents/materials" className="admin-btn">Kurumsal materyaller</Link>
           <Link href="/admin/documents/settings" className="admin-btn">Belge ayarları</Link>
           <button type="button" className="admin-btn admin-btn-primary" onClick={() => setCreating(true)}>+ Yeni belge</button>
         </>}

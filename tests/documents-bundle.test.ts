@@ -19,3 +19,11 @@ test('PDF routes ship the fonts, logo and pdfkit font metrics', () => {
   }
   assert.ok(fs.existsSync(path.join(root, 'node_modules/pdfkit/js/standard-fonts/Helvetica.cjs')), 'pdfkit standard font file not found where the include points');
 });
+
+test('brand files the PDF template reads are under the traced public/brand/*.svg (incl. the motif)', () => {
+  for (const f of ['yoca-logo-light-bg.svg', 'yoca-logo-primary.svg', 'yoca-motif.svg']) {
+    assert.ok(fs.existsSync(path.join(root, 'public/brand', f)), `public/brand/${f} missing`);
+  }
+  assert.ok(config.includes("'/api/admin/documents/**'"), 'the include must cover every documents route (pdf, email, materials)');
+  assert.ok(fs.existsSync(path.join(root, 'public/brand/email/yoca-logo-light.png')), 'e-mail logo PNG (light background) missing');
+});

@@ -924,3 +924,106 @@ export async function renderDocumentPdf(input: RenderInput): Promise<RenderedPdf
 }
 
 export { CW as CONTENT_W };
+
+/* ── Kurumsal materyaller: blank letterhead and business card ─── */
+
+/**
+ * Blank letterhead (Boş antet): A4 with the motif, the original logo and the
+ * footer from the CURRENT company profile. No number, no document record.
+ */
+export async function renderLetterheadPdf(issuer: Issuer, locale: 'tr' | 'en' = 'tr'): Promise<RenderedPdf> {
+  await loadRenderer();
+  registerFonts();
+  UP_LOCALE = locale === 'tr' ? 'tr-TR' : 'en-GB';
+  const t = L[locale];
+  const foot = footerPlan({ kind: 'letter', number: '', title: '', content: { locale } as DocContent, issuer, bankAccounts: [], mode: 'final' }, t);
+  const doc = (
+    <R.Document title={locale === 'tr' ? 'Yoca antetli kâğıt' : 'Yoca letterhead'} author={issuer.legalName || issuer.brand} creator="Yoca yönetim paneli" producer="Yoca" language={locale === 'tr' ? 'tr-TR' : 'en-GB'}>
+      <R.Page size="A4" style={{ fontFamily: 'Manrope', backgroundColor: '#FFFFFF', paddingTop: TOP1, paddingLeft: PX, paddingRight: PX, paddingBottom: foot.reserve }}>
+        <R.View fixed style={{ position: 'absolute', top: 0, right: 0 }}><BrandSvg file="yoca-motif.svg" width={MOTIF_W} /></R.View>
+        <Logo width={100.5} />
+        <R.View fixed style={{ position: 'absolute', left: PX, right: PX, top: H - BOTTOM - foot.height, height: foot.height, borderTopWidth: 1.5, borderTopColor: C.ink, paddingTop: 15, flexDirection: 'row', alignItems: 'flex-end' }}>
+          <R.View style={{ flexGrow: 1, flexBasis: 0, paddingRight: 18, alignSelf: 'flex-start' }}>
+            {foot.name ? <R.Text style={st.footName}>{foot.name}</R.Text> : null}
+            {foot.details ? <R.Text style={[st.footText, foot.name ? {} : { marginTop: 0 }]}>{foot.details}</R.Text> : null}
+          </R.View>
+          {foot.web ? <R.Text style={st.footWeb}>{foot.web}</R.Text> : null}
+        </R.View>
+      </R.Page>
+    </R.Document>
+  );
+  const buffer = await R.renderToBuffer(doc);
+  return { buffer, pages: 1 };
+}
+
+export interface CardInput { name: string; title: string; phone: string; email: string; website: string; bleedMm: number }
+
+const MM = 72 / 25.4;
+
+/**
+ * Business card (Kartvizit), Bolt BusinessCard (321 × 208 px = 85 × 55 mm):
+ * page 1 front (ink, white logo, motif, "Fikirden etkiye."), page 2 back
+ * (mist, logo, name, title, phone, e-mail, website, dot). Trim 85 × 55 mm;
+ * the bleed (taşma payı) is given separately; crop marks sit outside the
+ * bleed. RGB — a proof for the print shop, not a print-ready file.
+ */
+export async function renderBusinessCardPdf(card: CardInput): Promise<RenderedPdf> {
+  await loadRenderer();
+  registerFonts();
+  UP_LOCALE = 'tr-TR';
+  const TW = 85 * MM;
+  const TH = 55 * MM;
+  const B = Math.max(0, Math.min(5, card.bleedMm)) * MM;
+  const SLUG = 8 * MM;            // room for the crop marks
+  const PW = TW + 2 * (B + SLUG);
+  const PH = TH + 2 * (B + SLUG);
+  const X0 = SLUG + B;            // trim box origin on the page
+  const Y0 = SLUG + B;
+  const s = TW / 321;             // Bolt px → pt on the card
+  const marks = (
+    <>
+      {[[X0, 0], [X0 + TW, 0], [X0, PH - SLUG + 2 * MM], [X0 + TW, PH - SLUG + 2 * MM]].map(([x, y], i) => <R.View key={`v${i}`} style={{ position: 'absolute', left: x - 0.25, top: y, width: 0.5, height: SLUG - 2 * MM, backgroundColor: '#000000' }} />)}
+      {[[0, Y0], [0, Y0 + TH], [PW - SLUG + 2 * MM, Y0], [PW - SLUG + 2 * MM, Y0 + TH]].map(([x, y], i) => <R.View key={`h${i}`} style={{ position: 'absolute', left: x, top: y - 0.25, width: SLUG - 2 * MM, height: 0.5, backgroundColor: '#000000' }} />)}
+    </>
+  );
+  const slugText = (side: string) => (
+    <R.Text style={{ position: 'absolute', left: X0, top: PH - SLUG + 2.2 * MM, fontFamily: 'Manrope', fontSize: 4.5, color: '#666A65', lineHeight: 1.2 }}>
+      {`Yoca kartvizit · ${side} · kesim 85 × 55 mm · taşma payı ${card.bleedMm} mm · RGB prova (matbaa onayı gerekir)`}
+    </R.Text>
+  );
+  const nameSize = card.name.length > 24 ? 15 : 19.5;
+  const contact = [card.phone.trim(), card.email.trim()].filter(Boolean);
+  const doc = (
+    <R.Document title={`Kartvizit — ${card.name}`} author="Yoca" creator="Yoca yönetim paneli" producer="Yoca">
+      {/* front */}
+      <R.Page size={[PW, PH]} style={{ backgroundColor: '#FFFFFF' }}>
+        <R.View style={{ position: 'absolute', left: SLUG, top: SLUG, width: TW + 2 * B, height: TH + 2 * B, backgroundColor: C.ink, overflow: 'hidden' }}>
+          <R.View style={{ position: 'absolute', left: B + 36 * s, top: B + 36 * s }}><BrandSvg file="yoca-logo-primary.svg" width={156 * s} /></R.View>
+          <R.View style={{ position: 'absolute', right: B - 24 * s, bottom: B - 56 * s }}><BrandSvg file="yoca-motif.svg" width={150 * s} /></R.View>
+          <R.Text style={{ position: 'absolute', left: B + 36 * s, bottom: B + 36 * s, fontFamily: 'Manrope', fontSize: 10 * s, fontWeight: 700, letterSpacing: 10 * s * 0.2, color: '#FFFFFF', lineHeight: 1.2 }}>{up('Fikirden etkiye.')}</R.Text>
+        </R.View>
+        {marks}
+        {slugText('ön yüz')}
+      </R.Page>
+      {/* back */}
+      <R.Page size={[PW, PH]} style={{ backgroundColor: '#FFFFFF' }}>
+        <R.View style={{ position: 'absolute', left: SLUG, top: SLUG, width: TW + 2 * B, height: TH + 2 * B, backgroundColor: C.mist, overflow: 'hidden' }}>
+          <R.View style={{ position: 'absolute', left: B + 36 * s, top: B + 30 * s }}><Logo width={96 * s} /></R.View>
+          <R.View style={{ position: 'absolute', left: B + 36 * s, top: B + 76 * s, width: TW - 72 * s }}>
+            <R.Text style={{ fontFamily: 'Manrope', fontSize: nameSize, fontWeight: 800, letterSpacing: -nameSize * 0.01, color: C.ink, lineHeight: 1.15 }}>{card.name}</R.Text>
+            {card.title.trim() ? <R.Text style={{ fontFamily: 'Manrope', fontSize: 12 * s, color: C.muted, lineHeight: 1.3, marginTop: 3 }}>{card.title}</R.Text> : null}
+          </R.View>
+          <R.View style={{ position: 'absolute', left: B + 36 * s, bottom: B + 30 * s, width: TW - 100 * s }}>
+            {contact.map((l) => <R.Text key={l} style={{ fontFamily: 'Manrope', fontSize: 11 * s, color: C.ink, lineHeight: 1.35 }}>{l}</R.Text>)}
+            {card.website.trim() ? <R.Text style={{ fontFamily: 'Manrope', fontSize: 13 * s, fontWeight: 700, color: C.ink, lineHeight: 1.35 }}>{card.website.trim().replace(/^https?:\/\//, '').replace(/\/$/, '')}</R.Text> : null}
+          </R.View>
+          <R.View style={{ position: 'absolute', right: B + 36 * s, bottom: B + 40 * s }}><Dot size={16 * s} /></R.View>
+        </R.View>
+        {marks}
+        {slugText('arka yüz')}
+      </R.Page>
+    </R.Document>
+  );
+  const buffer = await R.renderToBuffer(doc);
+  return { buffer, pages: 2 };
+}

@@ -20,6 +20,12 @@ export interface ClientLite {
 
 export interface ProjectLite { id: string; client_id: string | null; name: string; status: string; archived_at: string | null }
 
+export interface EmailRow {
+  id: string; version: number; render_id: string; pdf_name: string; pdf_sha256: string; to_addrs: string[]; cc_addrs: string[]; subject: string; body: string;
+  status: 'sending' | 'accepted' | 'failed' | 'unknown' | 'delivered' | 'delayed' | 'bounced' | 'complained';
+  provider_id: string | null; error: string | null; last_event: string | null; sent_by: string | null; created_at: string; finished_at: string | null; status_checked_at: string | null;
+}
+
 export interface DocListRow {
   id: string; kind: DocKind; number: string; title: string; status: DocStatus; client_id: string | null; source_id: string | null;
   locale: 'tr' | 'en'; currency: string; total: string | null; final_version: number; final_total: string | null; final_at: string | null;
@@ -41,6 +47,7 @@ export interface EventRow { id: string; kind: string; detail: Record<string, unk
 export interface DocDetail {
   ok: boolean; error?: string;
   document: DocFull; versions: VersionRow[]; renders: RenderRow[]; events: EventRow[]; clients: ClientLite[]; projects: ProjectLite[];
+  emails: EmailRow[]; mail: { tableReady: boolean; serviceReady: boolean; from: string };
   source: { id: string; number: string; title: string } | null; derived: Array<{ id: string; number: string; title: string; kind: DocKind; status: DocStatus }>;
   settings: DocSettings; issuer: Issuer; company: CompanyInfo; companyRevision: number; templateVersion: string;
   assessment: { missing: MissingReport; total: string | null };
@@ -113,4 +120,42 @@ export function moneyOf(value: string | null, currency: string): string | null {
   if (value === null || value === undefined) return null;
   const m = parseMoney(String(value));
   return m === null || m === undefined ? null : fmtMoney(m, currency, 'tr');
+}
+
+/** POST to a PDF route; the PDF as a Blob, or a Turkish error. */
+export async function fetchPdf(path: string, body: unknown): Promise<{ blob: Blob } | { error: string }> {
+  const t = await token();
+  let res: Response;
+  try {
+    res = await fetch(path, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) }, body: JSON.stringify(body) });
+  } catch (e) {
+    return { error: `Sunucuya ulaşılamadı: ${(e as Error).message}` };
+  }
+  if (!res.ok) {
+    const j = (await res.json().catch(() => null)) as { error?: string } | null;
+    return { error: j?.error ?? `PDF üretilemedi (HTTP ${res.status}).` };
+  }
+  return { blob: await res.blob() };
+}
+
+/** Save a Blob (PDF, HTML) under a file name. */
+export function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Copy formatted HTML (with a plain-text fallback) to the clipboard. */
+export async function copyRich(html: string, text: string): Promise<boolean> {
+  try {
+    if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }) })]);
+      return true;
+    }
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }

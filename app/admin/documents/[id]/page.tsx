@@ -6,6 +6,9 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Badge, Details, Flash, field, label, small, fmtDate, fmtDateTime } from '@/components/admin/ops/ui';
 import { aiAction, clientDisplay, docAction, draftPdf, loadDoc, moneyOf, newKey, storedPdf, type ClientLite, type DocDetail, type StoredPdfResult } from '@/lib/documents/client';
 import { BankDecision } from '@/components/admin/documents/BankDecision';
+import { EmailDialog } from '@/components/admin/documents/EmailDialog';
+import { adminPost } from '@/lib/cockpit/client';
+import { documentEmailDefaults, EMAIL_STATUS_LABEL } from '@/lib/documents/mail';
 import { DocSummary } from '@/components/admin/documents/DocSummary';
 import { Group } from '@/components/admin/documents/Group';
 import type { BankChange } from '@/lib/documents/settings';
@@ -47,7 +50,7 @@ type Translation = { to: 'tr' | 'en'; title: string; subject: string; deliveryTi
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'Oluşturuldu', duplicated: 'Çoğaltılarak oluşturuldu', from_quote: 'Tekliften proforma oluşturuldu', finalized: 'Kesinleştirildi',
-  revised: 'Revizyona açıldı', archived: 'Arşivlendi', restored: 'Arşivden çıkarıldı', quote_state: 'Teklif durumu işaretlendi',
+  revised: 'Revizyona açıldı', archived: 'Arşivlendi', restored: 'Arşivden çıkarıldı', quote_state: 'Teklif durumu işaretlendi', emailed: 'E-postayla gönderildi (servis kabul etti)',
 };
 
 function recipientFrom(c: ClientLite) {
@@ -77,6 +80,7 @@ function EditorInner() {
   const [rewrite, setRewrite] = useState<Rewrite | null>(null);
   const [translation, setTranslation] = useState<Translation | null>(null);
   const [stateNote, setStateNote] = useState('');
+  const [mailing, setMailing] = useState(false);
   const [showAi, setShowAi] = useState(params.get('ai') === '1');
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [openBlocks, setOpenBlocks] = useState<Record<string, boolean>>({});
@@ -114,6 +118,11 @@ function EditorInner() {
     }
   }, [id, uid]);
   useEffect(() => { void load(); }, [load]);
+  // Sending history only: never touches the editor's (possibly unsaved) draft.
+  const refreshEmails = useCallback(async () => {
+    const r = await loadDoc(id);
+    if (r.ok) setData((d) => (d && d.ok ? { ...d, emails: r.emails, mail: r.mail, renders: r.renders, events: r.events } : d));
+  }, [id]);
 
   // Warn before leaving with unsaved changes.
   useEffect(() => {
@@ -383,6 +392,7 @@ function EditorInner() {
             <button type="button" className="admin-btn" disabled={!!busy} onClick={() => void previewDraft()}>{busy === 'prev' ? 'Hazırlanıyor…' : 'Önizle (taslak PDF)'}</button>
             <button type="button" className="admin-btn" disabled={!!busy} onClick={() => void downloadDraft()}>{busy === 'pdf' ? 'Hazırlanıyor…' : 'PDF indir'}</button>
             <button type="button" className="admin-btn" disabled={!!busy || missing.blocking.length > 0 || dirty} title={dirty ? 'Önce kaydedin' : missing.blocking.length ? 'Eksik bilgiler tamamlanmalı' : ''} onClick={finalize}>{busy === 'finalize' ? 'Kesinleştiriliyor…' : 'Kesinleştir'}</button>
+            {doc.final_version > 0 && <button type="button" className="admin-btn" disabled={!!busy} onClick={() => setMailing(true)} title="Son kesinleşmiş sürümün PDF’i gönderilir; açık revizyon gönderilmez">E-postayla gönder (v{doc.final_version})</button>}
             {doc.final_version > 0 && <a href="#surumler" className="admin-btn">Sürüm geçmişi ({data.versions.length})</a>}
             {kind === 'quote' && doc.final_version > 0 && <button type="button" className="admin-btn" disabled={!!busy} onClick={async () => { const r = await act('from_quote', { requestKey: newKey() }); if (r.ok && r.id) router.push(`/admin/documents/${r.id}`); }}>Proforma oluştur</button>}
             <button type="button" className="admin-btn" disabled={!!busy} onClick={async () => { const r = await act('duplicate', { requestKey: newKey() }); if (r.ok && r.id) router.push(`/admin/documents/${r.id}`); }}>Çoğalt</button>
@@ -392,6 +402,7 @@ function EditorInner() {
           <div className="flex flex-wrap items-center gap-2">
             {doc.final_version > 0 && <button type="button" className="admin-btn admin-btn-primary" disabled={!!busy} onClick={() => void downloadStored()}>{busy === 'pdf' ? 'Hazırlanıyor…' : 'PDF indir'}</button>}
             {doc.final_version > 0 && <button type="button" className="admin-btn" disabled={!!busy} onClick={() => void previewStored()}>{busy === 'prev' ? 'Hazırlanıyor…' : 'Önizle'}</button>}
+            {doc.final_version > 0 && doc.status !== 'archived' && <button type="button" className="admin-btn" disabled={!!busy} onClick={() => setMailing(true)}>E-postayla gönder</button>}
             {doc.final_version > 0 && <a href="#surumler" className="admin-btn">Sürüm geçmişi ({data.versions.length})</a>}
             {doc.status === 'final' && <button type="button" className="admin-btn" disabled={!!busy} onClick={() => void revise()}>Revize et</button>}
             {kind === 'quote' && doc.final_version > 0 && <button type="button" className="admin-btn" disabled={!!busy} onClick={async () => { const r = await act('from_quote', { requestKey: newKey() }); if (r.ok && r.id) router.push(`/admin/documents/${r.id}`); }}>Proforma oluştur</button>}
@@ -729,6 +740,38 @@ function EditorInner() {
             ))}
           </section>
 
+          <section id="gonderimler" className="admin-card grid scroll-mt-20 gap-3 p-4">
+            <h2 className="text-[15px] font-extrabold">E-posta gönderimleri</h2>
+            {!data.mail.tableReady ? <p className="text-[12px] text-yellow-200">E-posta gönderimi için veritabanı güncellemesi (v20) henüz uygulanmadı.</p>
+              : !data.mail.serviceReady ? <p className="text-[12px] text-yellow-200">E-posta servisi bu ortamda kurulu değil; gönderim yapılamaz.</p> : null}
+            <p className="text-[12px] text-subtle">PDF üretmek veya kesinleştirmek e-posta göndermez. “Servis kabul etti” teslim edildi demek değildir; teslimi “Durumu yenile” gösterir.</p>
+            {data.emails.length === 0 ? <p className="text-[13px] text-subtle">Henüz gönderim yok.</p> : data.emails.map((m) => (
+              <div key={m.id} className="grid gap-1 border-t border-line pt-2 text-[12px]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Badge tone={m.status === 'delivered' ? 'ok' : m.status === 'accepted' || m.status === 'sending' || m.status === 'delayed' ? 'info' : m.status === 'unknown' ? 'warn' : 'bad'}>{EMAIL_STATUS_LABEL[m.status] ?? m.status}</Badge>
+                  <span className="text-subtle">{fmtDateTime(m.created_at)} · {m.sent_by}</span>
+                </div>
+                <p className="text-white">Sürüm {m.version} · {m.pdf_name}</p>
+                <p className="text-muted">Alıcı: {m.to_addrs.join(', ')}{m.cc_addrs.length ? ` · CC: ${m.cc_addrs.join(', ')}` : ''}</p>
+                <p className="text-muted">Konu: {m.subject}</p>
+                {m.error && m.status !== 'accepted' ? <p className="text-yellow-200">{m.error}</p> : null}
+                {m.status_checked_at ? <p className="text-subtle">Durum kontrolü: {fmtDateTime(m.status_checked_at)}{m.last_event ? ` (${m.last_event})` : ''}</p> : null}
+                <div className="flex flex-wrap gap-1.5">
+                  <button type="button" className={small} onClick={async () => { const e = await storedPdf({ render: m.render_id }); handleStored(e, false); }}>{m.status === 'failed' ? 'PDF (gönderilmedi)' : 'Gönderilen PDF'}</button>
+                  {m.provider_id && ['accepted', 'delivered', 'delayed', 'bounced', 'complained'].includes(m.status) && (
+                    <button type="button" className={small} disabled={busy === `st-${m.id}`} onClick={async () => {
+                      setBusy(`st-${m.id}`);
+                      const r = await adminPost<{ ok: boolean; status?: string; error?: string }>('/api/admin/documents/email', { action: 'status', emailId: m.id });
+                      setBusy(null);
+                      setFlash(r.ok ? { tone: 'ok', text: `Durum: ${EMAIL_STATUS_LABEL[r.status ?? ''] ?? r.status}` } : { tone: 'warn', text: r.error ?? 'Durum okunamadı.' });
+                      await refreshEmails();
+                    }}>{busy === `st-${m.id}` ? '…' : 'Durumu yenile'}</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </section>
+
           {kind === 'quote' && (
             <section className="admin-card grid gap-3 p-4">
               <h2 className="text-[15px] font-extrabold">Teklif takibi</h2>
@@ -761,6 +804,16 @@ function EditorInner() {
         </aside>
       </div>
 
+      {mailing && (() => {
+        const v = finalV ?? data.versions[0];
+        const vc = v?.content ?? c;
+        const defaults = documentEmailDefaults({ kind, locale: vc.locale, number: doc.number, title: v?.title ?? draft.title, recipient: vc.recipient, signatory: vc.signatory, issuer: data.issuer });
+        return (
+          <EmailDialog docId={doc.id} number={doc.number} versions={data.versions.map((x) => ({ version: x.version, finalized_at: x.finalized_at }))} defaultVersion={doc.final_version}
+            defaults={defaults} from={data.mail.from} replyTo={data.issuer.email}
+            onClose={() => { setMailing(false); void refreshEmails(); }} onSent={() => void refreshEmails()} />
+        );
+      })()}
       {bankAsk && (
         <BankDecision number={doc.number} version={bankAsk.version} changes={bankAsk.changes} busy={!!busy} canRevise={doc.status === 'final' && bankAsk.version === doc.final_version}
           onClose={() => setBankAsk(null)}

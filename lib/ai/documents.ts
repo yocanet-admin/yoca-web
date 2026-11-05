@@ -115,14 +115,18 @@ export function draftDocument(model: string, input: { kind: DocKind; locale: Doc
  * "[EKSİK: …]" and listed. The result is a suggestion (title, salutation,
  * body, closing); nothing is written to the document without "Uygula".
  */
-export function letterText(model: string, input: { locale: DocLocale; subject: string; facts: string; recipient: string; projectName: string }): Promise<OpenAIResult<LetterSuggestion>> {
+export function letterText(model: string, input: { locale: DocLocale; subject: string; facts: string; recipient: string; projectName: string; format?: 'letter' | 'email' }): Promise<OpenAIResult<LetterSuggestion>> {
+  const email = input.format === 'email';
   return callOpenAI<LetterSuggestion>({
     model,
     system:
-      `You write a formal corporate letter (antetli yazı / bilgilendirme yazısı) that Yoca will sign and send. Write ONLY in ${LANG[input.locale]}.\n${YOCA}\n` +
+      (email
+        ? `You write a short, clear project update e-mail that Yoca will send to a client (the admin reviews it first; nothing is sent automatically). Write ONLY in ${LANG[input.locale]}.\n${YOCA}\n`
+        : `You write a formal corporate letter (antetli yazı / bilgilendirme yazısı) that Yoca will sign and send. Write ONLY in ${LANG[input.locale]}.\n${YOCA}\n`) +
       'Use ONLY the facts in <FACTS> (and the recipient / project names given). Do not add work that is not stated as done, test results, measurements, dates, deadlines, durations, guarantees, warranties, promises or commitments. Do not turn plans into completed work or the other way round.\n' +
       'If the letter clearly needs a fact that is not given (for example a date the text refers to), write [EKSİK: what is missing] (Turkish) or [MISSING: what is missing] (English) in its place and list it in "missing". Do not invent a placeholder for things the letter can do without.\n' +
-      'Return: title (short subject line for the letter, max ~80 characters), salutation (e.g. "Sayın Yetkili," or with the person\'s name only if given), body (plain paragraphs separated by a blank line; a list only if the facts are a list, one item per line starting with "- "; no salutation and no closing inside the body), closing (one short formula such as "Saygılarımızla,").\n' +
+      (email ? 'Return: title (the e-mail subject line, max ~70 characters), salutation (greeting line), body (2–4 short paragraphs separated by a blank line; no salutation, no sign-off inside the body), closing (one short sign-off such as "Saygılarımızla," or "İyi çalışmalar,").\n' : '') +
+      (email ? '' : 'Return: title (short subject line for the letter, max ~80 characters), salutation (e.g. "Sayın Yetkili," or with the person\'s name only if given), body (plain paragraphs separated by a blank line; a list only if the facts are a list, one item per line starting with "- "; no salutation and no closing inside the body), closing (one short formula such as "Saygılarımızla,").\n') +
       `${FACT_RULES}\n\n${NO_AI_SLOP_RULES}`,
     user: [
       input.recipient ? `Recipient: ${input.recipient}` : 'Recipient: (not given)',

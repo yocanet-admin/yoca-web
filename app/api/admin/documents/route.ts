@@ -4,6 +4,7 @@ import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
 import { addDaysIso, blockHeading, KIND_DEF, localId, newContent, sanitizeContent, todayIso, DOC_KINDS, QUOTE_STATES, type DocContent, type DocKind } from '@/lib/documents/model';
 import { bankChanges, docSettingsProblems, sanitizeDocSettings } from '@/lib/documents/settings';
+import { mailReady, senderAddress } from '@/lib/documents/emailSend';
 import { assess, buildSnapshot, contentOf, dbError, DOC_BUCKET, istanbulStamp, loadContext, recipientFromClient, selectedBanks, TEMPLATE_VERSION, type DocRow, type VersionRow, type VersionSnapshot } from '@/lib/documents/server';
 import { renderDocumentPdf } from '@/lib/documents/pdf';
 
@@ -66,13 +67,15 @@ export async function GET(request: NextRequest) {
     return json({ ok: true, documents, clients: clients.data ?? [], projects, settings: ctx.settings, issuer: ctx.issuer, companyRevision: ctx.revision });
   }
   if (!isUuid(id)) return json({ ok: false, error: 'bad id' }, 400);
-  const [doc, versions, events, clients, renders, projects] = await Promise.all([
+  const [doc, versions, events, clients, renders, projects, emails] = await Promise.all([
     client.from('doc_documents').select('*').eq('id', id).maybeSingle(),
     client.from('doc_versions').select('id, document_id, version, number, title, total, currency, pdf_path, pdf_bytes, pdf_pages, pdf_sha256, finalized_by, finalized_at, snapshot').eq('document_id', id).order('version', { ascending: false }),
     client.from('doc_events').select('id, kind, detail, actor, at').eq('document_id', id).order('at', { ascending: false }).limit(100),
     client.from('clients').select(CLIENT_COLUMNS).order('name'),
     client.from('doc_renders').select('id, version, company_revision, template_version, reason, issuer, pdf_pages, pdf_bytes, generated_by, generated_at').eq('document_id', id).order('generated_at', { ascending: false }),
     projectsOf(client),
+    // Sending history (v20). Without the table the panel says sending is not set up yet.
+    client.from('doc_emails').select('id, version, render_id, pdf_name, pdf_sha256, to_addrs, cc_addrs, subject, body, status, provider_id, error, last_event, sent_by, created_at, finished_at, status_checked_at').eq('document_id', id).order('created_at', { ascending: false }),
   ]);
   if (doc.error) { const e = dbError(doc.error); return json({ ok: false, error: e.error }, e.status); }
   if (!doc.data) return json({ ok: false, error: 'Belge bulunamadı.' }, 404);
@@ -96,6 +99,8 @@ export async function GET(request: NextRequest) {
     events: events.data ?? [],
     clients: clients.data ?? [],
     projects,
+    emails: emails.error ? [] : emails.data ?? [],
+    mail: { tableReady: !emails.error, serviceReady: mailReady(), from: senderAddress() },
     source: source.data ?? null,
     derived: derived.data ?? [],
     settings: ctx.settings,

@@ -2,12 +2,12 @@
 
 Yönetim paneli → Operasyon → **Teklifler ve Belgeler** (`/admin/documents`).
 
-Bu modülle beş belge türü hazırlanır: fiyat teklifi, proforma, antetli yazı, proje durum raporu ve teslim belgesi. Belgeler panelde düzenlenir, sürümleri saklanır ve PDF olarak indirilir.
+Bu modülle beş belge türü hazırlanır: fiyat teklifi, proforma, antetli yazı / bilgilendirme, proje durum raporu ve teslim belgesi. Belgeler panelde düzenlenir, sürümleri saklanır, PDF olarak indirilir ve istenirse ayrı bir “Gönder” adımıyla e-postayla gönderilir. Aynı bölümdeki **Kurumsal materyaller** sekmesinde boş antet, kartvizit, e-posta imzası ve proje bilgilendirme e-postası hazırlanır.
 
 Bu modülün yapmadıkları:
 
 - E-fatura veya muhasebe kaydı oluşturmaz.
-- Otomatik e-posta göndermez.
+- Kendiliğinden e-posta göndermez: PDF üretmek veya kesinleştirmek hiçbir şey göndermez; gönderim yalnızca “E-postayla gönder → Gönder” ile olur.
 - Herkese açık paylaşım bağlantısı vermez.
 - Elektronik imza almaz.
 
@@ -20,9 +20,10 @@ Bu modülün yapmadıkları:
 
 **Yeni belge**
 - Tür seçilir.
-- Mevcut bir müşteri seçilir ya da "müşteriye bağlamadan" alıcı elle yazılır.
+- Müşteri isteğe bağlıdır: mevcut müşteri seçilir ya da alıcı firma/kişi pencerede elle yazılır.
+- Proje isteğe bağlıdır (Operasyon projeleri; müşteri seçildiyse yalnızca onun projeleri). Proje adı belgeye kopyalanır.
 - Dil seçilir.
-- Elle doldurma ya da yapay zekâ ile ilk taslak seçilir.
+- Elle doldurma ya da yapay zekâ seçilir (antetli yazıda: “AI ile kurumsal metin hazırla”).
 
 **Taslak düzenleyici** (`/admin/documents/[id]`, durum: taslak)
 - Alanlar türe göre değişir: antetli yazıda kalem ve ödeme alanı yoktur.
@@ -35,9 +36,34 @@ Bu modülün yapmadıkları:
 
 **Kesinleşmiş belge** (durum: kesinleştirildi veya arşivlendi)
 - Form alanı yerine okunur özet gösterilir: belge bilgileri, alıcı, kalemler ve toplamlar, ödeme planı, belgede basılı banka bilgisi, bölümler. Özet, son sürümün dondurulmuş içeriğinden gelir.
-- Üstte: PDF indir, Önizle (kayıtlı PDF yeni sekmede), Sürüm geçmişi, Revize et, Proforma oluştur, Çoğalt, Arşivle.
+- Üstte: PDF indir, Önizle (kayıtlı PDF yeni sekmede), E-postayla gönder, Sürüm geçmişi, Revize et, Proforma oluştur, Çoğalt, Arşivle.
 - Düzenleme "Revize et" ile açılır.
 - Teklif takibi ve sürüm/PDF geçmişi yan sütundadır.
+
+**Antetli yazı / Bilgilendirme**
+- Numara mevcut YZI serisinden gelir; taslak → kesinleştirme → sürüm akışı diğer belgelerle aynıdır (ikinci bir belge sistemi yok).
+- Alanlar: başlık, konu, hitap (“Sayın Yetkili,” varsayılan; boşsa basılmaz), metin, kapanış ve imza. Proje ve ilgi isteğe bağlıdır.
+- “AI ile kurumsal metin hazırla”: konu ve “yapılan iş / iletilecek bilgiler” yazılır. Öneri başlık, hitap, metin ve kapanıştan oluşur; yalnızca verilen bilgilere dayanır. Yapılmamış iş, test sonucu, tarih, garanti veya taahhüt eklememesi istenir; eksik bilgi “[EKSİK: …]” ile işaretlenir ve listelenir (bu işaret kesinleştirmeyi engeller). Öneride verilen bilgilerde olmayan sayı, tarih, ay adı veya garanti/taahhüt sözcüğü varsa uyarı çıkar. “Uygula” denmeden belgeye hiçbir şey yazılmaz. Yapay zekâ olmadan da tüm akış çalışır.
+- Boş antet (numarasız) bu akışta değil, Kurumsal materyaller sekmesindedir.
+
+**E-postayla gönder** (kesinleşmiş belge; v20 gerekir)
+- Pencerede alıcı (en fazla 10), CC (isteğe bağlı), konu, mesaj ve eklenecek kesinleşmiş sürüm görünür ve düzenlenir. Varsayılan konu “NUMARA — başlık”, mesaj kısa bir ek yazısıdır.
+- Ek, “PDF indir” ile aynı dosyadır: sürümün sabit içeriği + güncel şirket profili + onaylı şablon. Dosya `doc_renders`'ta saklıdır; gönderim kaydı o dosyanın kimliğini ve SHA-256 özetini tutar. “Gönderilen PDF” tam o dosyayı açar.
+- Sürümdeki banka bilgisi güncel ayarlardan farklıysa hiçbir şey gönderilmez; “Sürümdeki bilgilerle göndermeyi seç” ya da revizyon seçilir (indirmedeki kararla aynı).
+- Tek pencere = tek istek anahtarı. Çift tıklama, aynı anda birkaç basış veya “Yeniden dene” ikinci e-posta göndermez (Resend `Idempotency-Key` = istek anahtarı; servis anahtarı 24 saat hatırlar; 23 saatten eski belirsiz gönderim kendiliğinden tekrarlanmaz).
+- Sonuç olduğu gibi gösterilir: **Servis kabul etti** (teslim edildi demek değildir) · **Gönderilemedi** (servis reddetti; hiçbir şey gönderilmedi) · **Sonuç belirsiz** (zaman aşımı / bağlantı / 5xx; aynı gönderim güvenle yeniden denenebilir). Hata hiçbir zaman başarı olarak gösterilmez.
+- “Durumu yenile” teslim durumunu servisten okur: teslim edildi, gecikiyor, geri döndü, istenmeyen işaretlendi. Bunun için tam yetkili Resend anahtarı gerekir; yalnızca gönderim yetkili anahtarda durum “servis kabul etti” kalır ve panel bunu söyler.
+- Geçmiş (yan sütun “E-posta gönderimleri” + İşlem geçmişi): gönderen kullanıcı, alıcı/CC, zaman, sürüm, PDF dosyası ve sonuç. Kayıtlar değiştirilemez ve silinemez.
+- Arşivdeki ve hiç kesinleşmemiş belge gönderilemez. Gönderen adresi `DOCUMENTS_EMAIL_FROM` (yoksa `NOTIFY_EMAIL_FROM`, yoksa `Yoca <noreply@yoca.net>`); yanıt adresi şirket profilindeki e-posta.
+- Canlı olmayan ortamlarda (preview / development) yalnızca `DOCUMENTS_EMAIL_TEST_ALLOW` listesindeki adreslere veya `@alan` adlarına gönderilir; yerel testler `NOTIFY_RESEND_ENDPOINT` ile yakalama sunucusuna gider. Geliştirme kontrollerinde gerçek müşteriye e-posta gitmez.
+
+**Kurumsal materyaller** (`/admin/documents/materials`)
+- Belge numarası kullanmaz, kesinleştirme yoktur, hiçbir şey kaydedilmez veya gönderilmez. Şirket bilgileri “Şirket bilgileri”nden, kişiler ekip kayıtlarından (`team_members`: ad, unvan) gelir; bu kayıtlar değişince yeni çıktılar da değişir.
+- **Boş antet:** A4 PDF; motif, orijinal logo, altbilgide güncel şirket bilgileri.
+- **Kartvizit:** ekip üyesi seçilir; ad ve unvan dolar, telefon ve e-posta şirket profilinden başlar (ekip kayıtlarında kişisel telefon/e-posta tutulmaz, herkese açık olurdu). Alanlar üretmeden önce düzenlenir, kaydedilmez. Ön/arka önizleme; iki sayfalık PDF: kesim 85 × 55 mm, taşma payı ayrı seçilir (2/3/5 mm), kesim işaretleri taşma alanının dışında. Renkler RGB'dir: dosya bir provadır; matbaaya göndermeden önce taşma payı ve CMYK profili matbaayla teyit edilir.
+- **E-posta imzası:** önizleme, biçimlendirilmiş kopyalama (HTML + düz metin), HTML indirme.
+- **Proje bilgilendirme e-postası:** müşteri/proje isteğe bağlı; konu, başlık, hitap, metin ve bağlantı (yalnızca http/https; buton gerçek bağlantıya gider) düzenlenir. AI önerisi “Uygula” denmeden alanları değiştirmez. Önizleme, biçimlendirilmiş kopyalama, düz metin, HTML indirme. Panelden gönderilmez.
+- E-posta HTML'i tablo düzeni ve satır içi stildir (Gmail, Outlook, mobil); Manrope yüklenmezse sistem yazı tipi kullanılır. Logo `https://yoca.net/brand/email/yoca-logo-light.png` (orijinal açık zemin SVG'den 500 px PNG).
 
 **Belge ayarları** (`/admin/documents/settings`)
 - Banka hesapları (IBAN kontrol hanesi doğrulanır).
@@ -138,27 +164,28 @@ Kurallar:
 
 ## PDF tasarımı
 
-Referans: "Yoca kurumsal belge tasarım kiti" (5 Kasım 2026).
+Şablon: Bolt'ta seçilen Yoca kurumsal set (`yoca-kurumsal-claude-teslim`), `TEMPLATE_VERSION = 'belge-2026-11-e'`. Bolt önizlemesi sabit 794 × 1123 px'lik bir sahnedir; burada aynı görünüm gerçek verilerle ve otomatik sayfalamayla yeniden kurulur (1 px = 0,75 pt).
 
-- **Teklif ve proforma:** yan bant düzeni.
-- **Yazı, rapor ve teslim belgesi:** antet düzeni.
+- Beyaz sayfa, 42 pt kenar boşluğu. İlk sayfa: sağ üstte marka motifi, orijinal açık zemin logosu, küçük büyük-harf üst başlık, büyük başlık ve yeşil marka noktası. Devam sayfalarında motif yerine küçük logo ve “TÜR · NUMARA” satırı.
+- **Teklif / proforma:** belge başlığı alt başlık olarak; proformada “FATURA YERİNE GEÇMEZ”. “Hazırlanan” ve “Belge / tarih” sütunları. Üç lime hücreli tablo başlığı her sayfada tekrarlanır. Satırda kod, başlık, açıklama, miktar ve tutar; birim fiyat, indirim ve (birden çok KDV oranı varsa) satır KDV'si miktarın altında. Ara toplam, indirim, KDV ve büyük genel toplam + nokta. Sonda 1,5 pt mürekkep çizgili kapanış: solda “Ödeme ve koşullar” (ödeme planı), banka bilgileri, kapanış cümlesi; sağda logo ve imza yetkilisi.
+- **Antetli yazı / durum raporu / teslim belgesi:** “Alıcı” ve “Sayı / tarih” sütunları, mürekkep çizgi, “Konu” + başlık, hitap, metin, “Saygılarımızla,” ve logo (imza yetkilisi doluysa altında). Antetli yazının büyük başlığı Bolt'taki “Birlikte. / bir sonraki adıma.”; rapor “Rapor.”, teslim belgesi “Teslim.”.
+- **Her sayfa:** altbilgide 1,5 pt çizgi, solda resmî unvan ve şirket bilgileri (adres · telefon · e-posta · vergi dairesi · VKN · MERSİS …), sağda web sitesi ve sayfa numarası (“01” ya da “01 / 03”). Taslak ve örnek belgelerde lime “TASLAK / ÖRNEK” etiketi.
+- Şirket bilgileri yalnızca o anki şirket profilinden gelir; boş alan ve etiketi basılmaz. Resmî unvan (“Yoca Teknoloji Ltd Şti”) profilde girilmelidir; koda yazılmadı.
+- Büyük harf belgenin diliyle yapılır (tr-TR: “İLETİŞİM”).
+- Logo `public/brand/yoca-logo-light-bg.svg` (koyu kartvizit önünde `yoca-logo-primary.svg`), motif `public/brand/yoca-motif.svg`; dosyaların kendi vektörleri ve oranlarıyla, ek yazı yok.
+- Font: Manrope (OFL, `lib/documents/fonts/OFL.txt`), PDF'e gömülü.
 
-Uygulama `lib/documents/pdf.tsx` içindedir:
-- `@react-pdf/renderer` kullanılır.
-- Sayfa sonları otomatik ayarlanır; sayfa sayısına sınır yoktur. Tablo başlığı devam sayfasında tekrarlanır.
-- Kısa bölümler (yaklaşık 130 pt'ye kadar) tek parça taşınır. Uzun bölümler akar: başlık altında en az iki satır ister (`minPresenceAhead`), paragraflar sayfa sonunda en az iki satır bırakır, son iki madde birlikte kalır.
-- İmza son içerikle birlikte kalır. Liste öncesi "…:" ile biten kısa paragraf listeyle birlikte kalır.
-- Toplam bloğu son kalemle birlikte taşınır; tek başına sayfa açmaz.
-- Teklif/proformada banka bilgileri ve imza aynı satırdadır (banka solda, imza sağda).
-- Teklif/proforma iki geçişle üretilir: "Plan ve koşullar" bir sayfada başlayıp son sayfaya taşıyorsa ikinci geçişte yeni sayfada başlatılır. Sayfa sayısı artmıyorsa ikinci sonuç kullanılır (kitteki "plan sayfası" düzeni).
-- Altlıktaki iletişim bloğunun yüksekliği metin alanından ayrılır.
+Sayfalama (`lib/documents/pdf.tsx`, `@react-pdf/renderer`):
+- Sayfa sonları otomatiktir, sayfa sayısına sınır yoktur.
+- Kısa bölümler (≈130 pt'ye kadar) tek parça taşınır; uzunlar akar: başlık en az iki satırla kalır, paragraflar sayfa sonunda en az iki satır bırakır, son iki madde birlikte kalır, listesi yeni sayfaya geçen bölümde “… — DEVAM” etiketi çıkar.
+- Toplam bloğu son kalemle birlikte taşınır. Kapanış bloğu son bölümle birlikte kalır; bölüm yoksa toplamdan sonra gelir, sığmazsa bir sonraki sayfaya geçer (kesilmez).
+- Teklif/proforma iki geçişle üretilir: “Plan ve koşullar” bir sayfada başlayıp son sayfaya taşıyorsa yeni sayfada başlatılır; sayfa sayısı artmıyorsa bu sonuç kullanılır.
+- Altbilginin yüksekliği metin alanından ayrılır.
 
-Kitteki `render.py` sabit örnekler içindir ve kullanılmaz.
-
-Diğer ayrıntılar:
-- **Logo:** `public/brand/yoca-logo-primary.svg`, dosyanın kendi oranıyla.
-- **Font:** Manrope (OFL, `lib/documents/fonts/OFL.txt`).
-- **Şablon sürümü:** `TEMPLATE_VERSION`. Tasarım değişirse artırılır; böylece yeni indirmeler yeni şablonla üretilir.
+Şablon değişince ne olur:
+- “Önizle” ve “PDF indir”, kesinleşmiş belgelerde de güncel onaylı şablonu ve güncel şirket profilini kullanır. Kalemler, tutarlar, alıcı, numara, tarih ve onay geçmişi değişmez; yeni numara veya içerik sürümü oluşmaz.
+- Her yeni üretim (sürüm, şirket profili revizyonu, şablon sürümü) ile `doc_renders`'a kaydedilir. “Geçmiş PDF” ve e-postayla gönderilen PDF'ler byte düzeyinde aynı kalır.
+- Banka değişikliği uyarısı ve açık seçim aynen sürer.
 
 ## Yönetici panelinde çerezler
 
@@ -191,7 +218,15 @@ Ziyaretçi sitesindeki İngilizce, sağ altta duran tercih kutusu `/admin` altı
    - `[TEST]` işaretli, müşteriye bağlı olmayan bir antetli yazı taslağının önizlemesi açılıyor mu?
    - Bu taslak kesinleştirilmez, gönderilmez.
 
+### v20 — e-postayla gönderim (ayrı yayın onayıyla)
+1. Yedeği kontrol et.
+2. Ön kontrol: `select to_regclass('public.doc_renders'), to_regclass('public.doc_emails');` → ilki dolu, ikincisi `null`.
+3. `supabase/upgrade-v20-document-emails.sql` (yalnızca `doc_emails`, üç fonksiyon, koruma tetikleyicileri; `doc_events` türlerine `emailed` eklenir; mevcut satırlar değişmez).
+4. Ortam değişkenleri: `RESEND_API_KEY` zaten var. İsteğe bağlı `DOCUMENTS_EMAIL_FROM` (yoca.net alanından bir adres). Teslim durumunu görmek için anahtarın tam yetkili olması gerekir. Preview ortamında `DOCUMENTS_EMAIL_TEST_ALLOW` yalnızca test adresleri.
+5. v20 uygulanmadan yayınlanırsa belgeler çalışır; gönderim ekranı “veritabanı güncellemesi uygulanmadı” der ve hiçbir şey göndermez.
+6. Canlı kontrol gerçek müşteriye değil, şirketin kendi adresine gönderimle yapılır.
+
 ## Geri dönüş
 
 - **Uygulama:** Önceki production dağıtımına geri al (Vercel → Instant Rollback). v19 tabloları yerinde kalabilir; eski uygulama onları okumaz.
-- **Veritabanı:** `upgrade-v19-documents.sql` sonundaki "Undo" bölümü. Gerçek belge oluştuktan sonra çalıştırılırsa belgeler ve sürümler silinir. Bu durumda yalnızca uygulamayı geri almak tercih edilmelidir. `yoca-docs` deposu geri alma ile silinmez.
+- **Veritabanı:** `upgrade-v20-document-emails.sql` / `upgrade-v19-documents.sql` sonundaki "Undo" bölümleri. Gerçek belge oluştuktan sonra çalıştırılırsa belgeler ve sürümler silinir. Bu durumda yalnızca uygulamayı geri almak tercih edilmelidir. `yoca-docs` deposu geri alma ile silinmez.

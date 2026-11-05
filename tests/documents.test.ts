@@ -204,3 +204,32 @@ test('AI letter: invented dates, numbers and promises are flagged; repeated salu
   const bad = cleanLetter(given, { title: 'x', salutation: '', body: 'Testlerin %100’ü başarılı oldu, ₺5.000 ek ücret yoktur.', closing: '', missing: [] });
   assert.equal(bad.warnings.length, 2);
 });
+
+test('document e-mail: addresses, statuses, test-recipient guard, escaped HTML, defaults', async () => {
+  const m = await import('../lib/documents/mail');
+  const p = m.parseAddresses('a@x.com, b@y.com.tr; A@x.com  bad@ <script>@x.com');
+  assert.deepEqual(p.list, ['a@x.com', 'b@y.com.tr']);
+  assert.deepEqual(p.invalid, ['bad@', '<script>@x.com']);
+  assert.equal(m.parseAddresses(Array.from({ length: 11 }, (_, i) => `u${i}@x.com`).join(',')).tooMany, true);
+  assert.equal(m.statusFromEvent('sent'), 'accepted', 'sent to the service is not delivered');
+  assert.equal(m.statusFromEvent('delivered'), 'delivered');
+  assert.equal(m.statusFromEvent('bounced'), 'bounced');
+  assert.equal(m.statusFromEvent(null), 'accepted');
+  // previews / local runs never reach real customers
+  assert.ok(m.testRecipientProblem({ vercelEnv: 'preview', capture: false, allow: '' }, ['musteri@firma.com']));
+  assert.equal(m.testRecipientProblem({ vercelEnv: 'preview', capture: false, allow: '@yoca.net,test@example.com' }, ['ray@yoca.net', 'test@example.com']), null);
+  assert.equal(m.testRecipientProblem({ vercelEnv: 'development', capture: true }, ['musteri@firma.com']), null, 'capture endpoint: nothing leaves');
+  assert.equal(m.testRecipientProblem({ vercelEnv: 'production', capture: false }, ['musteri@firma.com']), null);
+  assert.ok(m.testRecipientProblem({ nodeEnv: 'development', capture: false }, ['musteri@firma.com']));
+  const issuer = { ...SAMPLE_ISSUER, legalName: 'Yoca Teknoloji Ltd Şti', email: '' };
+  const html = m.brandedEmailHtml({ issuer, locale: 'tr', preheader: 'x', body: 'Merhaba <b>dünya</b>\n\nİkinci paragraf', cta: { label: 'Aç', href: 'javascript:alert(1)' } });
+  assert.ok(html.includes('Merhaba &lt;b&gt;dünya&lt;/b&gt;'));
+  assert.ok(!html.includes('javascript:'), 'only http(s) links become buttons');
+  assert.ok(html.includes('Yoca Teknoloji Ltd Şti · yoca.net'));
+  assert.ok(html.includes('yoca-logo-light.png'));
+  assert.ok(!/Vergi dairesi|VKN/.test(html), 'empty company facts print nothing');
+  const d = m.documentEmailDefaults({ kind: 'proforma', locale: 'tr', number: 'PRF-2026-0001', title: 'Web sitesi', recipient: { ...sampleLetter().recipient, email: 'murat@ornek.example' }, signatory: { name: '', title: '' }, issuer });
+  assert.equal(d.to, 'murat@ornek.example');
+  assert.equal(d.subject, 'PRF-2026-0001 — Web sitesi');
+  assert.ok(d.body.startsWith('Sayın Murat Yıldız (ÖRNEK),'));
+});
