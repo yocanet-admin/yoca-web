@@ -9,6 +9,8 @@ import { BankDecision } from '@/components/admin/documents/BankDecision';
 import { DocSummary } from '@/components/admin/documents/DocSummary';
 import { Group } from '@/components/admin/documents/Group';
 import type { BankChange } from '@/lib/documents/settings';
+import { readDocBackup, writeDocBackup, type DocBackup } from '@/lib/documents/backup';
+import { getAdminClient } from '@/lib/adminClient';
 import {
   BLOCK_LABEL, DOC_CURRENCIES, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, QUOTE_STATES, STATUS_LABEL,
   blockHeading, localId, missingFor, newItem, type Block, type BlockKey, type DocContent, type LineItem, type PaymentStep, type QuoteState,
@@ -23,21 +25,14 @@ import { computeDocument, fmtMoney, fmtPct } from '@/lib/documents/calc';
  * admin applies (or not).
  *  - Draft: the fields are grouped in collapsible sections; closing a group
  *    never loses what was typed, and unsaved changes are also kept in this
- *    browser (restored after a reload or an accidental navigation).
+ *    browser per user and per document (lib/documents/backup.ts), offered back
+ *    after a reload or an accidental navigation, removed on save, "Sil" and
+ *    sign-out.
  *  - Finalized / archived: a readable summary (recipient, items, totals,
  *    payment plan, sections) instead of disabled fields; "Revize et" opens the
  *    editor again. PDF, preview and the version history stay one click away.
  * Each finalization is a new version and earlier PDFs stay.
  */
-
-const BACKUP = (id: string) => `yoca-doc-unsaved:${id}`;
-type Backup = { base: string; at: string; title: string; clientId: string | null; content: DocContent };
-function readBackup(id: string): Backup | null {
-  try { const raw = window.localStorage.getItem(BACKUP(id)); return raw ? (JSON.parse(raw) as Backup) : null; } catch { return null; }
-}
-function writeBackup(id: string, b: Backup | null) {
-  try { if (b) window.localStorage.setItem(BACKUP(id), JSON.stringify(b)); else window.localStorage.removeItem(BACKUP(id)); } catch { /* storage unavailable: the beforeunload warning still applies */ }
-}
 
 type Draft = { title: string; clientId: string | null; content: DocContent };
 type DraftSuggestion = {
@@ -81,11 +76,15 @@ function EditorInner() {
   const [showAi, setShowAi] = useState(params.get('ai') === '1');
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [openBlocks, setOpenBlocks] = useState<Record<string, boolean>>({});
-  const [restore, setRestore] = useState<Backup | null>(null);
+  const [restore, setRestore] = useState<DocBackup | null>(null);
+  // Signed-in user: the browser backup is kept per user and per document.
+  const [uid, setUid] = useState<string | null>(null);
+  useEffect(() => { void getAdminClient()?.auth.getSession().then(({ data }) => setUid(data.session?.user.id ?? null)); }, []);
   const [bankAsk, setBankAsk] = useState<{ version: number; changes: BankChange[]; preview: boolean } | null>(null);
   const textRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
   const load = useCallback(async () => {
+    if (!uid) return;
     const r = await loadDoc(id);
     setData(r);
     if (r.ok) {
@@ -96,11 +95,11 @@ function EditorInner() {
       const bl = r.document.content.blocks;
       setOpenBlocks(Object.fromEntries(bl.map((b) => [b.id, bl.length <= 3 || !b.body.trim()])));
       // Unsaved changes from an earlier visit in this browser: offer to restore, never apply silently.
-      const b = r.document.status === 'draft' ? readBackup(id) : null;
+      const b = r.document.status === 'draft' ? readDocBackup(uid, id) : null;
       const same = b && JSON.stringify({ t: b.title, c: b.clientId, x: b.content }) === JSON.stringify({ t: r.document.title, c: r.document.client_id, x: r.document.content });
-      if (b && !same) setRestore(b); else { setRestore(null); if (b) writeBackup(id, null); }
+      if (b && !same) setRestore(b); else { setRestore(null); if (b) writeDocBackup(uid, id, null); }
     }
-  }, [id]);
+  }, [id, uid]);
   useEffect(() => { void load(); }, [load]);
 
   // Warn before leaving with unsaved changes.
@@ -113,10 +112,10 @@ function EditorInner() {
   // Keep unsaved changes in this browser too (in-app navigation does not trigger beforeunload).
   const docUpdatedAt = data?.ok ? data.document.updated_at : '';
   useEffect(() => {
-    if (!dirty || !draft || !docUpdatedAt) return;
-    const t = setTimeout(() => writeBackup(id, { base: docUpdatedAt, at: new Date().toISOString(), title: draft.title, clientId: draft.clientId, content: draft.content }), 400);
+    if (!dirty || !draft || !docUpdatedAt || !uid) return;
+    const t = setTimeout(() => writeDocBackup(uid, id, { base: docUpdatedAt, at: new Date().toISOString(), title: draft.title, clientId: draft.clientId, content: draft.content }), 400);
     return () => clearTimeout(t);
-  }, [dirty, draft, docUpdatedAt, id]);
+  }, [dirty, draft, docUpdatedAt, id, uid]);
 
   const doc = data?.ok ? data.document : null;
   const kind = doc?.kind ?? 'quote';
@@ -154,7 +153,7 @@ function EditorInner() {
     }
     setData({ ...data, document: { ...doc, title: draft.title, client_id: draft.clientId, content: c, updated_at: r.updated_at as string } });
     setDirty(false);
-    writeBackup(id, null);
+    if (uid) writeDocBackup(uid, id, null);
     setRestore(null);
     setFlash({ tone: 'ok', text: 'Kaydedildi.' });
     return r.updated_at as string;
@@ -375,7 +374,7 @@ function EditorInner() {
           {restore.base !== doc.updated_at && <p className="text-yellow-200">Belge bu değişikliklerden sonra kaydedilmiş. Geri yükleyip kaydederseniz sonraki kayıttaki metnin üzerine yazılır.</p>}
           <div className="flex flex-wrap gap-2">
             <button type="button" className="admin-btn admin-btn-primary" onClick={() => { setDraft({ title: restore.title, clientId: restore.clientId, content: restore.content }); setDirty(true); setRestore(null); setFlash({ tone: 'ok', text: 'Kaydedilmemiş değişiklikler geri yüklendi. Kaydetmeyi unutmayın.' }); }}>Geri yükle</button>
-            <button type="button" className="admin-btn" onClick={() => { writeBackup(id, null); setRestore(null); }}>Sil</button>
+            <button type="button" className="admin-btn" onClick={() => { if (uid) writeDocBackup(uid, id, null); setRestore(null); setFlash({ tone: 'ok', text: 'Bu tarayıcıdaki kaydedilmemiş değişiklikler silindi.' }); }}>Sil</button>
           </div>
         </div>
       )}

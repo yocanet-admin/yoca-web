@@ -119,7 +119,7 @@ const L = {
     proforma: 'Proforma • fatura yerine geçmez', proformaSub: 'Ödeme bilgisi içindir; resmî fatura değildir ve tahsilat yapıldığını göstermez.',
     subject: 'Konu', reference: 'İlgi', contact: 'İletişim',
     draft: 'Taslak', draftLine: 'Taslak · kesinleşmemiş belge', versionLine: (v: number, at: string) => `Sürüm ${v} · ${at}`, sample: 'Örnek belge / sentetik bilgiler',
-    brandKind: (k: string) => `Yoca / ${k}`,
+    brandKind: (k: string) => `Yoca / ${k}`, continued: (h: string) => `${h} — devam`,
   },
   en: {
     brandDocs: 'Yoca / Documents', number: 'Document no', issued: 'Issued', valid: 'Valid until', currency: 'Currency', source: 'Source quotation', version: 'Version', period: 'Period',
@@ -132,7 +132,7 @@ const L = {
     proforma: 'Proforma • fatura yerine geçmez (not an invoice)', proformaSub: 'For payment information only; not a tax invoice and not a confirmation of payment.',
     subject: 'Subject', reference: 'Reference', contact: 'Contact',
     draft: 'Draft', draftLine: 'Draft · not final', versionLine: (v: number, at: string) => `Version ${v} · ${at}`, sample: 'Sample document / synthetic data',
-    brandKind: (k: string) => `Yoca / ${k}`,
+    brandKind: (k: string) => `Yoca / ${k}`, continued: (h: string) => `${h} — continued`,
   },
 } as const;
 type Labels = (typeof L)['tr'] | (typeof L)['en'];
@@ -272,6 +272,24 @@ const st = {
 
 type PartT = { type: 'p' | 'li' | 'h'; text: string };
 
+/**
+ * Options for one rendering pass (see renderDocumentPdf):
+ *  - planBreak: start "Plan ve koşullar" on a new page;
+ *  - cont: places where a continuation label ("TESLİMATLAR — DEVAM") goes,
+ *    as `${section}:${part}` — found in the previous pass;
+ *  - probe: filled during the pass with the page of the plan opener and the
+ *    page on which each section part ends, plus each section's part order.
+ * Passed down as props (no React context: route handlers run on the
+ * react-server build, which has none), never module state, so concurrent
+ * renders do not mix.
+ */
+interface LayoutOpts {
+  planBreak?: boolean;
+  cont?: Set<string>;
+  probe?: { planPage: number; ends: Map<string, number>; order: Map<string, Array<{ key: string; li: boolean }>> };
+}
+
+
 function Part({ p, prev, size = 10, last = false }: { p: PartT; prev?: PartT['type']; size?: number; last?: boolean }) {
   if (p.type === 'h') return <R.Text style={[st.strong, { fontSize: size + 1, marginTop: prev ? 6 : 0, marginBottom: 6 }]}>{p.text}</R.Text>;
   if (p.type === 'p') return <R.Text style={[st.body, { fontSize: size, marginBottom: last ? 0 : 9, marginTop: prev === 'li' ? 4 : 0 }]} orphans={2} widows={2}>{p.text}</R.Text>;
@@ -294,7 +312,7 @@ function Part({ p, prev, size = 10, last = false }: { p: PartT; prev?: PartT['ty
  *    with the last part.
  * The last part has no bottom margin; `gap` is the only space after a section.
  */
-function Section({ heading, body, list, headingStyle, size = 10, gap = 18, before, after, afterGap = 6, width = MAIN_W }: { heading: React.ReactNode; body: string; list: boolean; headingStyle?: 'label' | 'strong'; size?: number; gap?: number; before?: React.ReactNode; after?: React.ReactNode; afterGap?: number; width?: number }) {
+function Section({ lay = {}, id, heading, body, list, headingStyle, size = 10, gap = 18, before, after, afterGap = 6, width = MAIN_W, continued }: { lay?: LayoutOpts; id?: string; heading: React.ReactNode; body: string; list: boolean; headingStyle?: 'label' | 'strong'; size?: number; gap?: number; before?: React.ReactNode; after?: React.ReactNode; afterGap?: number; width?: number; continued?: string }) {
   const parts = bodyParts(body, list);
   if (!parts.length) return null;
   const head = headingStyle === 'strong'
@@ -320,11 +338,36 @@ function Section({ heading, body, list, headingStyle, size = 10, gap = 18, befor
   if (n - tailN === 0) {
     return <R.View wrap={false} style={{ marginBottom: gap }}>{before}{head}{parts.map((_, i) => part(i))}{tailAfter}</R.View>;
   }
+  // Continuation label: when a list continues on the next page, the first item
+  // there gets a small "TESLİMATLAR — DEVAM" line so the section stays clear.
+  // Where that happens is measured in a rendering pass (probes record the page
+  // each part ends on) and applied in the next one (renderDocumentPdf).
+  const sid = id && continued ? id : null;
+  const flow = idx.slice(0, n - tailN);
+  const hasTail = Boolean(tailN || tailAfter);
+  if (sid && lay.probe) lay.probe.order.set(sid, [{ key: 'h', li: false }, ...flow.map((i) => ({ key: String(i), li: parts[i].type === 'li' })), ...(hasTail ? [{ key: 't', li: true }] : [])]);
+  const mark = (k: string) => (sid && lay.probe ? <R.View key={`m${k}`} render={({ pageNumber }) => { lay.probe!.ends.set(`${sid}:${k}`, pageNumber); return null; }} /> : null);
+  // The label sits in the free band above the page's text area (negative top
+  // margin = its own height), so adding it never moves a page break.
+  const contStyle = headingStyle === 'strong'
+    ? [st.strong, { fontSize: 9.5, color: C.muted, marginBottom: 6, marginTop: -(9.5 * 1.45 + 6) }]
+    : [st.labelMuted, { marginBottom: 8, marginTop: -(7.6 * 1.3 + 8) }];
+  const label = (k: string) => (sid && lay.cont?.has(`${sid}:${k}`) ? <R.Text style={contStyle}>{continued}</R.Text> : null);
   return (
     <R.View style={{ marginBottom: gap }}>
       <R.View wrap={false} minPresenceAhead={lineH * 2 + 6}>{before}{head}</R.View>
-      {idx.slice(0, n - tailN).map(part)}
-      {tailN || tailAfter ? <R.View wrap={false}>{idx.slice(n - tailN).map(part)}{tailAfter}</R.View> : null}
+      {mark('h')}
+      {flow.map((i) => {
+        const l = label(String(i));
+        return (
+          <React.Fragment key={i}>
+            {l ? <R.View wrap={false}>{l}{part(i)}</R.View> : part(i)}
+            {mark(String(i))}
+          </React.Fragment>
+        );
+      })}
+      {hasTail ? <R.View wrap={false}>{label('t')}{idx.slice(n - tailN).map(part)}{tailAfter}</R.View> : null}
+      {hasTail ? mark('t') : null}
     </R.View>
   );
 }
@@ -539,7 +582,6 @@ function PaymentBlock({ c, t }: { c: DocContent; t: Labels }) {
 }
 
 /** Internal layout options for the second rendering pass (see renderDocumentPdf). */
-interface LayoutOpts { planBreak?: boolean; probe?: { planPage: number } }
 
 function SidebarDocument({ input, layout }: { input: RenderInput; layout?: LayoutOpts }) {
   const c = input.content;
@@ -610,10 +652,10 @@ function SidebarDocument({ input, layout }: { input: RenderInput; layout?: Layou
         const boxed = (key: string, node: React.ReactNode): Item => (before, x) => (
           <R.View key={key} wrap={false} style={{ marginBottom: 18 }}>{before}{node}{x ? <R.View style={{ marginTop: 6 }}>{x}</R.View> : null}</R.View>
         );
-        for (const b of process) items.push((before, x) => <Section key={b.id} heading={sectionHeading(b)} body={b.body} list={BLOCK_LABEL[b.key].list} before={before} after={x} />);
+        for (const b of process) items.push((before, x) => <Section key={b.id} lay={layout} id={b.id} heading={sectionHeading(b)} body={b.body} list={BLOCK_LABEL[b.key].list} before={before} after={x} continued={up(t.continued(b.heading || BLOCK_LABEL[b.key][c.locale]))} />);
         if (computeDocument(c).payment.rows.length) items.push(boxed('pay', <PaymentBlock c={c} t={t} />));
-        if (def.deliveryTime && c.deliveryTime) items.push((before, x) => <Section key="delivery" heading={up(t.delivery)} body={c.deliveryTime} list={false} before={before} after={x} />);
-        for (const b of after) items.push((before, x) => <Section key={b.id} heading={up(b.heading || BLOCK_LABEL[b.key][c.locale])} body={b.body} list={BLOCK_LABEL[b.key].list} before={before} after={x} />);
+        if (def.deliveryTime && c.deliveryTime) items.push((before, x) => <Section key="delivery" lay={layout} id="delivery" heading={up(t.delivery)} body={c.deliveryTime} list={false} before={before} after={x} continued={up(t.continued(t.delivery))} />);
+        for (const b of after) items.push((before, x) => <Section key={b.id} lay={layout} id={b.id} heading={up(b.heading || BLOCK_LABEL[b.key][c.locale])} body={b.body} list={BLOCK_LABEL[b.key].list} before={before} after={x} continued={up(t.continued(b.heading || BLOCK_LABEL[b.key][c.locale]))} />);
         // Bank details and the signature share the closing row (bank left, signature right).
         if (banks.length) {
           items.push((before) => (
@@ -660,7 +702,7 @@ function letterBottom(issuer: Issuer, t: Labels): { contact: string; legal: stri
   return { contact, legal, boxH, legalH, bottom };
 }
 
-function LetterDocument({ input }: { input: RenderInput }) {
+function LetterDocument({ input, layout }: { input: RenderInput; layout?: LayoutOpts }) {
   const c = input.content;
   const t = L[c.locale];
   const r = c.recipient;
@@ -768,7 +810,7 @@ function LetterDocument({ input }: { input: RenderInput }) {
           return <R.View key={b.id}>{out}</R.View>;
         }
         const heading = `${numbered ? `${two(i + 1)} / ` : ''}${b.heading || BLOCK_LABEL[b.key][c.locale]}`;
-        return <Section key={b.id} heading={heading} body={b.body} list={BLOCK_LABEL[b.key].list} headingStyle="strong" size={10.5} gap={18} after={sig} width={LETTER_W} />;
+        return <Section key={b.id} lay={layout} id={b.id} heading={heading} body={b.body} list={BLOCK_LABEL[b.key].list} headingStyle="strong" size={10.5} gap={18} after={sig} width={LETTER_W} continued={t.continued(b.heading || BLOCK_LABEL[b.key][c.locale])} />;
       })}
       {blocks.length ? null : <Signature input={input} />}
     </>
@@ -789,7 +831,7 @@ export function DocumentPdf(input: RenderInput & { layout?: LayoutOpts }) {
   return (
     <R.Document title={`${input.number} — ${input.title}`} author={issuer.legalName || issuer.brand} creator="Yoca yönetim paneli" producer="Yoca" language={c.locale === 'tr' ? 'tr-TR' : 'en-GB'}>
       <R.Page size="A4" style={pageStyle}>
-        {sidebar ? <SidebarDocument input={input} layout={input.layout} /> : <LetterDocument input={input} />}
+        {sidebar ? <SidebarDocument input={input} layout={input.layout} /> : <LetterDocument input={input} layout={input.layout} />}
       </R.Page>
     </R.Document>
   );
@@ -803,21 +845,58 @@ async function renderOnce(input: RenderInput, layout?: LayoutOpts): Promise<Rend
   return { buffer, pages };
 }
 
+type Probe = NonNullable<LayoutOpts['probe']>;
+const newProbe = (): Probe => ({ planPage: 0, ends: new Map(), order: new Map() });
+
+/** Where a list continues on a new page: an unsplittable part (list item / tail group) that ends on a later page than the part before it. */
+function continuations(p: Probe): Set<string> {
+  const out = new Set<string>();
+  p.order.forEach((keys, sid) => {
+    for (let i = 1; i < keys.length; i += 1) {
+      const prev = p.ends.get(`${sid}:${keys[i - 1].key}`);
+      const cur = p.ends.get(`${sid}:${keys[i].key}`);
+      if (keys[i].li && prev && cur && cur > prev) out.add(`${sid}:${keys[i].key}`);
+    }
+  });
+  return out;
+}
+const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && Array.from(a).every((x) => b.has(x));
+
+/**
+ * One layout: render, find where lists continue on a new page, render again
+ * with the continuation labels there; repeat until the places stop changing
+ * (a label adds a line and can move a later break). At most 4 passes.
+ */
+async function renderLaidOut(input: RenderInput, base: Omit<LayoutOpts, 'cont' | 'probe'>): Promise<RenderedPdf & { planPage: number }> {
+  let cont = new Set<string>();
+  let last: RenderedPdf & { planPage: number } = { buffer: Buffer.alloc(0), pages: 0, planPage: 0 };
+  for (let pass = 0; pass < 4; pass += 1) {
+    const probe = newProbe();
+    const r = await renderOnce(input, { ...base, cont, probe });
+    last = { ...r, planPage: probe.planPage };
+    const next = continuations(probe);
+    if (sameSet(next, cont)) return last;
+    cont = next;
+  }
+  return last;
+}
+
 /**
  * Teklif / proforma: when "Plan ve koşullar" starts on one page and runs onto
- * the last page (which then often holds only a short remainder), a second pass
- * starts the plan on a fresh page — as in the design kit — and is kept only if
- * the document does not get longer. No page limit is applied.
+ * the last page (which then often holds only a short remainder), a second
+ * layout starts the plan on a fresh page — as in the design kit — and is kept
+ * only if the document does not get longer. No page limit is applied.
+ * Every layout adds "… — devam" labels where a list continues on a new page.
  */
 export async function renderDocumentPdf(input: RenderInput): Promise<RenderedPdf> {
   await loadRenderer();
   registerFonts();
-  if (input.kind !== 'quote' && input.kind !== 'proforma') return renderOnce(input);
-  const probe = { planPage: 0 };
-  const first = await renderOnce(input, { probe });
-  if (!probe.planPage || probe.planPage >= first.pages) return first;
-  const second = await renderOnce(input, { planBreak: true });
-  return second.pages <= first.pages ? second : first;
+  const first = await renderLaidOut(input, {});
+  if (input.kind !== 'quote' && input.kind !== 'proforma') return { buffer: first.buffer, pages: first.pages };
+  if (!first.planPage || first.planPage >= first.pages) return { buffer: first.buffer, pages: first.pages };
+  const second = await renderLaidOut(input, { planBreak: true });
+  const pick = second.pages <= first.pages ? second : first;
+  return { buffer: pick.buffer, pages: pick.pages };
 }
 
 export { MAIN_W, SIDE };
