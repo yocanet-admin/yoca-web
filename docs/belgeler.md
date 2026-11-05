@@ -229,6 +229,10 @@ Ziyaretçi sitesindeki İngilizce, sağ altta duran tercih kutusu `/admin` altı
 5. v20 uygulanmadan yayınlanırsa belgeler çalışır; gönderim ekranı “veritabanı güncellemesi uygulanmadı” der ve hiçbir şey göndermez.
 6. Canlı kontrol gerçek müşteriye değil, şirketin kendi adresine gönderimle yapılır.
 
+### v21 — belge tablolarında TRUNCATE yetkisi kapatıldı (5 Kasım 2026, production'a uygulandı)
+- `supabase/upgrade-v21-document-grants.sql`: `anon` ve `authenticated` rollerinden doc_* tablolarındaki TRUNCATE yetkisini kaldırır. TRUNCATE satır güvenliğine (RLS) ve satır düzeyindeki “silinemez” korumalarına takılmadığı için istemci rollerinde bulunmamalı.
+- Başka hiçbir şey değişmez: tablo boşaltılmaz, kayıt silinmez; panelin kullandığı SELECT / UPDATE ve `service_role` yetkileri yerinde kalır. Tekrar çalıştırılabilir.
+
 ## Geri dönüş
 
 - **Uygulama:** Önceki production dağıtımına geri al (Vercel → Instant Rollback). v19 tabloları yerinde kalabilir; eski uygulama onları okumaz.

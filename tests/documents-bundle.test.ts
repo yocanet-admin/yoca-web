@@ -27,3 +27,14 @@ test('brand files the PDF template reads are under the traced public/brand/*.svg
   assert.ok(config.includes("'/api/admin/documents/**'"), 'the include must cover every documents route (pdf, email, materials)');
   assert.ok(fs.existsSync(path.join(root, 'public/brand/email/yoca-logo-light.png')), 'e-mail logo PNG (light background) missing');
 });
+
+test('v21 only revokes TRUNCATE from client roles (no data change, service role untouched)', () => {
+  const sql = fs.readFileSync(path.join(root, 'supabase/upgrade-v21-document-grants.sql'), 'utf8').replace(/--.*$/gm, '').toLowerCase();
+  const statements = sql.split(';').map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  assert.deepEqual(statements[0], 'begin');
+  assert.deepEqual(statements.at(-1), 'commit');
+  const body = statements.slice(1, -1);
+  assert.equal(body.length, 1);
+  assert.match(body[0], /^revoke truncate on (public\.doc_[a-z_]+, )*public\.doc_[a-z_]+ from anon, authenticated$/);
+  assert.ok(!/service_role|delete from|truncate table|drop /.test(sql));
+});
