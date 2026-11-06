@@ -1,5 +1,6 @@
 import type { DocKind, DocLocale, Issuer, Recipient } from '@/lib/documents/model';
 import { KIND_LABEL } from '@/lib/documents/model';
+import { emailLayout, facts, kicker, NOTIFY_COLORS, para, section, title as notifyTitle } from '@/lib/notifyTemplates';
 
 /**
  * Yoca — e-mail texts and the branded HTML layout of the corporate set
@@ -28,15 +29,6 @@ export const emailThemeOf = (value: unknown): EmailTheme => (value === 'dark' ? 
 
 const C = { ink: '#0D0E12', lime: '#A2FF00', leaf: '#40C401', mist: '#F3F5EF', line: '#DCE0D8', muted: '#666A65', body: '#2B2E29' };
 
-/**
- * Colours per theme. Light is the corporate set as before (white card on mist).
- * Dark: Yoca ink #0D0E12 as the whole ground, white headings, light grey text
- * (contrast ≥ 7:1 on the ground), lime / leaf accents, lime links.
- */
-const THEME = {
-  light: { page: C.mist, card: '#FFFFFF', heading: C.ink, text: C.body, muted: C.muted, line: C.line, footTop: C.ink, link: '', footLink: '' },
-  dark: { page: C.ink, card: C.ink, heading: '#FFFFFF', text: '#E4E7E1', muted: '#A4AAA2', line: '#2C3038', footTop: '#FFFFFF', link: C.lime, footLink: '#D9DDD6' },
-} as const;
 const FONT = "Manrope, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif";
 
 export function esc(value: string): string {
@@ -109,65 +101,44 @@ export interface BrandedEmail {
   /** small grey note under the message (e.g. the attachment name) */
   note?: string;
   logoUrl?: string;
-  /** e-mail body theme (default light); never affects an attachment */
-  theme?: EmailTheme;
 }
 
 export function brandedEmailHtml(m: BrandedEmail): string {
-  const dark = m.theme === 'dark';
-  const T = THEME[dark ? 'dark' : 'light'];
-  // Dark: explicit bgcolor attributes as well (Outlook for Windows ignores some CSS backgrounds).
-  const bg = (color: string) => (dark ? ` bgcolor="${color}"` : '');
   const foot = companyFooter(m.issuer, m.locale);
   const href = m.cta ? safeLink(m.cta.href) : null;
   const cta = href && m.cta?.label.trim()
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0 0 0;"><tr><td bgcolor="${C.lime}" style="background:${C.lime};"><a href="${esc(href)}" style="display:inline-block;padding:14px 28px;font-family:${FONT};font-size:15px;font-weight:800;line-height:1;color:${C.ink};text-decoration:none;">${esc(m.cta.label.trim())}</a></td></tr></table>`
     : '';
   const headline = clean(m.headline);
-  const bodyLink = dark ? `color:${T.link};text-decoration:underline;` : undefined;
-  const footLink = `color:${T.footLink};text-decoration:none;`;
-  const web = websiteOf(m.issuer);
-  const footTop = dark ? [esc(clean(m.issuer.legalName)), web ? `<a href="${esc(`https://${web}`)}" style="${footLink}">${esc(web)}</a>` : ''].filter(Boolean).join(' · ') : esc(foot.top);
-  const footDetails = dark ? linkify(foot.details, footLink) : esc(foot.details);
-  const darkHead = dark
-    ? `<meta name="color-scheme" content="dark">
-<meta name="supported-color-schemes" content="dark">
-`
-    : '';
-  const darkStyle = dark
-    ? `  :root { color-scheme: dark; supported-color-schemes: dark; }
-  a[x-apple-data-detectors] { color: inherit !important; text-decoration: none !important; font-size: inherit !important; font-family: inherit !important; font-weight: inherit !important; line-height: inherit !important; }
-`
-    : '';
   return `<!doctype html>
 <html lang="${m.locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="x-apple-disable-message-reformatting">
-${darkHead}<title>${esc(headline || m.preheader)}</title>
+<title>${esc(headline || m.preheader)}</title>
 <style>
-${darkStyle}  @media only screen and (max-width: 620px) {
+  @media only screen and (max-width: 620px) {
     .container { width: 100% !important; }
     .pad-x { padding-left: 24px !important; padding-right: 24px !important; }
     .headline { font-size: 30px !important; }
   }
 </style>
 </head>
-<body style="margin:0;padding:0;background:${T.page};"${bg(T.page)}>
+<body style="margin:0;padding:0;background:${C.mist};">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(m.preheader)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${T.page};"${bg(T.page)}>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${C.mist};">
   <tr>
-    <td align="center" style="padding:32px 16px;"${bg(T.page)}>
-      <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:${T.card};"${bg(T.card)}>
-        <tr><td class="pad-x" style="padding:40px 48px 0 48px;"><img src="${esc(m.logoUrl ?? (dark ? EMAIL_LOGO_DARK : EMAIL_LOGO))}" alt="Yoca" width="132" style="display:block;width:132px;height:auto;border:0;outline:none;text-decoration:none;"></td></tr>
+    <td align="center" style="padding:32px 16px;">
+      <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#FFFFFF;">
+        <tr><td class="pad-x" style="padding:40px 48px 0 48px;"><img src="${esc(m.logoUrl ?? EMAIL_LOGO)}" alt="Yoca" width="132" style="display:block;width:132px;height:auto;border:0;outline:none;text-decoration:none;"></td></tr>
         <tr><td class="pad-x" style="padding:28px 48px 0 48px;"><div style="width:40px;height:3px;background:${C.lime};font-size:0;line-height:0;">&nbsp;</div></td></tr>
-        ${headline ? `<tr><td class="pad-x" style="padding:28px 48px 0 48px;"><h1 class="headline" style="margin:0;font-family:${FONT};font-size:36px;line-height:1.15;font-weight:800;color:${T.heading};">${esc(headline)}<span style="display:inline-block;width:11px;height:11px;margin-left:8px;background:${C.leaf};"></span></h1></td></tr>` : ''}
-        ${clean(m.greeting) ? `<tr><td class="pad-x" style="padding:28px 48px 0 48px;font-family:${FONT};font-size:16px;line-height:1.5;font-weight:800;color:${T.heading};">${esc(clean(m.greeting))}</td></tr>` : ''}
-        <tr><td class="pad-x" style="padding:${clean(m.greeting) ? 12 : 28}px 48px 0 48px;">${textToHtml(m.body, `font-family:${FONT};font-size:16px;line-height:1.5;color:${T.text};`, bodyLink)}${cta}</td></tr>
-        ${clean(m.note) ? `<tr><td class="pad-x" style="padding:8px 48px 0 48px;font-family:${FONT};font-size:13px;line-height:1.5;color:${T.muted};">${esc(clean(m.note))}</td></tr>` : ''}
+        ${headline ? `<tr><td class="pad-x" style="padding:28px 48px 0 48px;"><h1 class="headline" style="margin:0;font-family:${FONT};font-size:36px;line-height:1.15;font-weight:800;color:${C.ink};">${esc(headline)}<span style="display:inline-block;width:11px;height:11px;margin-left:8px;background:${C.leaf};"></span></h1></td></tr>` : ''}
+        ${clean(m.greeting) ? `<tr><td class="pad-x" style="padding:28px 48px 0 48px;font-family:${FONT};font-size:16px;line-height:1.5;font-weight:800;color:${C.ink};">${esc(clean(m.greeting))}</td></tr>` : ''}
+        <tr><td class="pad-x" style="padding:${clean(m.greeting) ? 12 : 28}px 48px 0 48px;">${textToHtml(m.body, `font-family:${FONT};font-size:16px;line-height:1.5;color:${C.body};`)}${cta}</td></tr>
+        ${clean(m.note) ? `<tr><td class="pad-x" style="padding:8px 48px 0 48px;font-family:${FONT};font-size:13px;line-height:1.5;color:${C.muted};">${esc(clean(m.note))}</td></tr>` : ''}
         <tr><td style="padding:32px 0 0 0;font-size:0;line-height:0;">&nbsp;</td></tr>
-        ${foot.top || foot.details ? `<tr><td class="pad-x" style="padding:24px 48px 32px 48px;border-top:1px solid ${T.line};font-family:${FONT};font-size:12px;line-height:1.6;color:${T.muted};">${foot.top ? `<b style="color:${T.footTop};">${footTop}</b>` : ''}${foot.top && foot.details ? '<br>' : ''}${footDetails}</td></tr>` : ''}
+        ${foot.top || foot.details ? `<tr><td class="pad-x" style="padding:24px 48px 32px 48px;border-top:1px solid ${C.line};font-family:${FONT};font-size:12px;line-height:1.6;color:${C.muted};">${foot.top ? `<b style="color:${C.ink};">${esc(foot.top)}</b>` : ''}${foot.top && foot.details ? '<br>' : ''}${esc(foot.details)}</td></tr>` : ''}
       </table>
     </td>
   </tr>
@@ -198,6 +169,68 @@ export function documentEmailDefaults(input: { kind: DocKind; locale: DocLocale;
     ? `${greeting}\n\n${input.number} numaralı ${label.toLocaleLowerCase('tr-TR')} ekte PDF olarak bilginize sunulmuştur.\n\nSorularınız için bu e-postayı yanıtlayabilirsiniz.\n\nSaygılarımızla,\n${sign}`
     : `${greeting}\n\nPlease find attached our ${label.toLowerCase()} ${input.number} as a PDF.\n\nIf you have any questions, simply reply to this e-mail.\n\nKind regards,\n${sign}`;
   return { subject, body, to: clean(input.recipient.email) };
+}
+
+export interface DocumentEmail {
+  issuer: Issuer;
+  locale: DocLocale;
+  kind: DocKind;
+  number: string;
+  /** title of the sent version (the document's name) */
+  docTitle?: string;
+  subject: string;
+  /** the message written in the send dialog */
+  body: string;
+  pdfName: string;
+  theme: EmailTheme;
+  /** preview only: logo from this site */
+  logoUrl?: string;
+}
+
+/**
+ * The e-mail body of "E-postayla gönder".
+ *  - light (default): the corporate set (brandedEmailHtml), unchanged.
+ *  - dark: the layout of the cockpit's "Sabah özeti" e-mail (lib/notifyTemplates):
+ *    near-black page, dark card with the lime top rule, white logo with a small
+ *    uppercase label, kicker with the slanted square, title, text, a section with
+ *    label/value rows, footer under the card. Content is the document send only:
+ *    document type and number, subject, the message, the document and its PDF
+ *    attachment, company details. No figures or report blocks.
+ * The attached PDF is the same file in both themes.
+ */
+export function documentEmailHtml(m: DocumentEmail): string {
+  const note = `${m.locale === 'tr' ? 'Ek' : 'Attachment'}: ${m.pdfName}`;
+  if (m.theme !== 'dark') return brandedEmailHtml({ issuer: m.issuer, locale: m.locale, preheader: m.subject, body: m.body, note, ...(m.logoUrl ? { logoUrl: m.logoUrl } : {}) });
+  const tr = m.locale === 'tr';
+  const N = NOTIFY_COLORS;
+  const kindLabel = KIND_LABEL[m.kind][m.locale];
+  const link = `color:${N.text};text-decoration:none;border-bottom:1px solid ${N.line};`;
+  const footLink = `color:${N.muted};text-decoration:underline;`;
+  const paras = m.body.replace(/\r\n?/g, '\n').trim().split(/\n{2,}/).filter((p) => p.trim())
+    .map((p) => para(p.trim().split('\n').map((line) => linkify(line, link)).join('<br>'), { html: true })).join('');
+  const docLine = [m.number, clean(m.docTitle)].filter(Boolean).join(' · ');
+  const foot = companyFooter(m.issuer, m.locale);
+  const web = websiteOf(m.issuer);
+  const footTop = [esc(clean(m.issuer.legalName)), web ? `<a href="${esc(`https://${web}`)}" style="${footLink}">${esc(web)}</a>` : ''].filter(Boolean).join(' · ');
+  const footerHtml = [footTop, foot.details ? linkify(foot.details, footLink) : ''].filter(Boolean).join('<br>');
+  return emailLayout({
+    lang: m.locale,
+    preheader: m.subject,
+    label: m.subject,
+    headerLabel: tr ? 'Belge' : 'Document',
+    logoHref: SITE,
+    ...(m.logoUrl ? { logoUrl: m.logoUrl } : {}),
+    footerHtml,
+    body:
+      kicker(`${kindLabel} · ${m.number}`) +
+      `${notifyTitle(m.subject)}<div style="height:6px;line-height:6px;font-size:0;">&nbsp;</div>` +
+      paras +
+      section(tr ? 'Ek' : 'Attachment', facts([
+        { label: tr ? 'Belge' : 'Document', value: docLine },
+        { label: 'PDF', value: m.pdfName },
+      ])) +
+      para(tr ? 'PDF dosyası bu e-postaya eklidir.' : 'The PDF file is attached to this e-mail.', { muted: true }),
+  });
 }
 
 const EMAIL = /^[^\s@<>(),;:"\[\]]+@[^\s@<>(),;:"\[\]]+\.[A-Za-z]{2,}$/;

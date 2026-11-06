@@ -136,10 +136,33 @@ export function emptyLine(text: string): string {
   return `<p style="margin:8px 0 6px 0;font:400 13px/1.5 ${FONT};color:${C.subtle};">${esc(text)}</p>`;
 }
 
-/** The full e-mail: preheader, header bar, card, footer. */
-export function emailLayout(opts: { preheader: string; label: string; body: string }): string {
+/** Colours of this kit, for other e-mails that use the same design (read only). */
+export const NOTIFY_COLORS: Readonly<typeof C> = Object.freeze({ ...C });
+export const NOTIFY_FONT = FONT;
+
+/**
+ * The full e-mail: preheader, header bar, card, footer.
+ * The optional fields let another e-mail use the same layout (document e-mail,
+ * dark theme); left out, the output is exactly the cockpit notification.
+ */
+export function emailLayout(opts: {
+  preheader: string;
+  label: string;
+  body: string;
+  /** html lang (default "tr") */
+  lang?: string;
+  /** small uppercase label right of the logo (default "Kokpit") */
+  headerLabel?: string;
+  /** where the logo links (default the cockpit) */
+  logoHref?: string;
+  /** logo image (default the e-mail PNG on yoca.net) */
+  logoUrl?: string;
+  /** footer under the card, already escaped HTML (default the cockpit notice) */
+  footerHtml?: string;
+}): string {
+  const footer = opts.footerHtml ?? `Bu bildirim <a href="${SITE}/admin" style="color:${C.muted};text-decoration:underline;">Yoca kokpitinden</a> gönderildi. Hangi bildirimlerin geleceğini <a href="${SITE}/admin/settings" style="color:${C.muted};text-decoration:underline;">Ayarlar</a> sayfasından seçebilirsin.`;
   return `<!doctype html>
-<html lang="tr">
+<html lang="${esc(opts.lang ?? 'tr')}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -154,15 +177,15 @@ export function emailLayout(opts: { preheader: string; label: string; body: stri
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;">
   <tr><td style="padding:0 4px 18px 4px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td><a href="${SITE}/admin" style="text-decoration:none;"><img src="${SITE}/brand/email/yoca-logo.png" width="96" height="27" alt="YOCA." style="display:block;border:0;width:96px;height:auto;"></a></td>
-      <td align="right" style="font:700 10px/1.4 ${FONT};letter-spacing:1.6px;text-transform:uppercase;color:${C.subtle};">Kokpit</td>
+      <td><a href="${esc(opts.logoHref ?? `${SITE}/admin`)}" style="text-decoration:none;"><img src="${esc(opts.logoUrl ?? `${SITE}/brand/email/yoca-logo.png`)}" width="96" height="27" alt="YOCA." style="display:block;border:0;width:96px;height:auto;"></a></td>
+      <td align="right" style="font:700 10px/1.4 ${FONT};letter-spacing:1.6px;text-transform:uppercase;color:${C.subtle};">${esc(opts.headerLabel ?? 'Kokpit')}</td>
     </tr></table>
   </td></tr>
   <tr><td style="background:${C.card};border:1px solid ${C.line};border-top:3px solid ${C.lime};border-radius:8px;padding:30px 28px 26px 28px;">
     ${opts.body}
   </td></tr>
   <tr><td style="padding:18px 4px 0 4px;font:400 12px/1.6 ${FONT};color:${C.subtle};">
-    Bu bildirim <a href="${SITE}/admin" style="color:${C.muted};text-decoration:underline;">Yoca kokpitinden</a> gönderildi. Hangi bildirimlerin geleceğini <a href="${SITE}/admin/settings" style="color:${C.muted};text-decoration:underline;">Ayarlar</a> sayfasından seçebilirsin.
+    ${footer}
   </td></tr>
 </table>
 </td></tr>

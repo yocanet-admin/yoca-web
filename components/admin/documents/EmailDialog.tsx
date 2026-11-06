@@ -4,8 +4,8 @@ import { useMemo, useState } from 'react';
 import { Flash, field, label } from '@/components/admin/ops/ui';
 import { adminPost } from '@/lib/cockpit/client';
 import { newKey } from '@/lib/documents/client';
-import { brandedEmailHtml, EMAIL_LOGO, EMAIL_LOGO_DARK, EMAIL_THEME_LABEL, EMAIL_THEMES, parseAddresses, SITE, type EmailTheme } from '@/lib/documents/mail';
-import type { DocLocale, Issuer } from '@/lib/documents/model';
+import { documentEmailHtml, EMAIL_LOGO, EMAIL_LOGO_DARK, EMAIL_THEME_LABEL, EMAIL_THEMES, parseAddresses, SITE, type EmailTheme } from '@/lib/documents/mail';
+import type { DocKind, DocLocale, Issuer } from '@/lib/documents/model';
 import { formatIban, type BankChange } from '@/lib/documents/settings';
 
 /**
@@ -23,11 +23,13 @@ import { formatIban, type BankChange } from '@/lib/documents/settings';
 
 type Result = { ok: boolean; status?: string; error?: string; emailId?: string; needsBankDecision?: boolean; bankChanges?: BankChange[]; version?: number; replay?: boolean };
 
-export function EmailDialog({ docId, number, versions, defaultVersion, defaults, from, replyTo, issuer, locale, themeReady, onClose, onSent }: {
+export function EmailDialog({ docId, number, kind, versionTitles, versions, defaultVersion, defaults, from, replyTo, issuer, locale, themeReady, onClose, onSent }: {
   docId: string; number: string; versions: Array<{ version: number; finalized_at: string }>; defaultVersion: number;
   defaults: { to: string; subject: string; body: string }; from: string; replyTo: string;
   /** current company profile and the version's language: the preview uses what the server uses */
   issuer: Issuer; locale: DocLocale;
+  /** document type and the title of each finalized version (shown in the dark theme) */
+  kind: DocKind; versionTitles: Record<number, string>;
   /** false until v22 is applied: only the light theme can be sent */
   themeReady: boolean;
   onClose: () => void; onSent: () => void;
@@ -65,10 +67,10 @@ export function EmailDialog({ docId, number, versions, defaultVersion, defaults,
 
   const pdfName = `${number}-v${version}.pdf`;
   // In the preview the logo comes from this site (same file as in the e-mail), so it also shows on a preview deployment.
-  const preview = useMemo(() => brandedEmailHtml({
-    issuer, locale, preheader: subject, body: message.trim() || ' ', note: `${locale === 'tr' ? 'Ek' : 'Attachment'}: ${pdfName}`, theme,
+  const preview = useMemo(() => documentEmailHtml({
+    issuer, locale, kind, number, docTitle: versionTitles[version] ?? '', subject, body: message.trim() || ' ', pdfName, theme,
     logoUrl: typeof window !== 'undefined' ? `${window.location.origin}${(theme === 'dark' ? EMAIL_LOGO_DARK : EMAIL_LOGO).slice(SITE.length)}` : undefined,
-  }), [issuer, locale, subject, message, pdfName, theme]);
+  }), [issuer, locale, kind, number, versionTitles, version, subject, message, pdfName, theme]);
 
   const send = async () => {
     if (busy || done) return;
@@ -119,7 +121,7 @@ export function EmailDialog({ docId, number, versions, defaultVersion, defaults,
 
         <div className="grid gap-1.5">
           <p className="text-[12px] font-bold">Önizleme · {EMAIL_THEME_LABEL[theme]}</p>
-          <iframe title={`E-posta önizleme (${EMAIL_THEME_LABEL[theme]})`} srcDoc={preview} sandbox="" className="h-[440px] w-full border border-line" style={{ background: theme === 'dark' ? '#0D0E12' : '#F3F5EF' }} />
+          <iframe title={`E-posta önizleme (${EMAIL_THEME_LABEL[theme]})`} srcDoc={preview} sandbox="" className="h-[440px] w-full border border-line" style={{ background: theme === 'dark' ? '#050505' : '#F3F5EF' }} />
           <p className="text-[11px] text-subtle">Gönderilecek HTML’in kendisidir. Bazı e-posta uygulamaları (ör. koyu modda Gmail / Outlook) renkleri kendi kurallarıyla değiştirebilir.</p>
         </div>
 

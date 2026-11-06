@@ -810,7 +810,7 @@ function EditorInner() {
         const vc = v?.content ?? c;
         const defaults = documentEmailDefaults({ kind, locale: vc.locale, number: doc.number, title: v?.title ?? draft.title, recipient: vc.recipient, signatory: vc.signatory, issuer: data.issuer });
         return (
-          <EmailDialog docId={doc.id} number={doc.number} versions={data.versions.map((x) => ({ version: x.version, finalized_at: x.finalized_at }))} defaultVersion={doc.final_version}
+          <EmailDialog docId={doc.id} number={doc.number} kind={kind} versionTitles={Object.fromEntries(data.versions.map((x) => [x.version, x.title ?? '']))} versions={data.versions.map((x) => ({ version: x.version, finalized_at: x.finalized_at }))} defaultVersion={doc.final_version}
             defaults={defaults} from={data.mail.from} replyTo={data.issuer.email} issuer={data.issuer} locale={vc.locale} themeReady={data.mail.themeReady}
             onClose={() => { setMailing(false); void refreshEmails(); }} onSent={() => void refreshEmails()} />
         );

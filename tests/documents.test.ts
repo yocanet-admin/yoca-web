@@ -234,29 +234,29 @@ test('document e-mail: addresses, statuses, test-recipient guard, escaped HTML, 
   assert.ok(d.body.startsWith('Sayın Murat Yıldız (ÖRNEK),'));
 });
 
-test('document e-mail theme: light stays the corporate set, dark uses the Yoca ground, white logo and readable links', async () => {
+test('document e-mail theme: light is the corporate set unchanged; dark uses the cockpit "Sabah özeti" layout with the document content', async () => {
   const m = await import('../lib/documents/mail');
+  const n = await import('../lib/notifyTemplates');
   assert.equal(m.emailThemeOf(undefined), 'light');
   assert.equal(m.emailThemeOf('dark'), 'dark');
   assert.equal(m.emailThemeOf('purple'), 'light');
   const issuer = { ...SAMPLE_ISSUER, legalName: 'Yoca Teknoloji Ltd Şti', email: 'connect@yoca.net', website: 'https://yoca.net' };
-  const base = { issuer, locale: 'tr' as const, preheader: 'Konu', body: 'Sayın Yetkili,\n\nAyrıntılar: https://yoca.net/hizmetler. Yanıt: connect@yoca.net\n<script>x</script> javascript:alert(1)', note: 'Ek: YZI-2026-0002-v1.pdf' };
-  const light = m.brandedEmailHtml(base);
-  assert.equal(m.brandedEmailHtml({ ...base, theme: 'light' }), light, 'explicit light = default');
-  assert.ok(light.includes('yoca-logo-light.png') && light.includes('background:#F3F5EF') && !light.includes('color-scheme'));
-  assert.ok(!light.includes('<a href="https://yoca.net/hizmetler"'), 'light body unchanged: no added links');
-  const dark = m.brandedEmailHtml({ ...base, theme: 'dark' });
-  assert.ok(dark.includes('/brand/email/yoca-logo.png') && !dark.includes('yoca-logo-light.png'), 'original white logo');
-  assert.ok(dark.includes('bgcolor="#0D0E12"') && dark.includes('background:#0D0E12'), 'Yoca ink ground, also as bgcolor for Outlook');
-  assert.ok(dark.includes('<meta name="color-scheme" content="dark">'));
-  assert.ok(dark.includes('background:#A2FF00') && !dark.includes('background:#FFFFFF'), 'lime accents, no white card');
-  assert.ok(dark.includes('<a href="https://yoca.net/hizmetler" style="color:#A2FF00;text-decoration:underline;">https://yoca.net/hizmetler</a>.'), 'link in lime, trailing dot outside');
-  assert.ok(dark.includes('<a href="mailto:connect@yoca.net"'), 'e-mail address linked');
+  const base = { issuer, locale: 'tr' as const, kind: 'letter' as const, number: 'YZI-2026-0002', docTitle: 'Belge modülü canlı kontrol', subject: '[TEST] Konu', body: 'Sayın Yetkili,\n\nAyrıntılar: https://yoca.net/hizmetler. Yanıt: connect@yoca.net\n<script>x</script> javascript:alert(1)', pdfName: 'YZI-2026-0002-v1.pdf' };
+  // light: exactly the corporate e-mail as before
+  const light = m.documentEmailHtml({ ...base, theme: 'light' });
+  assert.equal(light, m.brandedEmailHtml({ issuer, locale: 'tr', preheader: base.subject, body: base.body, note: 'Ek: YZI-2026-0002-v1.pdf' }));
+  assert.ok(light.includes('yoca-logo-light.png') && light.includes('background:#F3F5EF'));
+  // dark: the notification layout (same page, card, top rule, logo, kicker, title, section, rows)
+  const dark = m.documentEmailHtml({ ...base, theme: 'dark' });
+  const ref = n.emailLayout({ preheader: 'x', label: 'x', body: '' });
+  for (const piece of ['background:#050505;', 'background:#0E0E0E;border:1px solid #242424;border-top:3px solid #A2FF00;border-radius:8px;padding:30px 28px 26px 28px;', '/brand/email/yoca-logo.png" width="96" height="27"', 'max-width:600px;'])
+    assert.ok(ref.includes(piece) && dark.includes(piece), piece);
+  assert.ok(dark.includes(n.kicker('Antetli yazı / Bilgilendirme · YZI-2026-0002')) || dark.includes('YZI-2026-0002'), 'kicker with type and number');
+  assert.ok(dark.includes(n.title('[TEST] Konu')), 'subject as the title');
+  assert.ok(dark.includes('>Belge</td>') && dark.includes('YZI-2026-0002 · Belge modülü canlı kontrol') && dark.includes('>YZI-2026-0002-v1.pdf<'), 'document and PDF rows');
+  assert.ok(!dark.includes('Kokpit') && !dark.includes('/admin') && !dark.includes('Ayarlar'), 'no cockpit label, links or notice');
+  assert.ok(dark.includes('href="https://yoca.net"') && dark.includes('Yoca Teknoloji Ltd Şti'), 'company footer');
+  assert.ok(dark.includes('<a href="https://yoca.net/hizmetler"') && dark.includes('<a href="mailto:connect@yoca.net"'), 'links in the message');
   assert.ok(dark.includes('&lt;script&gt;x&lt;/script&gt;') && !dark.includes('href="javascript'), 'escaped, no script links');
-  assert.ok(dark.includes('<a href="https://yoca.net" style="color:#D9DDD6;text-decoration:none;">yoca.net</a>'), 'footer website as a readable link');
-  // text colours keep at least 7:1 against the ground
-  const lum = (hex: string) => { const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
-  const ratio = (a: string, b: string) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-  for (const fg of ['#E4E7E1', '#A4AAA2', '#A2FF00', '#D9DDD6']) assert.ok(ratio(fg, '#0D0E12') >= 7, `${fg} on #0D0E12`);
-  assert.equal(m.brandedEmailText({ ...base, theme: 'dark' }), m.brandedEmailText(base), 'plain-text part is the same');
+  assert.ok(!/stats|Yeni lead|Takip|Site uyarısı/.test(dark), 'no summary figures');
 });

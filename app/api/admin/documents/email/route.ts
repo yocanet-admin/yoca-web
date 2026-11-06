@@ -5,7 +5,7 @@ import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
 import { sanitizeContent, type DocKind } from '@/lib/documents/model';
 import { currentRenderOf, dbError, DOC_BUCKET, loadContext, safeFileName, type DocContext, type VersionSnapshot } from '@/lib/documents/server';
 import { bankChanges } from '@/lib/documents/settings';
-import { brandedEmailHtml, brandedEmailText, emailThemeOf, parseAddresses, statusFromEvent, testRecipientProblem } from '@/lib/documents/mail';
+import { brandedEmailText, documentEmailHtml, emailThemeOf, parseAddresses, statusFromEvent, testRecipientProblem } from '@/lib/documents/mail';
 import { CAPTURE_MODE, lookupDelivery, mailReady, sendDocumentMail, type SendOutcome } from '@/lib/documents/emailSend';
 
 /**
@@ -58,15 +58,19 @@ async function pdfOf(client: Sb, renderId: string): Promise<{ ok: true; buffer: 
 }
 
 /** Make (or repeat, with the same idempotency key) the send of one doc_emails row and record the outcome. */
-async function deliver(client: Sb, row: EmailRow, ctx: DocContext, locale: 'tr' | 'en', requestKey: string) {
+async function deliver(client: Sb, row: EmailRow, ctx: DocContext, locale: 'tr' | 'en', requestKey: string, doc: { number: string; kind: DocKind }) {
   const pdf = await pdfOf(client, row.render_id);
   let outcome: SendOutcome;
   if (!pdf.ok) outcome = { status: 'failed', error: pdf.error };
   else {
-    const mail = { issuer: ctx.issuer, locale, preheader: row.subject, body: row.body, note: `${locale === 'tr' ? 'Ek' : 'Attachment'}: ${row.pdf_name}`, theme: emailThemeOf(row.theme) };
+    // the document's name as frozen in the sent version (dark theme shows it with the number)
+    const ver = await client.from('doc_versions').select('title').eq('document_id', row.document_id).eq('version', row.version).maybeSingle();
+    const docTitle = ver.data ? String((ver.data as { title: string | null }).title ?? '') : '';
+    const mail = { issuer: ctx.issuer, locale, preheader: row.subject, body: row.body, note: `${locale === 'tr' ? 'Ek' : 'Attachment'}: ${row.pdf_name}` };
+    const html = documentEmailHtml({ issuer: ctx.issuer, locale, kind: doc.kind, number: doc.number, docTitle, subject: row.subject, body: row.body, pdfName: row.pdf_name, theme: emailThemeOf(row.theme) });
     outcome = await sendDocumentMail({
       to: row.to_addrs, cc: row.cc_addrs, replyTo: row.reply_to ?? undefined, subject: row.subject,
-      html: brandedEmailHtml(mail), text: brandedEmailText(mail), attachment: { filename: row.pdf_name, content: pdf.buffer },
+      html, text: brandedEmailText(mail), attachment: { filename: row.pdf_name, content: pdf.buffer },
     }, requestKey);
   }
   const fin = await client.rpc('doc_email_finish', {
@@ -128,7 +132,7 @@ export async function POST(request: NextRequest) {
     // The service remembers a request key for 24 hours; after that a retry could send a second copy.
     const stale = Date.now() - new Date(row.created_at).getTime() > 23 * 3_600_000;
     if ((row.status === 'sending' || row.status === 'unknown') && stale) return fail(409, 'Bu gönderimin sonucu belirsiz kaldı ve 23 saatten eski; ikinci kopya riskine karşı yeniden denenmez. Alıcıya ulaşıp ulaşmadığını kontrol edin, gerekirse yeni gönderim yapın.', { status: row.status, emailId: row.id });
-    if (row.status === 'sending' || row.status === 'unknown') return deliver(client, row, ctx, doc.locale, requestKey);
+    if (row.status === 'sending' || row.status === 'unknown') return deliver(client, row, ctx, doc.locale, requestKey, doc);
     return json({ ok: row.status !== 'failed', replay: true, status: row.status, emailId: row.id, error: row.error ?? undefined }, row.status === 'failed' ? 422 : 200);
   }
 
@@ -182,5 +186,5 @@ export async function POST(request: NextRequest) {
   if (rowRes.error || !rowRes.data) return fail(500, 'Gönderim kaydı okunamadı; hiçbir şey gönderilmedi.');
   const row = rowRes.data as EmailRow;
   if (b.replay && !['sending', 'unknown'].includes(row.status)) return json({ ok: row.status !== 'failed', replay: true, status: row.status, emailId: row.id, error: row.error ?? undefined });
-  return deliver(client, row, ctx, locale, requestKey);
+  return deliver(client, row, ctx, locale, requestKey, doc);
 }
