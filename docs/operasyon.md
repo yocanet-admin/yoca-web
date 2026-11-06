@@ -64,7 +64,8 @@
 2. **`supabase/upgrade-v18-operations.sql`:** yalnızca ekleme yapar. `clients` tablosuna sütun ekler (mevcut satırlar firma ve müşteri olarak kalır), lead tablolarına boş `client_id` bağlantı sütunu ekler (mevcut leadler değişmez), yeni tablolar ve özel `ops-docs` deposu oluşturur. Tekrar çalıştırılabilir. Eski uygulama yeni alanları okumadığı için önce veritabanı hazırlanabilir.
 3. **Merge → production dağıtımı:** ilk yayında bildirim görevi zamanlanmamıştı; 6 Kasım 2026'dan itibaren ekip içi özet `vercel.json`'da zamanlanır (yukarıya bakın).
 4. **`supabase/upgrade-v23-ops-forward-guard.sql`** (merge'den önce, onayla): elle iletme kayıtlarını kilitler. Satır değiştirmez; tekrar çalıştırılabilir; geri alma dosyanın sonunda.
-5. **Kontrol:** Operasyon sayfaları açılıyor mu, sayfaların boş durumları doğru mu? Cron Jobs listesinde `/api/cron/ops` (09:00 / 15:00 İstanbul) görünür.
+5. **`supabase/upgrade-v24-ops-grants.sql`:** diğer 12 `ops_*` tablosunda `anon` ve `authenticated` rollerinin TRUNCATE yetkisini kaldırır (v21'in belge tabloları için yaptığının aynısı). Yalnızca yetki değişir; satır, RLS, politika ve `service_role` / `postgres` yetkileri aynı kalır. Tekrar çalıştırılabilir.
+6. **Kontrol:** Operasyon sayfaları açılıyor mu, sayfaların boş durumları doğru mu? Cron Jobs listesinde `/api/cron/ops` (09:00 / 15:00 İstanbul) görünür.
 
 ## Mevcut verilere etkisi
 Mevcut satırlarda hiçbir veri değişmez. CRM ekranı aynı çalışır. Operasyon kaydına bağlı bir müşteri silinmek istenirse veritabanı silmeyi reddeder (bağlı geçmiş var); arşivleme kullanılır.
