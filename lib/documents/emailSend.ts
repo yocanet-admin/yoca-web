@@ -43,9 +43,28 @@ export interface DocumentMail {
   attachment: { filename: string; content: Buffer };
 }
 
+/** Any e-mail through the same account and rules (used by documents and by the Operasyon "E-postayla ilet"). */
+export interface OutgoingMail {
+  to: string[];
+  cc: string[];
+  replyTo?: string;
+  subject: string;
+  html: string;
+  text: string;
+  attachments: Array<{ filename: string; content: Buffer }>;
+}
+
 export type SendOutcome = { status: 'accepted'; providerId: string } | { status: 'failed' | 'unknown'; error: string };
 
 export async function sendDocumentMail(m: DocumentMail, requestKey: string, timeoutMs = 25_000): Promise<SendOutcome> {
+  return sendMail({ to: m.to, cc: m.cc, replyTo: m.replyTo, subject: m.subject, html: m.html, text: m.text, attachments: [m.attachment] }, `yoca-doc-email-${requestKey}`, timeoutMs);
+}
+
+/**
+ * One call to Resend. `idempotencyKey` is sent as the Idempotency-Key, so the
+ * same key never produces a second e-mail (24 h). Outcome as in the header.
+ */
+export async function sendMail(m: OutgoingMail, idempotencyKey: string, timeoutMs = 25_000): Promise<SendOutcome> {
   const key = apiKey();
   if (!key) return { status: 'failed', error: 'E-posta servisi kurulu değil (RESEND_API_KEY yok). Hiçbir şey gönderilmedi.' };
   const ctrl = new AbortController();
@@ -54,7 +73,7 @@ export async function sendDocumentMail(m: DocumentMail, requestKey: string, time
     const res = await fetch(ENDPOINT, {
       method: 'POST',
       signal: ctrl.signal,
-      headers: headers(key, { 'Idempotency-Key': `yoca-doc-email-${requestKey}` }),
+      headers: headers(key, { 'Idempotency-Key': idempotencyKey }),
       body: JSON.stringify({
         from: FROM,
         to: m.to,
@@ -63,7 +82,7 @@ export async function sendDocumentMail(m: DocumentMail, requestKey: string, time
         subject: m.subject,
         html: m.html,
         text: m.text,
-        attachments: [{ filename: m.attachment.filename, content: m.attachment.content.toString('base64') }],
+        ...(m.attachments.length ? { attachments: m.attachments.map((a) => ({ filename: a.filename, content: a.content.toString('base64') })) } : {}),
       }),
     });
     const json = (await res.json().catch(() => ({}))) as { id?: string; message?: string; name?: string };

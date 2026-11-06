@@ -14,7 +14,7 @@ import { DEFAULT_OPS, LICENSE_ACTIONS, LICENSE_ACTION_LABEL, type LicenseAction,
  */
 
 interface Env { send: { email: boolean; telegram: boolean; reason: string }; licenseApi: { configured: boolean; missing: string[] }; cronSecret: boolean }
-interface GetRes { ok?: boolean; error?: string; ready?: boolean; settings?: OpsSettings; me?: string | null; environment?: Env }
+interface GetRes { ok?: boolean; error?: string; ready?: boolean; settings?: OpsSettings; me?: string | null; environment?: Env; team?: { email: string | null; telegram: boolean; telegramName: string | null } }
 interface PostRes { ok?: boolean; error?: string; settings?: OpsSettings }
 
 interface Draft { reminderDays: string; cancelReminderDays: string; digest: boolean; customerNotifications: boolean; customerFrom: string; perms: Record<LicenseAction, string> }
@@ -66,11 +66,11 @@ export default function OpsSettingsPage() {
       if (bad.length) problems.push(`${LICENSE_ACTION_LABEL[a]}: geçersiz e-posta ${bad.join(', ')}.`);
     });
     if (problems.length) { setFlash({ text: problems.join(' '), tone: 'bad' }); return; }
-    if (d.customerNotifications && !saved?.customerNotifications && !window.confirm('Müşteri bildirimleri açılacak. Yalnızca müşteri bildirimi ayrıca açık olan hizmetlerin alıcılarına e-posta gider. Devam edilsin mi?')) return;
 
     const settings: OpsSettings = {
       reminderDays: rem.days, cancelReminderDays: can.days, digest: d.digest,
-      customerNotifications: d.customerNotifications, customerFrom: d.customerFrom.trim() || null, licensePermissions: perms,
+      // automatic customer e-mails are permanently off
+      customerNotifications: false, customerFrom: null, licensePermissions: perms,
     };
     setBusy(true); setFlash(null);
     const r = await adminPost<PostRes>('/api/admin/ops/settings', { settings });
@@ -94,7 +94,7 @@ export default function OpsSettingsPage() {
 
   return (
     <div className="grid gap-6">
-      <PageHead title="Operasyon ayarları" sub="Hatırlatmalar, günlük özet, müşteri bildirimleri ve lisans işlem yetkileri." />
+      <PageHead title="Operasyon ayarları" sub="Ekip içi hatırlatmalar, günlük özet ve lisans işlem yetkileri." />
       {res.ready === false && <Flash tone="warn" message="Kayıtlı ayarlar okunamadı (cockpit_settings tablosu veya sunucu anahtarı yok). Varsayılanlar gösteriliyor; kaydetme başarısız olabilir." />}
       {flash && <Flash tone={flash.tone} message={flash.text} onClose={() => setFlash(null)} />}
 
@@ -113,19 +113,17 @@ export default function OpsSettingsPage() {
           </div>
           <label className="flex items-start gap-2 text-[13px]">
             <input type="checkbox" className="mt-1" checked={d.digest} onChange={(e) => setD({ ...d, digest: e.target.checked })} />
-            <span>Günlük özet (ekibe): yaklaşan ve geciken yenilemeler, bekleyen tahsilatlar, eksik bilgiler.</span>
+            <span>Günlük özet (yalnızca ekibe): bugünün hatırlatmaları, bitişi geçen / doğrulama bekleyen yenilemeler, geciken tahsilat ve sağlayıcı ödemeleri, geciken görevler. Takip edilecek bir şey yoksa e-posta gitmez.</span>
           </label>
         </section>
 
-        <section className={`admin-card grid gap-4 !p-4 ${d.customerNotifications ? '!border-yellow-400/50' : ''}`}>
-          <h2 className="text-[13px] font-bold uppercase tracking-[0.08em] text-muted">Müşteri bildirimleri</h2>
-          <label className="flex items-start gap-2 text-[13px]">
-            <input type="checkbox" className="mt-1" checked={d.customerNotifications} onChange={(e) => setD({ ...d, customerNotifications: e.target.checked })} />
-            <span><strong>Müşterilere yenileme hatırlatması gönder</strong> (genel anahtar; varsayılan kapalı)</span>
-          </label>
-          <ul className="grid list-disc gap-1 ps-5 text-[12px] text-muted">
-            <li>Açık olsa bile yalnızca <strong>hizmet sayfasında müşteri bildirimi ayrıca açılmış</strong> hizmetlerin yazılı alıcılarına gider.</li>
-            <li>Test / önizleme ortamları gerçek kişilere asla göndermez.</li>
+        <section className="admin-card grid gap-3 !p-4" aria-label="Bildirimlerin akışı">
+          <h2 className="text-[13px] font-bold uppercase tracking-[0.08em] text-muted">Bildirimlerin akışı</h2>
+          <ul className="grid list-disc gap-1 ps-5 text-[12px] text-soft">
+            <li><strong>Ekip içi günlük özet:</strong> her gün 09:00 (İstanbul); 15:00’te yalnızca başarısız gönderim yeniden denenir. Günde en çok bir özet; takip edilecek iş yoksa gönderilmez.</li>
+            <li><strong>Alıcı:</strong> kokpit bildirim adresi {res.team?.email ? <strong className="text-white">{res.team.email}</strong> : 'tanımlı değil'}{res.team?.telegram ? ` ve ekip Telegram grubu${res.team.telegramName ? ` (${res.team.telegramName})` : ''}` : ''}. Değiştirmek için <Link className="underline" href="/admin/settings">Ayarlar → Bildirimler</Link>.</li>
+            <li><strong>Sabah özeti</strong> (08:30) ayrıdır: leadler, takipler, site izleme ve trafik. Operasyon özeti bunları tekrar etmez.</li>
+            <li><strong>Müşteriye otomatik e-posta yoktur.</strong> Müşteri kaydındaki e-posta gönderim izni değildir. Müşteriye veya başka bir adrese bildirmek için hizmet sayfasında “E-postayla ilet” kullanılır: alıcı, konu, mesaj ve ekler elle belirlenir, “Gönder” denmeden hiçbir şey gitmez.</li>
           </ul>
           {env && (
             <p className="flex flex-wrap items-center gap-2 text-[12px]">
@@ -135,9 +133,6 @@ export default function OpsSettingsPage() {
               <span className="text-subtle">({env.send.reason === 'production' ? 'canlı ortam' : env.send.reason})</span>
             </p>
           )}
-          <label className={label}>Gönderen adı / adresi (isteğe bağlı)
-            <input className={field} value={d.customerFrom} onChange={(e) => setD({ ...d, customerFrom: e.target.value })} placeholder="ör. Yoca <destek@yoca.net>" maxLength={200} />
-          </label>
         </section>
 
         <section className="admin-card grid gap-4 !p-4">

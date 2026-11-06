@@ -101,14 +101,52 @@ test('reminders: thresholds, dedupe, catch-up sends only the most urgent', () =>
   assert.ok(moved.length > 0);
 });
 
-test('reminders: verified renewal, perpetual, cancelled → nothing; customer only when switched on', () => {
+test('reminders: verified renewal, perpetual, cancelled → nothing; NEVER a customer reminder (automatic customer e-mails are off)', () => {
   const open = new Map([['s1', period({ renewed_at: '2026-12-01T00:00:00Z' })]]);
-  assert.equal(planReminders({ services: [svc()], openPeriods: open, today: '2026-12-25', customerEnabled: true, existing: new Set() }).length, 0);
-  assert.equal(planReminders({ services: [svc({ is_perpetual: true }), svc({ id: 's2', status: 'cancelled' })], openPeriods: new Map(), today: '2026-12-25', customerEnabled: true, existing: new Set() }).length, 0);
-  const off = planReminders({ services: [svc({ customer_notify: true, customer_recipients: ['a@example.com'] })], openPeriods: new Map(), today: '2026-12-25', customerEnabled: false, existing: new Set() });
-  assert.ok(off.every((r) => r.audience === 'team'));
-  const on = planReminders({ services: [svc({ customer_notify: true, customer_recipients: ['a@example.com'] })], openPeriods: new Map(), today: '2026-12-25', customerEnabled: true, existing: new Set() });
-  assert.ok(on.some((r) => r.audience === 'customer'));
+  assert.equal(planReminders({ services: [svc()], openPeriods: open, today: '2026-12-25', existing: new Set() }).length, 0);
+  assert.equal(planReminders({ services: [svc({ is_perpetual: true }), svc({ id: 's2', status: 'cancelled' })], openPeriods: new Map(), today: '2026-12-25', existing: new Set() }).length, 0);
+  // even an old stored "on" switch, a service flag and recipients do not create customer reminders
+  const all = planReminders({ services: [svc({ customer_notify: true, customer_recipients: ['a@example.com'] })], openPeriods: new Map(), today: '2026-12-25', customerEnabled: true, existing: new Set() });
+  assert.ok(all.length > 0 && all.every((r) => r.audience === 'team' && r.kind !== 'customer_reminder'));
+});
+
+test('settings: customer notifications are always off, whatever is stored', async () => {
+  const { sanitizeOps } = await import('../lib/ops/settings');
+  const s = sanitizeOps({ customerNotifications: true, customerFrom: 'Biri <x@y.com>', digest: true });
+  assert.equal(s.customerNotifications, false);
+  assert.equal(s.customerFrom, null);
+  assert.equal(s.digest, true);
+});
+
+test('team digest: operations only, empty → nothing to send, cockpit layout', async () => {
+  const { buildOpsDigest } = await import('../lib/ops/digest');
+  const empty = buildOpsDigest({ today: '2026-11-06', reminders: [], renewals: [], payments: [], tasks: [] });
+  assert.equal(empty.empty, true);
+  const d = buildOpsDigest({
+    today: '2026-11-06',
+    reminders: [{ tone: 'amber', title: 'ornek.com (Alan adı)', detail: 'bitiş 2026-11-13 · 7 gün sonra', href: 'https://yoca.net/admin/ops/services/x' }],
+    renewals: [], payments: [{ tone: 'red', title: 'VPS <b>', detail: 'tahsilat gecikti' }], tasks: [],
+  });
+  assert.equal(d.empty, false);
+  assert.equal(d.subject, 'Operasyon — 1 hatırlatma, 1 ödeme (6 Kasım Cuma)');
+  assert.ok(d.email.includes('border-top:3px solid #A2FF00') && d.email.includes('Bugünün hatırlatmaları') && d.email.includes('VPS &lt;b&gt;'));
+  assert.ok(!/Yeni lead|Siteler|Trafik/.test(d.email), 'nothing of the morning summary');
+  assert.ok(d.telegram.includes('VPS &lt;b&gt;'));
+});
+
+test('manual forward: default text has no internal data; warnings for costs, notes, access words', async () => {
+  const { customerReminderText } = await import('../lib/ops/reminders');
+  const { forwardWarnings, forwardKey, isForward } = await import('../lib/ops/forward');
+  const s = svc({ name: 'ornek.com', cost_amount: '1234.56', note: 'Sağlayıcıda indirimli fiyat, kâr marjı yüksek', price_amount: '5000' });
+  const t = customerReminderText(s, '2026-12-31', 7, 'Örnek A.Ş.');
+  assert.ok(t.subject.includes('ornek.com') && t.text.includes('Merhaba Örnek A.Ş.'));
+  assert.ok(!t.text.includes('1234') && !t.text.includes('kâr') && !t.text.includes('5000'));
+  assert.ok(customerReminderText(s, '2026-12-31', -1, null).subject.includes('sona erdi'));
+  assert.deepEqual(forwardWarnings(t.text, s), []);
+  assert.ok(forwardWarnings('Maliyet 1234.56 TL', s).length >= 1);
+  assert.ok(forwardWarnings('Not: Sağlayıcıda indirimli fiyat, kâr marjı yüksek', s).some((w) => w.includes('iç not')));
+  assert.ok(forwardWarnings('cPanel şifresi: abc', s).some((w) => w.includes('erişim')));
+  assert.ok(isForward(forwardKey('00000000-0000-4000-8000-000000000000')) && !isForward('reminder:x'));
 });
 
 test('duplicate keeps setup, never payments/dates/notifications', () => {

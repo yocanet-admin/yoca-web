@@ -4,8 +4,7 @@ import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ServiceForm, { EMAIL_RE, PAY_TONE, RENEW_TONE, StatusBadges, looksSecret } from '@/components/admin/ops/ServiceForm';
-import { Badge, DateOr, Documents, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, fmtDateTime, label as labelCls, small, toList } from '@/components/admin/ops/ui';
-import { adminApi } from '@/lib/cockpit/client';
+import { Badge, DateOr, Documents, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, fmtDateTime, label as labelCls, small } from '@/components/admin/ops/ui';
 import {
   addPayment,
   archiveRow,
@@ -16,7 +15,8 @@ import {
   removeLink,
   saveRow,
   voidPayment,
-  type NotificationRow,
+  type DocumentRow,
+ type NotificationRow,
   type OpsData,
   type Party,
   type Task,
@@ -24,7 +24,6 @@ import {
 } from '@/lib/ops/data';
 import {
   AUTO_RENEW_LABEL,
-  DEFAULT_REMINDER_DAYS,
   KIND_FIELDS,
   KIND_LABEL,
   PARTY_LABEL,
@@ -32,7 +31,6 @@ import {
   PERIOD_LABEL,
   RENEW_STATE_LABEL,
   SERVICE_STATUS_LABEL,
-  addDays,
   dueText,
   istanbulDay,
   missingInfo,
@@ -45,8 +43,10 @@ import {
   type Service,
 } from '@/lib/ops/model';
 import { CURRENCIES, formatAmount, formatMinor, formatTotals, minorToDb, parseAmount, type Minor } from '@/lib/ops/money';
-import { customerReminderText, offsetText } from '@/lib/ops/reminders';
-import type { OpsSettings } from '@/lib/ops/settings';
+import { offsetText } from '@/lib/ops/reminders';
+import { FORWARD_OUTCOME_LABEL, isForward } from '@/lib/ops/forward';
+import { ForwardDialog } from '@/components/admin/ops/ForwardDialog';
+import { adminPost } from '@/lib/cockpit/client';
 
 /**
  * Yoca Operasyon — one service: facts, periods (renewal history), payments,
@@ -62,32 +62,32 @@ const ZERO = BigInt(0);
 const PERIOD_STATUS_LABEL: Record<PeriodRow['status'], string> = { open: 'Açık dönem', renewed: 'Yenilendi', closed: 'Kapandı', cancelled: 'İptal' };
 const PAYMENT_KIND_LABEL: Record<Payment['kind'], string> = { payment: 'Ödeme', refund: 'İade', adjustment: 'Düzeltme' };
 const DIRECTION_LABEL: Record<Payment['direction'], string> = { in: 'Tahsilat (müşteriden)', out: 'Sağlayıcıya ödeme' };
-const NOTE_KIND_LABEL: Record<string, string> = { reminder: 'Ekip hatırlatması', cancel_reminder: 'İptal hatırlatması', customer_reminder: 'Müşteri hatırlatması', digest: 'Özet' };
+const NOTE_KIND_LABEL: Record<string, string> = { reminder: 'Ekip hatırlatması', cancel_reminder: 'İptal hatırlatması', customer_reminder: 'Müşteri hatırlatması (eski)', digest: 'Özet' };
 const NOTE_STATUS: Record<string, { label: string; tone: 'ok' | 'warn' | 'bad' | 'info' | 'muted' }> = {
   pending: { label: 'Bekliyor', tone: 'info' }, sent: { label: 'Gönderildi', tone: 'ok' }, failed: { label: 'Başarısız', tone: 'bad' }, skipped: { label: 'Atlandı', tone: 'muted' }, suppressed: { label: 'Engellendi', tone: 'warn' },
 };
 const TASK_KIND_LABEL: Record<Task['kind'], string> = { delivery: 'Teslim', handover: 'Devir', task: 'Görev' };
 const METHODS = ['Havale/EFT', 'Kredi kartı', 'Nakit', 'Sağlayıcı bakiyesi', 'Çek/senet', 'Diğer'];
 
-interface SettingsResponse { ok?: boolean; error?: string; settings?: OpsSettings; environment?: { send?: { email: boolean; telegram: boolean; reason: string } } }
-interface Extra { logs: WorkLog[]; tasks: Task[]; notes: NotificationRow[]; error?: string }
+interface Extra { logs: WorkLog[]; tasks: Task[]; notes: NotificationRow[]; docs: DocumentRow[]; error?: string }
 /** Insert rows have no id yet ({ id?: string } alone is a weak type). */
 type AnyRow = { id?: string } & Record<string, unknown>;
 type Say = (message: string, tone?: 'ok' | 'bad' | 'warn') => void;
 
 async function loadExtra(id: string): Promise<Extra> {
   try {
-    const [logs, tasks, notes] = await Promise.all([
+    const [logs, tasks, notes, docs] = await Promise.all([
       db().from('ops_work_logs').select('*').eq('service_id', id).order('worked_on', { ascending: false }),
       db().from('ops_tasks').select('*').eq('service_id', id).order('sort').order('created_at'),
-      db().from('ops_notifications').select('id,dedupe_key,service_id,kind,offset_days,target_date,audience,status,attempts,last_error,sent_at,created_at').eq('service_id', id).order('created_at', { ascending: false }).limit(100),
+      db().from('ops_notifications').select('id,dedupe_key,service_id,kind,offset_days,target_date,audience,status,attempts,last_error,sent_at,created_at,recipients,payload').eq('service_id', id).order('created_at', { ascending: false }).limit(100),
+      db().from('ops_documents').select('*').eq('entity', 'service').eq('entity_id', id).is('archived_at', null).order('created_at', { ascending: false }),
     ]);
     return {
-      logs: (logs.data ?? []) as WorkLog[], tasks: (tasks.data ?? []) as Task[], notes: (notes.data ?? []) as NotificationRow[],
-      error: logs.error?.message ?? tasks.error?.message ?? notes.error?.message,
+      logs: (logs.data ?? []) as WorkLog[], tasks: (tasks.data ?? []) as Task[], notes: (notes.data ?? []) as NotificationRow[], docs: (docs.data ?? []) as DocumentRow[],
+      error: logs.error?.message ?? tasks.error?.message ?? notes.error?.message ?? docs.error?.message,
     };
   } catch (e) {
-    return { logs: [], tasks: [], notes: [], error: (e as Error).message };
+    return { logs: [], tasks: [], notes: [], docs: [], error: (e as Error).message };
   }
 }
 
@@ -763,98 +763,79 @@ function TasksSection({ service, tasks, say, reload }: { service: Service; tasks
   );
 }
 
-function CustomerNotifySection({ service, end, clientName, settings, settingsError, say, reload }: { service: Service; end: string | null; clientName: string | null; settings: SettingsResponse | null; settingsError: string | null; say: Say; reload: () => Promise<void> }) {
-  const [on, setOn] = useState(service.customer_notify);
-  const [recipients, setRecipients] = useState(service.customer_recipients.join(', '));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const days = (service.reminder_days?.length ? service.reminder_days : settings?.settings?.reminderDays?.length ? settings.settings.reminderDays : DEFAULT_REMINDER_DAYS).filter((d) => d >= 0);
-  const offsets = Array.from(new Set([...days, 0])).sort((a, b) => b - a);
-  const [offset, setOffset] = useState(offsets[0] ?? 0);
-  const today = istanbulDay();
-  const target = end ?? addDays(today, offset);
-  const preview = customerReminderText(service, target, offset, clientName);
-  const list = toList(recipients).map((x) => x.toLowerCase());
-  const bad = list.filter((x) => !EMAIL_RE.test(x));
-  const dirty = on !== service.customer_notify || list.join(',') !== service.customer_recipients.join(',');
-  const globalOn = settings?.settings?.customerNotifications === true;
-  const send = settings?.environment?.send;
+/**
+ * Reminders go to the TEAM only (daily Operasyon digest). Nothing here sends by
+ * itself: a customer gets an e-mail only through "E-postayla ilet", with the
+ * recipient typed or picked by hand and "Gönder" pressed in the dialog.
+ */
+function ForwardSection({ service, end, today, onForward }: { service: Service; end: string | null; today: string; onForward: (target: string | null, offset: number) => void }) {
   const noReminders = service.is_perpetual || service.period === 'once' || service.status === 'cancelled';
-
-  const save = async () => {
-    if (busy) return;
-    if (bad.length) { setError(`Geçersiz e-posta: ${bad.join(', ')}`); return; }
-    if (on && list.length === 0) { setError('Müşteri bildirimini açmak için en az bir alıcı girin.'); return; }
-    setBusy(true); setError(null);
-    const r = await saveRow('ops_services', { id: service.id, customer_notify: on, customer_recipients: Array.from(new Set(list)) });
-    setBusy(false);
-    if (r.error) { setError(r.error); return; }
-    say(on ? 'Müşteri bildirimi açıldı.' : 'Müşteri bildirimi kapalı.');
-    await reload();
-  };
-
   return (
-    <Section title="Müşteri bildirimi" id="musteri-bildirimi">
-      <div className="grid gap-1.5 text-[12px]">
-        {settingsError ? <Flash tone="warn" message={`Operasyon ayarları okunamadı: ${settingsError}. Genel anahtarın durumu bilinmiyor.`} />
-          : settings && !globalOn ? <Flash tone="warn" message="Genel müşteri bildirimi anahtarı KAPALI (Operasyon ayarları). Bu hizmette açık olsa da müşteriye e-posta gönderilmez." />
-          : settings && globalOn ? <p className="text-yoca-green">Genel müşteri bildirimi anahtarı açık.</p> : <p className="text-subtle">Ayarlar yükleniyor…</p>}
-        {send && !send.email && <Flash tone="warn" message={`Bu ortam gerçek alıcılara e-posta gönderemiyor (${send.reason}).`} />}
+    <Section title="Hatırlatma ve iletme" id="iletme">
+      <div className="grid gap-1.5 text-[12px] text-soft">
+        <p>Yenileme hatırlatmaları yalnızca <strong>ekip içi</strong> günlük Operasyon özetine girer (09:00, kokpit bildirim adresi). Müşteriye otomatik e-posta gönderilmez; kayıttaki e-posta adresi gönderim izni değildir.</p>
+        <p className="text-subtle">Müşteriye veya başka bir adrese bildirmek gerekirse “E-postayla ilet” ile alıcıyı, konuyu, mesajı ve ekleri kendiniz belirleyip gönderirsiniz. Kaydetmek, yenilemeyi onaylamak veya bir bildirimi kapatmak e-posta göndermez.</p>
         {noReminders && <p className="text-yellow-200">Bu hizmet {service.is_perpetual ? 'süresiz' : service.period === 'once' ? 'tek seferlik' : 'iptal edilmiş'}; yenileme hatırlatması planlanmaz.</p>}
-        {!end && !noReminders && <p className="text-yellow-200">Bitiş tarihi bilinmiyor; tarih girilene kadar hatırlatma planlanmaz. Önizlemede örnek tarih kullanıldı.</p>}
+        {!end && !noReminders && <p className="text-yellow-200">Bitiş tarihi bilinmiyor; tarih girilene kadar hatırlatma planlanmaz.</p>}
       </div>
-      <label className="flex items-center gap-2 text-[13px] text-soft">
-        <input type="checkbox" role="switch" aria-checked={on} className="accent-yoca-lime" checked={on} onChange={(e) => setOn(e.target.checked)} />
-        Bu hizmet için müşteriye yenileme hatırlatması gönder (varsayılan kapalı)
-      </label>
-      <label className={labelCls}>Alıcılar
-        <textarea className={field} rows={2} value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="musteri@ornek.com, muhasebe@ornek.com" />
-      </label>
-      {bad.length > 0 && <p className="text-[12px] text-red-300">Geçersiz: {bad.join(', ')}</p>}
-      <Flash tone="bad" message={error} onClose={() => setError(null)} />
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="admin-btn-primary" disabled={busy || !dirty} onClick={save}>{busy ? 'Kaydediliyor…' : 'Kaydet'}</button>
-        {dirty && <span className="text-[12px] text-yellow-200">Kaydedilmemiş değişiklik var.</span>}
-      </div>
-      <div className="grid gap-2 border border-line p-3 text-[12px]">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="font-bold text-soft">E-posta önizlemesi</span>
-          <label className="flex items-center gap-2 text-muted">Zaman
-            <select className={`${field} !w-auto !py-1 text-[12px]`} value={offset} onChange={(e) => setOffset(Number(e.target.value))}>
-              {offsets.map((o) => <option key={o} value={o}>{o === 0 ? 'Bitiş günü' : `${o} gün önce`}</option>)}
-            </select>
-          </label>
-        </div>
-        <p><span className="text-subtle">Konu:</span> {preview.subject}</p>
-        <pre className="whitespace-pre-wrap font-sans text-soft">{preview.text}</pre>
-        <p className="text-subtle">Hatırlatma günleri: {offsets.filter((o) => o > 0).join(', ')} gün önce ve bitiş günü ({offsetText(0)}).</p>
-      </div>
+      <div><button type="button" className="admin-btn" onClick={() => onForward(end, end ? Math.max(-1, daysBetween(today, end)) : 0)}>E-postayla ilet</button></div>
     </Section>
   );
 }
 
-function NotificationsSection({ notes, error }: { notes: NotificationRow[]; error?: string }) {
+const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000);
+
+function NotificationsSection({ notes, error, today, onForward, say, reload }: { notes: NotificationRow[]; error?: string; today: string; onForward: (target: string | null, offset: number, reminderId: string) => void; say: Say; reload: () => Promise<void> }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const refresh = async (n: NotificationRow) => {
+    setBusy(n.id);
+    const r = await adminPost<{ ok: boolean; status?: string; error?: string }>('/api/admin/ops/forward', { action: 'status', id: n.id });
+    setBusy(null);
+    say(r.ok ? `Durum: ${FORWARD_OUTCOME_LABEL[r.status ?? ''] ?? r.status}` : r.error ?? 'Durum okunamadı.', r.ok ? 'ok' : 'warn');
+    await reload();
+  };
   return (
     <Section title="Bildirim geçmişi" id="bildirimler">
       {error && <Flash tone="warn" message={`Bazı kayıtlar okunamadı: ${error}`} />}
-      {notes.length === 0 ? <p className="text-[12px] text-subtle">Bu hizmet için planlanmış veya gönderilmiş bildirim yok.</p> : (
+      {notes.length === 0 ? <p className="text-[12px] text-subtle">Bu hizmet için planlanmış, gönderilmiş veya iletilmiş bildirim yok.</p> : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-[12px]">
+          <table className="w-full min-w-[760px] text-left text-[12px]">
             <thead className="text-[11px] uppercase tracking-[0.06em] text-subtle">
-              <tr><th className="py-1.5 pe-3">Tür</th><th className="py-1.5 pe-3">Zaman</th><th className="py-1.5 pe-3">Hedef tarih</th><th className="py-1.5 pe-3">Durum</th><th className="py-1.5 pe-3">Deneme</th><th className="py-1.5 pe-3">Son hata</th><th className="py-1.5">Gönderildi</th></tr>
+              <tr><th className="py-1.5 pe-3">Tür</th><th className="py-1.5 pe-3">Zaman</th><th className="py-1.5 pe-3">Hedef tarih</th><th className="py-1.5 pe-3">Durum</th><th className="py-1.5 pe-3">Ayrıntı</th><th className="py-1.5 pe-3">Gönderildi</th><th className="py-1.5" /></tr>
             </thead>
             <tbody>
-              {notes.map((n) => (
-                <tr key={n.id} className="border-t border-line align-top">
-                  <td className="py-1.5 pe-3">{NOTE_KIND_LABEL[n.kind] ?? n.kind}<span className="block text-subtle">{n.audience === 'customer' ? 'müşteri' : 'ekip'}</span></td>
-                  <td className="py-1.5 pe-3">{n.offset_days === null ? '—' : offsetText(n.offset_days)}</td>
-                  <td className="py-1.5 pe-3 tabular-nums">{n.target_date ? fmtDate(n.target_date) : '—'}</td>
-                  <td className="py-1.5 pe-3"><Badge tone={NOTE_STATUS[n.status]?.tone ?? 'muted'}>{NOTE_STATUS[n.status]?.label ?? n.status}</Badge></td>
-                  <td className="py-1.5 pe-3 tabular-nums">{n.attempts}</td>
-                  <td className="py-1.5 pe-3 text-red-300">{n.last_error ?? ''}</td>
-                  <td className="py-1.5">{n.sent_at ? fmtDateTime(n.sent_at) : '—'}</td>
-                </tr>
-              ))}
+              {notes.map((n) => {
+                const manual = isForward(n.dedupe_key);
+                const p = (n.payload ?? {}) as { subject?: string; sent_by?: string; cc?: string[]; outcome?: string; delivery?: string; attachments?: Array<{ name: string }>; status_checked_at?: string };
+                const state = manual ? (p.delivery ?? p.outcome ?? n.status) : null;
+                return (
+                  <tr key={n.id} className="border-t border-line align-top">
+                    <td className="py-1.5 pe-3">{manual ? 'Elle iletildi' : NOTE_KIND_LABEL[n.kind] ?? n.kind}<span className="block text-subtle">{manual ? 'dış alıcı' : n.audience === 'customer' ? 'müşteri' : 'ekip'}</span></td>
+                    <td className="py-1.5 pe-3">{n.offset_days === null ? '—' : offsetText(n.offset_days)}</td>
+                    <td className="py-1.5 pe-3 tabular-nums">{n.target_date ? fmtDate(n.target_date) : '—'}</td>
+                    <td className="py-1.5 pe-3">{manual
+                      ? <Badge tone={state === 'delivered' ? 'ok' : state === 'accepted' || state === 'sending' || state === 'delayed' ? 'info' : state === 'unknown' ? 'warn' : 'bad'}>{FORWARD_OUTCOME_LABEL[state ?? ''] ?? state}</Badge>
+                      : <Badge tone={NOTE_STATUS[n.status]?.tone ?? 'muted'}>{NOTE_STATUS[n.status]?.label ?? n.status}</Badge>}</td>
+                    <td className="py-1.5 pe-3">{manual ? (
+                      <span className="grid gap-0.5">
+                        <span>Alıcı: {(n.recipients ?? []).join(', ')}{p.cc?.length ? ` · CC: ${p.cc.join(', ')}` : ''}</span>
+                        <span className="text-muted">Konu: {p.subject}</span>
+                        {p.attachments?.length ? <span className="text-muted">Ek: {p.attachments.map((a) => a.name).join(', ')}</span> : null}
+                        <span className="text-subtle">Gönderen: {p.sent_by ?? '—'}{p.status_checked_at ? ` · durum kontrolü ${fmtDateTime(p.status_checked_at)}` : ''}</span>
+                        {n.last_error && <span className="text-red-300">{n.last_error}</span>}
+                      </span>
+                    ) : <span className="text-red-300">{n.last_error ?? ''}{n.attempts > 1 ? <span className="block text-subtle">{n.attempts} deneme</span> : null}</span>}</td>
+                    <td className="py-1.5 pe-3">{n.sent_at ? fmtDateTime(n.sent_at) : '—'}</td>
+                    <td className="py-1.5">
+                      {manual && n.status === 'sent' && <button type="button" className={small} disabled={busy === n.id} onClick={() => void refresh(n)}>{busy === n.id ? '…' : 'Durumu yenile'}</button>}
+                      {!manual && n.audience === 'team' && n.kind !== 'digest' && n.status !== 'skipped' && n.target_date && (
+                        // days left counted from today (the stored offset is when the reminder was planned)
+                        <button type="button" className={small} onClick={() => onForward(n.target_date, Math.max(-1, daysBetween(today, n.target_date as string)), n.id)}>E-postayla ilet</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -869,9 +850,8 @@ function ServiceDetailInner({ id }: { id: string }) {
   const params = useSearchParams();
   const router = useRouter();
   const [data, setData] = useState<OpsData | null>(null);
-  const [extra, setExtra] = useState<Extra>({ logs: [], tasks: [], notes: [] });
-  const [settings, setSettings] = useState<SettingsResponse | null>(null);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [extra, setExtra] = useState<Extra>({ logs: [], tasks: [], notes: [], docs: [] });
+  const [forward, setForward] = useState<{ target: string | null; offset: number; reminderId: string | null } | null>(null);
   const [editing, setEditing] = useState(false);
   const [flash, setFlash] = useState<{ message: string; tone: 'ok' | 'bad' | 'warn' } | null>(null);
   const [archBusy, setArchBusy] = useState(false);
@@ -890,7 +870,6 @@ function ServiceDetailInner({ id }: { id: string }) {
   };
   useEffect(() => {
     void reload();
-    adminApi<SettingsResponse>('/api/admin/ops/settings').then((r) => { if (r.ok === false) setSettingsError(r.error ?? 'bilinmeyen hata'); else setSettings(r); });
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (params.get('created')) {
@@ -1023,8 +1002,20 @@ function ServiceDetailInner({ id }: { id: string }) {
       <Section title="Belgeler" id="belgeler"><Documents entity="service" entityId={service.id} /></Section>
       {service.kind === 'maintenance' && <MaintenanceSection service={service} open={view.open} logs={extra.logs} say={say} reload={reload} />}
       <TasksSection service={service} tasks={extra.tasks} say={say} reload={reload} />
-      <CustomerNotifySection key={service.updated_at} service={service} end={view.end} clientName={view.clients[0]?.name ?? partyName(service.owner_client_id)} settings={settings} settingsError={settingsError} say={say} reload={reload} />
-      <NotificationsSection notes={extra.notes} error={extra.error} />
+      <ForwardSection service={service} end={view.end} today={today} onForward={(target, offset) => setForward({ target, offset, reminderId: null })} />
+      <NotificationsSection notes={extra.notes} error={extra.error} today={today} say={say} reload={reload} onForward={(target, offset, reminderId) => setForward({ target, offset, reminderId })} />
+      {forward && (
+        <ForwardDialog service={service} target={forward.target} offset={forward.offset} reminderId={forward.reminderId}
+          clientName={view.clients[0]?.name ?? partyName(service.owner_client_id)}
+          contacts={[
+            // the firm record's own e-mail and its contacts: offered as buttons, added only when clicked
+            ...[...view.clients, ...data.parties.filter((p) => p.id === service.owner_client_id && !view.clients.some((c) => c.id === p.id))]
+              .filter((p) => p.email).map((p) => ({ id: `party-${p.id}`, client_id: p.id, name: p.name, role: 'firma kaydı', email: p.email, phone: null, is_primary: false, note: null })),
+            ...data.contacts.filter((c) => view.clients.some((p) => p.id === c.client_id) || c.client_id === service.owner_client_id),
+          ]}
+          documents={extra.docs}
+          onClose={() => { setForward(null); void reload(); }} onSent={() => void reload()} />
+      )}
 
       <Section title="Lisanslar" id="lisanslar" action={<Link href="/admin/ops/licenses" className={small}>Lisanslar sayfası</Link>}>
         {view.licenses.length === 0 ? <p className="text-[12px] text-subtle">Bu hizmete bağlı lisans yok.</p> : (

@@ -34,8 +34,8 @@ export interface PlanInput {
   defaultDays?: number[];
   /** Cancellation-deadline reminders when the service has none of its own (Operasyon ayarları). */
   defaultCancelDays?: number[];
-  /** Customer reminders allowed at all (global switch in Operasyon ayarları). */
-  customerEnabled: boolean;
+  /** @deprecated ignored: reminders are planned for the team only (automatic customer e-mails are off). */
+  customerEnabled?: boolean;
   /** Keys already in ops_notifications (any status). */
   existing: Set<string>;
 }
@@ -75,9 +75,6 @@ export function planReminders(input: PlanInput): PlannedReminder[] {
     const days = s.reminder_days?.length ? s.reminder_days : defaults;
     if (end) {
       out.push(...planFor(end, days, input.today, (o) => ({ dedupeKey: reminderKey('reminder', s.id, open?.id ?? null, end, o, 'team'), serviceId: s.id, periodId: open?.id ?? null, kind: 'reminder', audience: 'team', offsetDays: o, targetDate: end, skip: false }), input.existing));
-      if (input.customerEnabled && s.customer_notify && s.customer_recipients.length) {
-        out.push(...planFor(end, days, input.today, (o) => ({ dedupeKey: reminderKey('customer_reminder', s.id, open?.id ?? null, end, o, 'customer'), serviceId: s.id, periodId: open?.id ?? null, kind: 'customer_reminder', audience: 'customer', offsetDays: o, targetDate: end, skip: false }), input.existing).filter((r) => r.offsetDays >= 0));
-      }
     }
     const cancelDays = s.cancel_reminder_days?.length ? s.cancel_reminder_days : input.defaultCancelDays ?? [];
     if (s.cancel_by && cancelDays.length) {
@@ -96,12 +93,23 @@ export function offsetText(offset: number): string {
   return `${offset} gün sonra`;
 }
 
-/** The customer e-mail text (shown as preview before the switch is turned on). */
+/**
+ * Default text for a MANUAL forward ("E-postayla ilet"): only the service name,
+ * its end date and the customer's name — never costs, profit, provider,
+ * internal notes or access details. Shown and editable before sending.
+ */
 export function customerReminderText(s: Pick<Service, 'name' | 'kind'>, target: string, offset: number, clientName: string | null): { subject: string; text: string } {
-  const when = offset === 0 ? 'bugün' : offset === 1 ? 'yarın' : `${offset} gün sonra`;
   const date = new Date(`${target}T12:00:00Z`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' });
+  const hello = `Merhaba${clientName ? ` ${clientName}` : ''},`;
+  if (offset < 0) {
+    return {
+      subject: `Hatırlatma: ${s.name} dönemi sona erdi (${date})`,
+      text: `${hello}\n\n${s.name} hizmetinizin dönemi ${date} tarihinde sona erdi. Yenileme ile ilgili bir sorunuz varsa bu e-postaya yanıt verebilirsiniz.\n\nYoca`,
+    };
+  }
+  const when = offset === 0 ? 'bugün' : offset === 1 ? 'yarın' : `${offset} gün sonra`;
   return {
     subject: `Hatırlatma: ${s.name} ${when} yenilenecek (${date})`,
-    text: `Merhaba${clientName ? ` ${clientName}` : ''},\n\n${s.name} hizmetinizin dönemi ${date} tarihinde (${when}) sona eriyor. Yenileme ile ilgili bir sorunuz varsa bu e-postaya yanıt verebilirsiniz.\n\nYoca`,
+    text: `${hello}\n\n${s.name} hizmetinizin dönemi ${date} tarihinde (${when}) sona eriyor. Yenileme ile ilgili bir sorunuz varsa bu e-postaya yanıt verebilirsiniz.\n\nYoca`,
   };
 }
