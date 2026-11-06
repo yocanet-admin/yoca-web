@@ -2,8 +2,10 @@
  * Yoca Operasyon — settings (cockpit_settings key "ops"); pure sanitizer +
  * defaults (unit-tested). Read/write happens in app/api/admin/ops/settings.
  *
- * Customer notifications are OFF by default and stay off until an admin
- * turns the global switch on here AND on the individual service.
+ * Automatic customer notifications do not exist: customerNotifications is
+ * always false, whatever is stored (6 Kas 2026 decision). Reminders go to the
+ * team only; forwarding to a customer is a separate manual action
+ * ("E-postayla ilet") with a recipient typed or picked by an admin.
  * License actions are separate permissions per admin e-mail; nobody has them
  * until they are granted here.
  */
@@ -44,8 +46,9 @@ export function sanitizeOps(input: unknown): OpsSettings {
     reminderDays: days(v.reminderDays, DEFAULT_OPS.reminderDays),
     cancelReminderDays: days(v.cancelReminderDays, DEFAULT_OPS.cancelReminderDays),
     digest: v.digest === undefined ? DEFAULT_OPS.digest : v.digest === true,
-    customerNotifications: v.customerNotifications === true,
-    customerFrom: typeof v.customerFrom === 'string' && v.customerFrom.trim() ? v.customerFrom.trim().slice(0, 200) : null,
+    // Automatic customer e-mails are permanently off (stored values are ignored).
+    customerNotifications: false,
+    customerFrom: null,
     licensePermissions: Object.fromEntries(LICENSE_ACTIONS.map((a) => [a, emails(perms[a])])) as Record<LicenseAction, string[]>,
   };
 }

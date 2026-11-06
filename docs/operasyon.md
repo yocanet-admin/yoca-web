@@ -26,27 +26,40 @@
 - **Lisanslar:** asıl kaynak license.yoca.net'tir. Yönetim API'si eklenene kadar bağlantı tablosu ve panel bağlantısı çalışır, işlem düğmeleri kapalıdır (bkz. `license-management-api.md`).
 - **Operasyon ayarları:**
   - hatırlatma günleri (varsayılan 30/14/7/1) ve iptal son günü hatırlatmaları;
-  - günlük özet;
-  - müşteri bildirimlerinin genel anahtarı (varsayılan kapalı);
+  - günlük özet (yalnızca ekibe);
+  - bildirimlerin akışı (salt okunur: alıcı, saatler, müşteriye otomatik gönderim yok);
   - lisans yetkileri (işlem başına).
 
-## Bildirimler (`/api/cron/ops`)
+## Bildirimler
 
-**İlk yayında kapalı.** `vercel.json`'da bu görev için zamanlama yok; hatırlatma ve günlük özet otomatik çalışmaz, kimseye mesaj gitmez. Alıcılar ve tekrar gönderim koruması production'da doğrulandıktan sonra açmak için `vercel.json` `crons` listesine `{ "path": "/api/cron/ops", "schedule": "0 6,12 * * *" }` (09:00 ve 15:00 İstanbul) eklenir. Aşağıdaki kurallar o zaman geçerlidir.
+**Otomatik bildirimler yalnızca ekip içidir** (6 Kasım 2026 kararı). Müşteriye otomatik e-posta yoktur; müşteri kaydındaki e-posta gönderim izni değildir.
 
-- `CRON_SECRET` ile yetkilendirilir.
-- Her hatırlatmanın tekil bir anahtarı vardır ve gönderimden önce `ops_notifications`'a yazılarak sahiplenilir. Tekrarlı ya da eşzamanlı bir çağrı ikinci mesaj üretmez.
-- Ekibe günde tek bir özet gider. Kesintiden sonra yalnızca en acil kaçırılmış hatırlatma gönderilir; daha eskileri "atlandı" olarak kaydedilir.
-- Başarısız gönderimler en çok 3 kez yeniden denenir. Geçmiş, hizmet detayında görünür.
-- Müşteri bildirimi yalnızca şu durumda gider: genel anahtar açık, hizmetteki anahtar açık, alıcı seçili. Önizleme hizmet detayındadır.
-- Production dışındaki (test/önizleme) bir dağıtım gerçek kişilere hiç mesaj göndermez.
-- Vadeler İstanbul takvim günüdür (`date`); kesin zamanlar `timestamptz` olarak saklanır.
+### Ekip içi günlük Operasyon özeti (`/api/cron/ops`)
+- Zamanlama (`vercel.json`): `0 6,12 * * *` → 09:00 ve 15:00 İstanbul. Özet 09:00'da gider; 15:00 çalışması yalnızca başarısız bir gönderimi yeniden dener. Günde en çok bir özet (`digest:YYYY-MM-DD`).
+- Alıcı: kokpit bildirim adresi (Ayarlar → Bildirimler, `cockpit_settings.notify.email_to`; bugün mg@yoca.net) ve ekip Telegram grubu. Ayrı bir alıcı listesi yoktur.
+- İçerik (yalnızca Operasyon): bugünün hatırlatmaları (bitiş / iptal son günü; 30/14/7/1 gün önce, gün, “tarihi geçti”), bitişi geçen veya doğrulama bekleyen yenilemeler, geciken tahsilat ve sağlayıcı ödemeleri, geciken Operasyon görevleri. Her satır hizmet sayfasına bağlanır. Takip edilecek bir şey yoksa e-posta gitmez.
+- Sabah özeti (08:30) ayrıdır: leadler, CRM takipleri, site izleme (SSL / alan adı / hosting), trafik. Operasyon özeti bunları tekrar etmez. (İzlenen bir sitenin alan adı aynı zamanda Operasyon'da hizmet olarak kayıtlıysa ikisinde de görünebilir: biri WHOIS izlemesinden, diğeri yenileme kaydından.)
+- `CRON_SECRET` ile yetkilendirilir. Her hatırlatmanın tekil anahtarı vardır ve gönderimden önce `ops_notifications`'a yazılarak sahiplenilir; tekrarlı ya da eşzamanlı bir çağrı ikinci mesaj üretmez. Kesintiden sonra yalnızca en acil kaçırılmış hatırlatma gönderilir. Başarısız gönderim en çok 3 kez yeniden denenir.
+- Production dışındaki bir dağıtım gerçek kişilere mesaj göndermez.
+- “Günlük özet” Operasyon ayarlarından kapatılabilir; kapalıyken hatırlatmalar “engellendi” olarak kaydedilir.
+
+### Elle iletme: “E-postayla ilet” (`/api/admin/ops/forward`)
+- Hizmet sayfasında (“Hatırlatma ve iletme” bölümü ve bildirim geçmişindeki ekip hatırlatmalarının yanında). Yalnızca yönetici açar ve gönderir.
+- Alıcı alanı boş açılır. Firma kaydının ve kişilerinin e-postaları düğme olarak gösterilir; yalnızca tıklanınca alıcıya eklenir. CC isteğe bağlı.
+- Konu ve mesaj nötr bir metinle başlar (yalnızca hizmet adı, tarih ve müşteri adı) ve düzenlenebilir. Sağlayıcı maliyeti, kâr, iç notlar, erişim bilgileri ve ekip değerlendirmeleri metne eklenmez; mesajda bunlara benzeyen bir şey varsa göndermeden önce uyarı çıkar (engellemez).
+- Ekler: yalnızca bu hizmetin dosyaları, hiçbiri işaretli gelmez; en çok 10 dosya, toplam 15 MB.
+- “Kurumsal dille düzenle”: yalnızca mesaj metni yapay zekâya gider; öneri ayrı gösterilir, “Uygula” denmeden mesaj değişmez.
+- Önizleme, sunucunun göndereceği e-postanın kendisidir (kurumsal açık şablon, şirket profilindeki bilgiler).
+- “Gönder” dışında hiçbir şey göndermez; kaydetmek, yenilemeyi onaylamak veya bir bildirimi kapatmak e-posta başlatmaz.
+- Mevcut e-posta altyapısı (Resend, belge e-postasıyla aynı hesap ve kurallar) kullanılır. Tek pencere = tek istek anahtarı = tek kayıt = tek e-posta (Resend `Idempotency-Key`); çift tıklama veya “Yeniden dene” ikinci e-posta göndermez.
+- Kayıt: `ops_notifications` satırı (`dedupe_key = forward:<anahtar>`, `kind = customer_reminder`, `audience = customer`, `recipients` = alıcılar; `payload` içinde konu, mesaj, CC, ekler (ad, boyut, SHA-256), gönderen yönetici, sonuç, Resend kimliği, teslim durumu). Bildirim geçmişinde “Elle iletildi” olarak görünür; “Durumu yenile” teslim durumunu okur. Ekip cron'u bu satırlara dokunmaz. Yeni tablo veya migration yoktur.
+- Production dışında yalnızca `DOCUMENTS_EMAIL_TEST_ALLOW` listesindeki adreslere gönderilir; yerel testler yakalama sunucusuna gider.
 
 ## Veri geçişi sırası (onaydan sonra)
 1. **Yedek / ön kontrol:** salt okunur `checks/preflight.sql`. `is_admin()` ve `audit_row()` mevcut mu?
 2. **`supabase/upgrade-v18-operations.sql`:** yalnızca ekleme yapar. `clients` tablosuna sütun ekler (mevcut satırlar firma ve müşteri olarak kalır), lead tablolarına boş `client_id` bağlantı sütunu ekler (mevcut leadler değişmez), yeni tablolar ve özel `ops-docs` deposu oluşturur. Tekrar çalıştırılabilir. Eski uygulama yeni alanları okumadığı için önce veritabanı hazırlanabilir.
-3. **Merge → production dağıtımı:** Operasyon bildirim görevi bu sürümde zamanlanmaz (yukarıya bakın).
-4. **Kontrol:** Operasyon sayfaları açılıyor mu, sayfaların boş durumları doğru mu? Cron Jobs listesinde `/api/cron/ops` olmamalı.
+3. **Merge → production dağıtımı:** ilk yayında bildirim görevi zamanlanmamıştı; 6 Kasım 2026'dan itibaren ekip içi özet `vercel.json`'da zamanlanır (yukarıya bakın).
+4. **Kontrol:** Operasyon sayfaları açılıyor mu, sayfaların boş durumları doğru mu? Cron Jobs listesinde `/api/cron/ops` (09:00 / 15:00 İstanbul) görünür.
 
 ## Mevcut verilere etkisi
 Mevcut satırlarda hiçbir veri değişmez. CRM ekranı aynı çalışır. Operasyon kaydına bağlı bir müşteri silinmek istenirse veritabanı silmeyi reddeder (bağlı geçmiş var); arşivleme kullanılır.

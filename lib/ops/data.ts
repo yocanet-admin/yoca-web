@@ -46,7 +46,7 @@ export interface DocumentRow { id: string; entity: string; entity_id: string; na
 export interface WorkLog { id: string; service_id: string | null; project_id: string | null; worked_on: string; minutes: number; note: string | null; created_by: string | null; created_at: string }
 export interface Task { id: string; project_id: string | null; service_id: string | null; kind: 'delivery' | 'handover' | 'task'; title: string; status: 'todo' | 'doing' | 'done' | 'skipped'; owner_email: string | null; due_on: string | null; done_at: string | null; sort: number; note: string | null }
 export interface LicenseLink { id: string; license_id: string; client_id: string | null; project_id: string | null; service_id: string | null; label: string | null; snapshot: Record<string, unknown> | null; last_synced_at: string | null; sync_error: string | null }
-export interface NotificationRow { id: string; dedupe_key: string; service_id: string | null; kind: string; offset_days: number | null; target_date: string | null; audience: string; status: string; attempts: number; last_error: string | null; sent_at: string | null; created_at: string }
+export interface NotificationRow { id: string; dedupe_key: string; service_id: string | null; kind: string; offset_days: number | null; target_date: string | null; audience: string; status: string; attempts: number; last_error: string | null; sent_at: string | null; created_at: string; recipients?: string[]; payload?: Record<string, unknown> | null }
 
 export interface OpsData {
   ready: boolean;
