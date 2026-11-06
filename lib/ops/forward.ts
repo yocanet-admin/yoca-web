@@ -14,6 +14,8 @@
  */
 
 import type { Service } from '@/lib/ops/model';
+import type { Issuer } from '@/lib/documents/model';
+import { brandedEmailHtml, brandedEmailText } from '@/lib/documents/mail';
 
 export const FORWARD_PREFIX = 'forward:';
 export const forwardKey = (requestKey: string) => `${FORWARD_PREFIX}${requestKey}`;
@@ -60,4 +62,29 @@ export function forwardWarnings(text: string, service: Pick<Service, 'note' | 'c
   if (SECRET_WORDS.test(text)) out.push('Mesajda erişim bilgisi (şifre, kullanıcı adı, anahtar, panel girişi) olabilecek bir ifade var.');
   if (service.secret_ref && t.includes(String(service.secret_ref).toLocaleLowerCase('tr-TR'))) out.push('Mesajda erişim bilgisinin saklandığı yer (secret_ref) geçiyor.');
   return out;
+}
+
+/**
+ * The external e-mail. By its signature it can only contain what the admin
+ * typed (subject, message), the names of the files they ticked and the public
+ * company profile (legal name, address, phone, e-mail, tax facts, website — the
+ * same footer as every document e-mail). It takes NO service, period, payment,
+ * provider or note data, so cost, profit, internal notes and access details
+ * cannot be added by the system.
+ */
+export function forwardEmail(input: { issuer: Issuer; subject: string; body: string; attachmentNames: string[] }): { html: string; text: string } {
+  const mail = { issuer: input.issuer, locale: 'tr' as const, preheader: input.subject, body: input.body, ...(input.attachmentNames.length ? { note: `Ek: ${input.attachmentNames.join(', ')}` } : {}) };
+  return { html: brandedEmailHtml(mail), text: brandedEmailText(mail) };
+}
+
+/** Starting text of the dialog: service NAME, date and customer name only (nothing else is passed in). */
+export function forwardDefaults(input: { serviceName: string; target: string | null; offset: number; clientName: string | null }): { subject: string; text: string } {
+  const hello = `Merhaba${input.clientName ? ` ${input.clientName}` : ''},`;
+  if (!input.target) return { subject: `${input.serviceName} hakkında`, text: `${hello}\n\n\n\nYoca` };
+  const date = new Date(`${input.target}T12:00:00Z`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' });
+  if (input.offset < 0) {
+    return { subject: `Hatırlatma: ${input.serviceName} dönemi sona erdi (${date})`, text: `${hello}\n\n${input.serviceName} hizmetinizin dönemi ${date} tarihinde sona erdi. Yenileme ile ilgili bir sorunuz varsa bu e-postaya yanıt verebilirsiniz.\n\nYoca` };
+  }
+  const when = input.offset === 0 ? 'bugün' : input.offset === 1 ? 'yarın' : `${input.offset} gün sonra`;
+  return { subject: `Hatırlatma: ${input.serviceName} ${when} yenilenecek (${date})`, text: `${hello}\n\n${input.serviceName} hizmetinizin dönemi ${date} tarihinde (${when}) sona eriyor. Yenileme ile ilgili bir sorunuz varsa bu e-postaya yanıt verebilirsiniz.\n\nYoca` };
 }

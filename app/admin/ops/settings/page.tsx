@@ -14,7 +14,7 @@ import { DEFAULT_OPS, LICENSE_ACTIONS, LICENSE_ACTION_LABEL, type LicenseAction,
  */
 
 interface Env { send: { email: boolean; telegram: boolean; reason: string }; licenseApi: { configured: boolean; missing: string[] }; cronSecret: boolean }
-interface GetRes { ok?: boolean; error?: string; ready?: boolean; settings?: OpsSettings; me?: string | null; environment?: Env; team?: { email: string | null; telegram: boolean; telegramName: string | null } }
+interface GetRes { ok?: boolean; error?: string; ready?: boolean; settings?: OpsSettings; me?: string | null; environment?: Env; team?: { email: string | null; telegram: boolean; telegramName: string | null; lastDigest?: { day: string; status: string; attempts: number; note: string | null; sentAt: string | null; email: string | null; telegram: string | null } | null } }
 interface PostRes { ok?: boolean; error?: string; settings?: OpsSettings }
 
 interface Draft { reminderDays: string; cancelReminderDays: string; digest: boolean; customerNotifications: boolean; customerFrom: string; perms: Record<LicenseAction, string> }
@@ -33,6 +33,9 @@ function parseDays(text: string): { days: number[]; bad: string[] } {
   const days = Array.from(new Set(parts.filter((p) => !bad.includes(p)).map(Number))).sort((a, b) => b - a);
   return { days, bad };
 }
+
+const CH_LABEL: Record<string, string> = { sent: 'gönderildi', failed: 'gönderilemedi (yeniden denenecek)', unknown: 'sonuç belirsiz', pending: 'bekliyor', skipped: 'kanal yok' };
+const CH_TONE: Record<string, 'ok' | 'warn' | 'bad' | 'muted'> = { sent: 'ok', failed: 'bad', unknown: 'warn', pending: 'muted', skipped: 'muted' };
 
 export default function OpsSettingsPage() {
   const [res, setRes] = useState<GetRes | null>(null);
@@ -120,11 +123,23 @@ export default function OpsSettingsPage() {
         <section className="admin-card grid gap-3 !p-4" aria-label="Bildirimlerin akışı">
           <h2 className="text-[13px] font-bold uppercase tracking-[0.08em] text-muted">Bildirimlerin akışı</h2>
           <ul className="grid list-disc gap-1 ps-5 text-[12px] text-soft">
-            <li><strong>Ekip içi günlük özet:</strong> her gün 09:00 (İstanbul); 15:00’te yalnızca başarısız gönderim yeniden denenir. Günde en çok bir özet; takip edilecek iş yoksa gönderilmez.</li>
+            <li><strong>Ekip içi günlük özet:</strong> her gün 09:00 (İstanbul); 15:00’te yalnızca gönderilemeyen kanal (e-posta veya Telegram) yeniden denenir; başarılı kanala aynı özet tekrar gitmez. Günde en çok bir özet; takip edilecek iş yoksa gönderilmez.</li>
             <li><strong>Alıcı:</strong> kokpit bildirim adresi {res.team?.email ? <strong className="text-white">{res.team.email}</strong> : 'tanımlı değil'}{res.team?.telegram ? ` ve ekip Telegram grubu${res.team.telegramName ? ` (${res.team.telegramName})` : ''}` : ''}. Değiştirmek için <Link className="underline" href="/admin/settings">Ayarlar → Bildirimler</Link>.</li>
             <li><strong>Sabah özeti</strong> (08:30) ayrıdır: leadler, takipler, site izleme ve trafik. Operasyon özeti bunları tekrar etmez.</li>
             <li><strong>Müşteriye otomatik e-posta yoktur.</strong> Müşteri kaydındaki e-posta gönderim izni değildir. Müşteriye veya başka bir adrese bildirmek için hizmet sayfasında “E-postayla ilet” kullanılır: alıcı, konu, mesaj ve ekler elle belirlenir, “Gönder” denmeden hiçbir şey gitmez.</li>
           </ul>
+          <div className="grid gap-1 border-t border-line pt-2 text-[12px]">
+            <span className="text-muted">Son ekip özeti</span>
+            {res.team?.lastDigest ? (
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="tabular-nums">{res.team.lastDigest.day}</span>
+                <Badge tone={CH_TONE[res.team.lastDigest.email ?? ''] ?? 'muted'}>E-posta: {CH_LABEL[res.team.lastDigest.email ?? ''] ?? '—'}</Badge>
+                <Badge tone={CH_TONE[res.team.lastDigest.telegram ?? ''] ?? 'muted'}>Telegram: {CH_LABEL[res.team.lastDigest.telegram ?? ''] ?? '—'}</Badge>
+                <span className="text-subtle">{res.team.lastDigest.attempts} deneme</span>
+              </span>
+            ) : <span className="text-subtle">Henüz özet gönderilmedi (takip edilecek iş olmayan günlerde özet gitmez).</span>}
+            {res.team?.lastDigest?.note && <span className="text-yellow-200">{res.team.lastDigest.note}</span>}
+          </div>
           {env && (
             <p className="flex flex-wrap items-center gap-2 text-[12px]">
               <span className="text-muted">Bu ortam:</span>

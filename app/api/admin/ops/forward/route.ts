@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
-import { getSupabaseAsUser } from '@/lib/supabase';
+import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
 import { loadContext } from '@/lib/documents/server';
-import { brandedEmailHtml, brandedEmailText, parseAddresses, statusFromEvent, testRecipientProblem } from '@/lib/documents/mail';
+import { parseAddresses, statusFromEvent, testRecipientProblem } from '@/lib/documents/mail';
 import { CAPTURE_MODE, lookupDelivery, mailReady, sendMail, type SendOutcome } from '@/lib/documents/emailSend';
-import { forwardKey, forwardWarnings, type ForwardPayload } from '@/lib/ops/forward';
+import { forwardEmail, forwardKey, forwardWarnings, type ForwardPayload } from '@/lib/ops/forward';
 import type { Service } from '@/lib/ops/model';
 
 /**
@@ -21,7 +21,14 @@ import type { Service } from '@/lib/ops/model';
  *
  * Only what the admin sees in the dialog is sent: the typed recipients, the
  * edited subject and message, and the files ticked by hand. No customer
- * address, cost, note or access detail is added on the server.
+ * address, cost, note or access detail is added on the server: the e-mail is
+ * composed from those fields and the public company profile only
+ * (forwardEmail in lib/ops/forward.ts takes no service data).
+ *
+ * The record is created with the admin's own session (the database sets the
+ * sender from it, v23) and its send result is written with the service role
+ * only: after v23 an admin session cannot change the content of a forward,
+ * mark it as sent or delete it.
  */
 
 export const runtime = 'nodejs';
@@ -66,10 +73,6 @@ async function download(client: Sb, docs: DocRow[]): Promise<{ ok: true; files: 
   return { ok: true, files };
 }
 
-function compose(issuer: Awaited<ReturnType<typeof loadContext>>['issuer'], subject: string, body: string, names: string[]) {
-  const mail = { issuer, locale: 'tr' as const, preheader: subject, body, ...(names.length ? { note: `Ek: ${names.join(', ')}` } : {}) };
-  return { html: brandedEmailHtml(mail), text: brandedEmailText(mail) };
-}
 
 /** Send (or repeat with the same idempotency key) the stored content of one record; record the outcome. */
 async function deliver(client: Sb, row: Row, requestKey: string) {
@@ -83,13 +86,14 @@ async function deliver(client: Sb, row: Row, requestKey: string) {
     else if (files.files.some((f) => p.attachments.find((a) => a.id === f.doc.id)?.sha256 !== f.sha)) outcome = { status: 'failed', error: 'Ek dosya, gönderim kaydındakiyle aynı değil; hiçbir şey gönderilmedi.' };
     else {
       const ctx = await loadContext(client);
-      const mail = compose(ctx.issuer, p.subject, p.body, p.attachments.map((a) => a.name));
+      const mail = forwardEmail({ issuer: ctx.issuer, subject: p.subject, body: p.body, attachmentNames: p.attachments.map((a) => a.name) });
       outcome = await sendMail({ to: row.recipients, cc: p.cc, replyTo: p.reply_to ?? undefined, subject: p.subject, html: mail.html, text: mail.text, attachments: files.files.map((f) => ({ filename: f.doc.name, content: f.buffer })) }, `yoca-ops-forward-${requestKey}`);
     }
   }
   const status = outcome.status === 'accepted' ? 'sent' : 'failed';
   const payload: ForwardPayload = { ...p, outcome: outcome.status, provider_id: outcome.status === 'accepted' ? outcome.providerId : p.provider_id ?? null };
-  const up = await client.from('ops_notifications').update({
+  const writer = getSupabaseServiceRole() ?? client;
+  const up = await writer.from('ops_notifications').update({
     status, attempts: row.attempts + 1, last_error: outcome.status === 'accepted' ? null : outcome.error,
     sent_at: outcome.status === 'accepted' ? new Date().toISOString() : null, next_attempt_at: null, payload,
   }).eq('id', row.id);
@@ -115,7 +119,7 @@ export async function POST(request: NextRequest) {
     const look = await lookupDelivery(row.payload.provider_id);
     if (!look.ok) return json({ ok: false, error: look.error, restricted: look.restricted ?? false }, look.restricted ? 200 : 502);
     const delivery = statusFromEvent(look.lastEvent);
-    await client.from('ops_notifications').update({ payload: { ...row.payload, delivery, last_event: look.lastEvent ?? null, status_checked_at: new Date().toISOString() } }).eq('id', row.id);
+    await (getSupabaseServiceRole() ?? client).from('ops_notifications').update({ payload: { ...row.payload, delivery, last_event: look.lastEvent ?? null, status_checked_at: new Date().toISOString() } }).eq('id', row.id);
     return json({ ok: true, status: delivery, lastEvent: look.lastEvent });
   }
 
@@ -131,7 +135,7 @@ export async function POST(request: NextRequest) {
     const docs = await attachmentsOf(client, service.id, attachmentIds);
     if (!docs.ok) return fail(400, docs.error);
     const ctx = await loadContext(client);
-    const mail = compose(ctx.issuer, subject || '(konu yok)', message || ' ', docs.docs.map((d) => d.name));
+    const mail = forwardEmail({ issuer: ctx.issuer, subject: subject || '(konu yok)', body: message || ' ', attachmentNames: docs.docs.map((d) => d.name) });
     return json({ ok: true, html: mail.html, text: mail.text, from: process.env.DOCUMENTS_EMAIL_FROM || process.env.NOTIFY_EMAIL_FROM || 'Yoca <noreply@yoca.net>', replyTo: (ctx.issuer.email ?? '').trim(), warnings: forwardWarnings(`${subject}\n${message}`, service), mailReady: mailReady() });
   }
 

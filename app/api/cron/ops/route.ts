@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cronAuth } from '@/lib/cockpit/cron';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { notifyAdmins } from '@/lib/notify';
+import { sendTelegramChecked } from '@/lib/notify';
+import { getNotifySettings } from '@/lib/cockpit/settings';
+import { sendMail } from '@/lib/documents/emailSend';
 import { readOpsSettings } from '@/lib/ops/serverSettings';
 import { realSendAllowed } from '@/lib/ops/settings';
 import { istanbulDay, KIND_LABEL, payState, renewState, type PeriodRow, type Payment, type Service } from '@/lib/ops/model';
 import { offsetText, planReminders, type PlannedReminder } from '@/lib/ops/reminders';
-import { buildOpsDigest, OPS_SITE, type DigestLine } from '@/lib/ops/digest';
+import { buildOpsDigest, channelsToSend, digestOutcome, OPS_SITE, type DigestChannels, type DigestLine } from '@/lib/ops/digest';
 
 /**
  * Yoca Operasyon — TEAM reminders (Vercel Cron 06:00 and 12:00 UTC =
@@ -25,9 +27,14 @@ import { buildOpsDigest, OPS_SITE, type DigestLine } from '@/lib/ops/digest';
  *  - ONE digest per Istanbul day (key digest:YYYY-MM-DD) to the cockpit
  *    notification address + team Telegram, only when there is something to
  *    follow; it does not repeat the morning summary (see lib/ops/digest.ts).
- *  - Failures are kept (status failed, attempts, last_error) and retried by the
- *    next run up to 3 attempts. After an outage only the most urgent missed
- *    reminder is sent (planner).
+ *  - E-mail and Telegram are tracked separately on the digest row
+ *    (payload.channels). The digest content is stored with the row at the
+ *    first attempt; the 15:00 run sends that SAME content again only to a
+ *    channel that failed — never to a channel that succeeded. An unclear
+ *    e-mail is asked again with the same Idempotency-Key (no second copy);
+ *    an unclear Telegram send is not repeated (it could be a duplicate) and
+ *    is reported for a manual check. At most 3 attempts.
+ *  - After an outage only the most urgent missed reminder is sent (planner).
  *  - Outside production nothing reaches a real inbox (realSendAllowed).
  */
 
@@ -132,30 +139,65 @@ export async function GET(request: NextRequest) {
   }));
   const digestContent = buildOpsDigest({ today, reminders, renewals, payments: paymentLines, tasks });
 
-  // ── One digest per Istanbul day ─────────────────────────────────
+  // ── One digest per Istanbul day, each channel tracked on its own ──
+  type StoredDigest = { subject: string; email: string; text: string; telegram: string; items: string[]; emailTo: string; chatId: string | null; channels: DigestChannels };
   let digest: 'sent' | 'skipped' | 'failed' | 'suppressed' | 'off' | 'already' = 'skipped';
+  let channelsOut: DigestChannels | null = null;
+  const digestKey = `digest:${today}`;
+  const { data: existingRow } = await db.from('ops_notifications').select('id, status, attempts, next_attempt_at, payload').eq('dedupe_key', digestKey).maybeSingle();
+  type DigestRow = { id: string; status: string; attempts: number; next_attempt_at: string | null; payload: StoredDigest | Record<string, never> };
+  let row = existingRow as DigestRow | null;
+
   if (!settings.digest) {
     digest = 'off';
     await mark(teamItems.map((r) => r.dedupeKey), 'suppressed', 'Günlük özet kapalı (Operasyon ayarları).');
-  } else if (!digestContent.empty) {
-    const digestKey = `digest:${today}`;
-    const { data: claimedDigest } = await db.from('ops_notifications').upsert({ dedupe_key: digestKey, kind: 'digest', audience: 'team', target_date: today, status: 'pending' }, { onConflict: 'dedupe_key', ignoreDuplicates: true }).select('id');
-    const { data: digestRow } = await db.from('ops_notifications').select('status, attempts').eq('dedupe_key', digestKey).maybeSingle();
-    const row = digestRow as { status: string; attempts: number } | null;
-    const mine = Boolean(claimedDigest?.length) || (row?.status === 'failed' && row.attempts < 3);
-    if (!mine) digest = 'already';
-    else if (!allowed.email && !allowed.telegram) {
-      digest = 'suppressed';
-      await mark([digestKey, ...teamItems.map((r) => r.dedupeKey)], 'suppressed', allowed.reason);
-    } else {
-      const sent = await notifyAdmins({ kind: 'ops', force: true, subject: digestContent.subject, email: digestContent.email, telegram: digestContent.telegram, keyboard: [[{ text: 'Operasyonu aç →', url: `${OPS_SITE}/admin/ops` }]] });
-      const ok = sent.email === 'sent' || sent.telegram === 'sent';
-      const noChannel = sent.email === 'skipped' && sent.telegram === 'skipped';
-      digest = ok ? 'sent' : noChannel ? 'suppressed' : 'failed';
-      const err = ok ? undefined : noChannel ? 'Bildirim kanalı kurulu değil (e-posta/Telegram).' : `e-posta: ${sent.email}, telegram: ${sent.telegram}`;
-      await mark([digestKey, ...teamItems.map((r) => r.dedupeKey)], ok ? 'sent' : noChannel ? 'suppressed' : 'failed', err);
-    }
+  } else if (!row && !digestContent.empty) {
+    // First attempt today: store the content and the channels, then claim the row.
+    const notify = await getNotifySettings();
+    const channels: DigestChannels = {
+      email: { state: !notify.email_to ? 'skipped' : !allowed.email ? 'skipped' : 'pending', error: !allowed.email ? allowed.reason : null },
+      telegram: { state: !notify.telegram_chat_id || !process.env.TELEGRAM_BOT_TOKEN ? 'skipped' : !allowed.telegram ? 'skipped' : 'pending', error: !allowed.telegram ? allowed.reason : null },
+    };
+    const payload: StoredDigest = { subject: digestContent.subject, email: digestContent.email, text: digestContent.text, telegram: digestContent.telegram, items: teamItems.map((r) => r.dedupeKey), emailTo: notify.email_to, chatId: notify.telegram_chat_id ?? null, channels };
+    const ins = await db.from('ops_notifications').upsert({ dedupe_key: digestKey, kind: 'digest', audience: 'team', target_date: today, status: 'pending', payload }, { onConflict: 'dedupe_key', ignoreDuplicates: true }).select('id, status, attempts, next_attempt_at, payload');
+    row = ins.data?.length ? (ins.data[0] as DigestRow) : null;
+    if (!row) digest = 'already';
+  } else if (row) {
+    // Same day again: only a digest still waiting for a failed channel is ours to send.
+    const due = row.status === 'failed' && row.attempts < 3 && (!row.next_attempt_at || Date.parse(row.next_attempt_at) <= Date.now()) && 'channels' in row.payload;
+    if (!due) { digest = 'already'; row = null; }
   }
 
-  return NextResponse.json({ ok: true, today, planned: planned.length, claimed: claimed.length, retried: retry.length, digest, counts: digestContent.counts, environment: allowed.reason });
+  if (row && settings.digest && 'channels' in row.payload) {
+    const p = row.payload as StoredDigest;
+    const channels: DigestChannels = { email: { ...p.channels.email }, telegram: { ...p.channels.telegram } };
+    const now = new Date().toISOString();
+    for (const ch of channelsToSend(channels)) {
+      if (ch === 'email') {
+        const r = await sendMail({ to: p.emailTo.split(',').map((x) => x.trim()).filter(Boolean), cc: [], subject: p.subject, html: p.email, text: p.text, attachments: [] }, `yoca-ops-digest-${today}`);
+        channels.email = r.status === 'accepted' ? { state: 'sent', at: now, providerId: r.providerId, error: null } : { state: r.status, at: now, error: r.error };
+      } else {
+        const r = await sendTelegramChecked(p.chatId, p.telegram, [[{ text: 'Operasyonu aç →', url: `${OPS_SITE}/admin/ops` }]]);
+        channels.telegram = { state: r.result, at: now, error: r.error ?? null };
+      }
+    }
+    const attempts = row.attempts + 1;
+    const out = digestOutcome(channels, attempts);
+    await db.from('ops_notifications').update({
+      status: out.status, attempts, last_error: out.error, payload: { ...p, channels },
+      sent_at: out.anySent ? (row.status === 'sent' ? undefined : now) : null,
+      next_attempt_at: out.retry ? new Date(Date.now() + 3 * 3_600_000).toISOString() : null,
+    }).eq('id', row.id);
+    // The reminders in this digest: delivered as soon as one channel reached the team; otherwise
+    // they wait for the digest's retry, and after the last attempt they go into a later digest.
+    const items = p.items ?? [];
+    if (out.anySent) await mark(items, 'sent');
+    else if (out.retry) {
+      for (const k of items) await db.from('ops_notifications').update({ status: 'failed', last_error: out.error, next_attempt_at: null }).eq('dedupe_key', k);
+    } else await mark(items, out.status === 'suppressed' ? 'suppressed' : 'failed', out.error ?? undefined);
+    digest = out.status === 'sent' ? 'sent' : out.status === 'suppressed' ? 'suppressed' : 'failed';
+    channelsOut = channels;
+  }
+
+  return NextResponse.json({ ok: true, today, planned: planned.length, claimed: claimed.length, retried: retry.length, digest, channels: channelsOut ? { email: channelsOut.email.state, telegram: channelsOut.telegram.state } : null, counts: digestContent.counts, environment: allowed.reason });
 }

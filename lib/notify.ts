@@ -99,6 +99,38 @@ export async function telegramApi<T = unknown>(method: string, body?: Record<str
   }
 }
 
+/**
+ * Telegram message with an exact outcome (used where a retry must not
+ * duplicate a message, e.g. the Operasyon digest):
+ *   sent     Telegram answered ok
+ *   failed   Telegram answered with an error that means "not delivered"
+ *            (4xx, incl. 429 rate limit) → safe to try again later
+ *   unknown  no answer / timeout / 5xx → it may have been delivered; the
+ *            Bot API has no idempotency key, so this must NOT be retried blindly
+ *   skipped  no bot token or no chat
+ */
+export async function sendTelegramChecked(chatId: string | null | undefined, html: string, keyboard?: TelegramButton[][], timeoutMs = 15_000): Promise<{ result: 'sent' | 'failed' | 'unknown' | 'skipped'; error?: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token || !chatId) return { result: 'skipped' };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${TELEGRAM_API}/bot${token}/sendMessage`, {
+      method: 'POST', signal: ctrl.signal, cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: html.slice(0, 4000), parse_mode: 'HTML', link_preview_options: { is_disabled: true }, ...(keyboard?.length ? { reply_markup: { inline_keyboard: keyboard } } : {}) }),
+    });
+    const json = (await response.json().catch(() => null)) as { ok?: boolean; description?: string } | null;
+    if (response.ok && json?.ok) return { result: 'sent' };
+    const msg = `Telegram ${response.status}${json?.description ? `: ${String(json.description).slice(0, 160)}` : ''}`;
+    if (response.status >= 400 && response.status < 500) return { result: 'failed', error: msg };
+    return { result: 'unknown', error: msg };
+  } catch (error) {
+    return { result: 'unknown', error: (error as Error).name === 'AbortError' ? 'Telegram zamanında yanıt vermedi.' : `Telegram bağlantı hatası: ${(error as Error).message.slice(0, 120)}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Telegram message in HTML parse mode (escape user text with escapeHtml). */
 export async function sendTelegram(chatId: string | null | undefined, html: string, keyboard?: TelegramButton[][]): Promise<ChannelResult> {
   if (!process.env.TELEGRAM_BOT_TOKEN || !chatId) return 'skipped';
