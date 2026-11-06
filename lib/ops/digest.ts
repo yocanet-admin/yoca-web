@@ -33,6 +33,8 @@ export interface Digest {
   empty: boolean;
   subject: string;
   email: string;
+  /** plain-text part of the e-mail */
+  text: string;
   telegram: string;
   counts: { reminders: number; renewals: number; payments: number; tasks: number };
 }
@@ -79,5 +81,50 @@ export function buildOpsDigest(input: DigestInput): Digest {
       .map((s) => `${s.icon} <b>${esc(s.heading)}</b>\n` + s.lines.slice(0, 8).map((l) => `   • ${esc(l.title)}${l.detail ? ` — <i>${esc(l.detail)}</i>` : ''}`).join('\n') + (s.lines.length > 8 ? `\n   <i>+${s.lines.length - 8} daha</i>` : ''))
       .join('\n\n');
 
-  return { empty: total === 0, subject, email, telegram, counts };
+  const text = [
+    subject, '',
+    ...sections.flatMap((s) => [s.heading.toLocaleUpperCase('tr-TR'), ...s.lines.map((l) => `- ${l.title}${l.detail ? ` — ${l.detail}` : ''}${l.href ? ` (${l.href})` : ''}`), '']),
+    `Operasyon: ${OPS_SITE}/admin/ops`,
+  ].join('\n');
+
+  return { empty: total === 0, subject, email, text, telegram, counts };
+}
+
+/* ── Delivery per channel (e-mail and Telegram tracked separately) ── */
+
+export type ChannelState = 'pending' | 'sent' | 'failed' | 'unknown' | 'skipped';
+export interface ChannelInfo { state: ChannelState; error?: string | null; at?: string | null; providerId?: string | null }
+export interface DigestChannels { email: ChannelInfo; telegram: ChannelInfo }
+export const MAX_DIGEST_ATTEMPTS = 3;
+
+/**
+ * Channels to send in this run. A channel that already succeeded is never
+ * sent again (no second copy of the same digest).
+ *  - e-mail: pending, failed or unknown. An unknown e-mail is repeated ONLY
+ *    with the same Idempotency-Key (yoca-ops-digest-<day>): Resend returns
+ *    the first result and does not send a second copy.
+ *  - Telegram: pending or failed (Telegram said "not delivered"). An unknown
+ *    Telegram send is NOT repeated: the Bot API has no idempotency key, so a
+ *    retry could post the digest twice. It is reported for a manual check.
+ */
+export function channelsToSend(c: DigestChannels): Array<'email' | 'telegram'> {
+  const out: Array<'email' | 'telegram'> = [];
+  if (c.email.state === 'pending' || c.email.state === 'failed' || c.email.state === 'unknown') out.push('email');
+  if (c.telegram.state === 'pending' || c.telegram.state === 'failed') out.push('telegram');
+  return out;
+}
+
+/** Overall state of the day's digest after a run. */
+export function digestOutcome(c: DigestChannels, attempts: number): { status: 'sent' | 'failed' | 'suppressed'; retry: boolean; anySent: boolean; error: string | null } {
+  const anySent = c.email.state === 'sent' || c.telegram.state === 'sent';
+  const retryable = channelsToSend(c).length > 0 && attempts < MAX_DIGEST_ATTEMPTS;
+  const allSkipped = c.email.state === 'skipped' && c.telegram.state === 'skipped';
+  const notes = [
+    c.email.state === 'failed' ? `E-posta gönderilemedi${c.email.error ? ` (${c.email.error})` : ''}${retryable ? '; sonraki çalışmada yeniden denenecek' : ''}.` : '',
+    c.email.state === 'unknown' ? `E-posta sonucu belirsiz${c.email.error ? ` (${c.email.error})` : ''}${retryable ? '; aynı gönderim anahtarıyla yeniden sorulacak (ikinci kopya gitmez)' : ''}.` : '',
+    c.telegram.state === 'failed' ? `Telegram gönderilemedi${c.telegram.error ? ` (${c.telegram.error})` : ''}${retryable ? '; sonraki çalışmada yeniden denenecek' : ''}.` : '',
+    c.telegram.state === 'unknown' ? `Telegram sonucu belirsiz${c.telegram.error ? ` (${c.telegram.error})` : ''}; mükerrer mesaj riskine karşı otomatik tekrar yapılmadı, grupta kontrol edin.` : '',
+  ].filter(Boolean);
+  const status = retryable ? 'failed' : anySent ? 'sent' : allSkipped ? 'suppressed' : 'failed';
+  return { status, retry: retryable, anySent, error: notes.length ? notes.join(' ') : allSkipped ? 'Bildirim kanalı kurulu değil (e-posta/Telegram).' : null };
 }

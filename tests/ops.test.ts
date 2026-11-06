@@ -174,3 +174,47 @@ test('CSV import: mapping, errors with reasons, duplicates reported (not merged)
   assert.ok(out[1].errors.some((e) => e.includes('geçersiz tutar')));
   assert.equal(out[2].duplicateOf, 'example.com (dosyada satır 2)');
 });
+
+test('digest channels: a channel that succeeded is never sent again; unclear Telegram is not retried; unclear e-mail only with the same key', async () => {
+  const { channelsToSend, digestOutcome } = await import('../lib/ops/digest');
+  const ch = (email: string, telegram: string) => ({ email: { state: email as never }, telegram: { state: telegram as never } });
+  assert.deepEqual(channelsToSend(ch('pending', 'pending')), ['email', 'telegram']);
+  assert.deepEqual(channelsToSend(ch('sent', 'failed')), ['telegram'], 'e-mail ok, Telegram refused → only Telegram again');
+  assert.deepEqual(channelsToSend(ch('failed', 'sent')), ['email'], 'Telegram ok, e-mail refused → only e-mail again');
+  assert.deepEqual(channelsToSend(ch('unknown', 'sent')), ['email'], 'unclear e-mail: asked again (same Idempotency-Key)');
+  assert.deepEqual(channelsToSend(ch('sent', 'unknown')), [], 'unclear Telegram: no blind retry');
+  assert.deepEqual(channelsToSend(ch('sent', 'skipped')), []);
+  const a = digestOutcome(ch('sent', 'failed'), 1);
+  assert.deepEqual([a.status, a.retry, a.anySent], ['failed', true, true]);
+  const b = digestOutcome(ch('sent', 'unknown'), 1);
+  assert.deepEqual([b.status, b.retry, b.anySent], ['sent', false, true]);
+  assert.ok(b.error?.includes('Telegram sonucu belirsiz') && b.error.includes('otomatik tekrar yapılmadı'));
+  const c = digestOutcome(ch('failed', 'failed'), 3);
+  assert.deepEqual([c.status, c.retry, c.anySent], ['failed', false, false], 'no more than 3 attempts');
+  assert.equal(digestOutcome(ch('skipped', 'skipped'), 1).status, 'suppressed');
+  assert.equal(digestOutcome(ch('sent', 'sent'), 1).status, 'sent');
+});
+
+test('external e-mail: built only from the typed fields and the public company profile — no service data can get in', async () => {
+  const { forwardEmail, forwardDefaults } = await import('../lib/ops/forward');
+  const { SAMPLE_ISSUER } = await import('./fixtures-documents');
+  // sentinels that must never appear: cost, price, profit, internal note, access details, provider
+  const s = svc({ name: 'ornek.com', cost_amount: '777.77', price_amount: '999.99', note: 'GIZLI-NOT-SENTINEL', details: { panel_user: 'ADMIN-SENTINEL', panel_password: 'PASS-SENTINEL' }, panel_url: 'https://panel.sentinel.example' });
+  const d = forwardDefaults({ serviceName: s.name, target: '2026-12-31', offset: 7, clientName: 'Örnek A.Ş.' });
+  const mail = forwardEmail({ issuer: SAMPLE_ISSUER, subject: d.subject, body: d.text, attachmentNames: ['bilgi.pdf'] });
+  const all = JSON.stringify([d, mail]);
+  for (const sentinel of ['777.77', '999.99', 'GIZLI-NOT-SENTINEL', 'ADMIN-SENTINEL', 'PASS-SENTINEL', 'panel.sentinel']) assert.ok(!all.includes(sentinel), sentinel);
+  assert.ok(mail.html.includes('ornek.com hizmetinizin') && mail.html.includes('Ek: bilgi.pdf'));
+  // by signature: forwardEmail / forwardDefaults take no service object
+  assert.equal(forwardEmail.length, 1);
+  assert.deepEqual(Object.keys({ serviceName: '', target: null, offset: 0, clientName: null }).sort(), ['clientName', 'offset', 'serviceName', 'target']);
+});
+
+test('v23 only guards forward rows and revokes TRUNCATE on ops_notifications (no data change)', async () => {
+  const fs = await import('node:fs');
+  const sql = fs.readFileSync('supabase/upgrade-v23-ops-forward-guard.sql', 'utf8').replace(/--.*$/gm, '').toLowerCase();
+  assert.match(sql, /create trigger ops_notifications_forward_guard before insert or update or delete on public\.ops_notifications/);
+  assert.match(sql, /revoke truncate on public\.ops_notifications from anon, authenticated;/);
+  assert.match(sql, /current_user <> 'service_role'/);
+  assert.ok(!/delete from|truncate table|drop table|alter table|update public\./.test(sql), 'no data or table change');
+});

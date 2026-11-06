@@ -7,7 +7,7 @@ import { newKey } from '@/lib/documents/client';
 import { parseAddresses } from '@/lib/documents/mail';
 import type { Contact, DocumentRow } from '@/lib/ops/data';
 import type { Service } from '@/lib/ops/model';
-import { customerReminderText } from '@/lib/ops/reminders';
+import { forwardDefaults } from '@/lib/ops/forward';
 
 /**
  * "E-postayla ilet": a reminder goes out of the team ONLY from here.
@@ -35,7 +35,8 @@ export function ForwardDialog({ service, target, offset, clientName, contacts, d
   reminderId?: string | null;
   onClose: () => void; onSent: () => void;
 }) {
-  const initial = target ? customerReminderText(service, target, offset, clientName) : { subject: `${service.name} hakkında`, text: `Merhaba${clientName ? ` ${clientName}` : ''},\n\n\n\nYoca` };
+  // only the service NAME, the date and the customer name go into the starting text
+  const initial = forwardDefaults({ serviceName: service.name, target, offset, clientName });
   const [to, setTo] = useState('');
   const [cc, setCc] = useState('');
   const [subject, setSubject] = useState(initial.subject);
