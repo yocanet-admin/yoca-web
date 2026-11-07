@@ -7,7 +7,7 @@ import { sendMail } from '@/lib/documents/emailSend';
 import { readOpsSettings } from '@/lib/ops/serverSettings';
 import { realSendAllowed } from '@/lib/ops/settings';
 import { addDays, istanbulDay, KIND_LABEL, payState, renewState, type PeriodRow, type Payment, type Service } from '@/lib/ops/model';
-import { buildItems as buildFinItems, type Expense, type FinPayment, type FinPeriod } from '@/lib/fin/model';
+import { buildItems as buildFinItems, digestExpenseItems, digestUntil, type Expense, type FinPayment, type FinPeriod } from '@/lib/fin/model';
 import { formatMinor } from '@/lib/ops/money';
 import { offsetText, planReminders, type PlannedReminder } from '@/lib/ops/reminders';
 import { buildOpsDigest, channelsToSend, cronRunResult, digestOutcome, digestRunAction, OPS_SITE, type DigestChannels, type DigestLine } from '@/lib/ops/digest';
@@ -229,14 +229,13 @@ async function expenseDigestLines(db: NonNullable<ReturnType<typeof getSupabaseA
     const rollError = roll.error ? `dönemler oluşturulamadı: ${roll.error.message}` : null;
     const [exp, per, pay] = await Promise.all([
       db.from('fin_expenses').select('*').is('archived_at', null),
-      db.from('fin_periods').select('*').eq('status', 'open').lte('due_on', addDays(today, 7)),
+      db.from('fin_periods').select('*').eq('status', 'open').lte('due_on', digestUntil(today)),
       db.from('fin_payments').select('*').is('voided_at', null),
     ]);
     const readError = exp.error ?? per.error ?? pay.error;
     if (readError) return { lines: [], rolled, error: [rollError, `okunamadı: ${readError.message}`].filter(Boolean).join(' · ') };
     const items = buildFinItems({ expenses: (exp.data ?? []) as Expense[], periods: (per.data ?? []) as FinPeriod[], payments: (pay.data ?? []) as FinPayment[], opsPeriods: [], opsPayments: [], parties: [], today });
-    const lines = items
-      .filter((it) => ['overdue', 'pending', 'partial', 'unknown'].includes(it.summary.state))
+    const lines = digestExpenseItems(items, today)
       .map((it) => {
         const late = it.summary.state === 'overdue';
         const left = it.summary.remaining !== null && it.currency ? formatMinor(it.summary.remaining, it.currency) : 'tutar bilinmiyor';

@@ -43,12 +43,17 @@ Finans kullanıcısı Operasyon tahsilatında hizmet adı/türü, müşterinin g
 - Alanlar: açıklama, kategori, isteğe bağlı kayıtlı müşteri (veya serbest metin ödeyen), ait olduğu dönem (ay), isteğe bağlı vade, beklenen tutar (boş = “Tutar bekleniyor”, asla 0), para birimi, tahsilat hesabı/yöntemi, sorumlu, not, belgeler.
 - Tahsilat türleri: tahsilat, müşteriye iade, düzeltme (+/−). Kısmi ve fazla tahsilat desteklenir. Tarih gerçek tahsilat tarihidir; ileri tarih kabul edilmez, uydurulmaz.
 - Tahsilatlar düzenlenmez, silinmez; yanlış kayıt gerekçeyle iptal edilir (kim/ne zaman/neden kalır).
-- Geçerli tahsilatı olan alacağın tutarı ve para birimi değiştirilemez; alacak yalnızca geçerli tahsilatı yokken gerekçeyle iptal edilir, silinmez.
+- **Yanlış girilen beklenen tutar** tahsilattan sonra da düzeltilebilir, ama yalnızca gerekçeyle (alacak sayfasında “Beklenen tutarı düzelt”). Tahsilatlar silinmez ve değişmez; veritabanı kimin, ne zaman, hangi gerekçeyle düzelttiğini saklar, işlem geçmişi eski → yeni tutarı gösterir. Her düzeltme kendi gerekçesini ister; gerekçe sonradan değiştirilemez. Tahsilattan sonra tutar boşaltılamaz ve para birimi değiştirilemez (yanlış para biriminde açılmışsa yeni alacak açılır, yanlış tahsilatlar gerekçeyle iptal edilir).
+- Alacak yalnızca geçerli tahsilatı yokken gerekçeyle iptal edilir, silinmez.
 - Belgeler özel `fin-docs` deposunda (`receivable/`, `collection/`, `ops_receivable/`, `ops_collection/` yolları), üzerine yazma ve silme yok, 60 saniyelik bağlantı.
 
 ## Yetki
 
 Finans sorumlusu (`admin_users.role = 'finance'`) Genel bakış, Gelirler ve Giderler’i yönetir: kayıt ekleme, düzenleme, tahsilat/ödeme, iade, iptal, belge, CSV. Onay veya tutar sınırı yoktur. Kural menüde değil veritabanındadır (RLS: `can_finance()`, korumalı tetikleyiciler, `security definer` fonksiyonlar) ve yönetici API’leri (`requireAdmin`) finans oturumunu reddeder. Operasyon tabloları, CRM, ayarlar/şirket sırları, kullanıcı/rol yönetimi, site içerikleri ve genel işlem geçmişi kapalıdır. Finans geçmişi (`fin_audit`) ilgili kayıtlardaki **tüm** işlemleri (yönetici dahil) gösterir; Operasyon ödemelerinde yalnızca ödeme alanları.
+
+## Testler (yerel)
+
+Tarihe bağlı testler yerel uygulamayı sabit saatle (libfaketime, `2026-11-07 09:00 UTC` = 12:00 İstanbul) çalıştırır; uygulama kodu değişmez. Ekip özetinin 7 günlük penceresi birim testinde İstanbul gece yarısı sınırlarıyla doğrulanır (`digestExpenseItems`, `digestUntil`).
 
 ## Migration
 

@@ -88,7 +88,7 @@ export function ReceivableForm({ initial, clients, amountLocked = false, busy = 
           </label>
         </div>
       </div>
-      {amountLocked && <p className="text-[12px] text-subtle">Geçerli tahsilatı olduğu için tutar ve para birimi değiştirilemez; fark için düzeltme veya iade kaydı ekleyin, yanlış tahsilatı gerekçeyle iptal edin.</p>}
+      {amountLocked && <p className="text-[12px] text-subtle">Geçerli tahsilatı olduğu için tutar burada değiştirilmez: yanlış girilen beklenen tutarı sayfadaki “Beklenen tutarı düzelt” ile gerekçe yazarak düzeltin (tahsilatlar değişmez, eski → yeni tutar geçmişte kalır). Para birimi tahsilattan sonra değiştirilemez.</p>}
       <div className="grid gap-3 sm:grid-cols-3">
         <label className={label}>Tahsilat hesabı<input className={field} value={account} onChange={(e) => setAccount(e.target.value)} maxLength={200} placeholder="ör. şirket TL hesabı" /></label>
         <label className={label}>Yöntem

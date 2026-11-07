@@ -122,7 +122,9 @@ test('v26 migration: receivables + collections guarded, Operasyon collections th
   assert.match(sql, /create table if not exists public\.fin_receivables/);
   assert.match(sql, /amount numeric\(14, 2\) check \(amount is null or amount > 0\)/);
   assert.match(sql, /Tahsilat kaydı değiştirilemez/);
-  assert.match(sql, /Geçerli tahsilatı olan alacağın tutarı veya para birimi değiştirilemez/);
+  assert.match(sql, /Tahsilatı olan alacağın beklenen tutarını düzeltmek için gerekçe gerekli/);
+  assert.match(sql, /new\.amount_corrected_by := public\.doc_actor\(\)/);
+  assert.match(sql, /Geçerli tahsilatı olan alacağın para birimi değiştirilemez/);
   assert.doesNotMatch(sql, /for delete to authenticated/);
   assert.match(sql, /values \(per\.id, per\.service_id, 'in', p_kind/);
   assert.match(sql, /where id = p_payment and direction = 'in' and voided_at is null/);

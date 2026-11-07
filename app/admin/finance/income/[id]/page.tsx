@@ -7,11 +7,11 @@ import { Badge, Details, Flash, PageHead, field, fmtDate, fmtDateTime, small } f
 import { ReceivableForm } from '@/components/admin/fin/ReceivableForm';
 import { FinDocs, FinHistory, PaymentForm, PaymentList, SourceBadge, money } from '@/components/admin/fin/parts';
 import { monthName } from '@/components/admin/fin/MonthPicker';
-import { addCollection, cancelReceivable, loadIncome, updateReceivable, voidCollection, type IncomeData } from '@/lib/fin/incomeData';
+import { addCollection, cancelReceivable, correctReceivableAmount, loadIncome, updateReceivable, voidCollection, type IncomeData } from '@/lib/fin/incomeData';
 import { buildIncomeItems, incomeStateText } from '@/lib/fin/income';
 import { FIN_STATE_TONE, METHOD_LABEL } from '@/lib/fin/model';
 import { dueText, istanbulDay } from '@/lib/ops/model';
-import { formatAmount } from '@/lib/ops/money';
+import { formatAmount, minorToDb, parseAmount } from '@/lib/ops/money';
 
 /**
  * Yoca Finans — one manual receivable: expected amount vs. real collections.
@@ -27,6 +27,9 @@ export default function ReceivablePage() {
   const [flash, setFlash] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [why, setWhy] = useState('');
+  const [fixAmount, setFixAmount] = useState('');
+  const [fixWhy, setFixWhy] = useState('');
+  const [fixing, setFixing] = useState(false);
   const today = istanbulDay();
   const reload = useCallback(() => loadIncome().then(setData), []);
   useEffect(() => { void reload(); }, [reload]);
@@ -59,6 +62,7 @@ export default function ReceivablePage() {
         {s.state === 'over' && s.remaining !== null && <p className="text-yellow-200">Beklenenden {money(-s.remaining, rec.currency)} fazla tahsil edildi. Tutar değiştirilmedi; gerekiyorsa müşteriye iade veya düzeltme kaydı ekleyin.</p>}
         <p className="text-subtle">{[rec.pay_account && `Hesap: ${rec.pay_account}`, rec.pay_method && `Yöntem: ${METHOD_LABEL[rec.pay_method] ?? rec.pay_method}`, rec.owner_email && `Sorumlu: ${rec.owner_email}`].filter(Boolean).join(' · ') || 'Hesap / yöntem girilmedi.'}</p>
         {rec.note && <p className="whitespace-pre-line">{rec.note}</p>}
+        {rec.amount_corrected_at && rec.amount_note && <p className="text-[12px] text-subtle">Beklenen tutar düzeltildi: {rec.amount_corrected_by ?? '—'} · {fmtDateTime(rec.amount_corrected_at)} · Gerekçe: {rec.amount_note} (önceki tutar işlem geçmişinde)</p>}
         <p className="text-[12px] text-subtle">Ekleyen: {rec.created_by ?? '—'} · {fmtDateTime(rec.created_at)}{cancelled ? ` · İptal: ${rec.cancelled_by ?? '—'} · ${fmtDateTime(rec.cancelled_at)} · Gerekçe: ${rec.cancel_reason ?? ''}` : ''}</p>
         {!cancelled && (cancelling ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -77,6 +81,29 @@ export default function ReceivablePage() {
           if (e) { setFlash({ tone: 'bad', text: e }); return; }
           setEditing(false); setFlash({ tone: 'ok', text: 'Kaydedildi. Değişiklik işlem geçmişinde görünür.' }); void reload();
         }} />
+      )}
+
+      {!cancelled && hasValid && (
+        <section className="grid gap-2 border border-line p-3 text-[13px]" aria-label="Beklenen tutarı düzelt">
+          <h2 className="text-[14px] font-extrabold">Beklenen tutarı düzelt</h2>
+          <p className="text-[12px] text-subtle">Alacak tutarı yanlış girildiyse burada gerekçeyle düzeltin. Tahsilatlar silinmez veya değişmez; eski → yeni tutar, kim ve ne zaman işlem geçmişinde kalır. Para birimi tahsilattan sonra değiştirilemez.</p>
+          {fixing ? (
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="grid gap-1 text-[12px] font-semibold text-muted">Doğru tutar ({rec.currency})<input className={`${field} w-40`} inputMode="decimal" value={fixAmount} onChange={(e) => setFixAmount(e.target.value)} placeholder="0,00" /></label>
+              <label className="grid flex-1 gap-1 text-[12px] font-semibold text-muted">Gerekçe (zorunlu)<input className={field} value={fixWhy} onChange={(e) => setFixWhy(e.target.value)} maxLength={500} placeholder="ör. sözleşmede 1.200 TL, 1.000 TL yazılmıştı" /></label>
+              <button type="button" className="admin-btn" disabled={fixWhy.trim().length < 3 || !parseAmount(fixAmount) || (parseAmount(fixAmount) ?? BigInt(0)) <= BigInt(0)} onClick={async () => {
+                const m = parseAmount(fixAmount);
+                if (!m || m <= BigInt(0)) return;
+                const e = await correctReceivableAmount(rec.id, minorToDb(m), fixWhy.trim());
+                if (e) { setFlash({ tone: 'bad', text: e }); return; }
+                setFixing(false); setFixAmount(''); setFixWhy('');
+                setFlash({ tone: 'ok', text: 'Beklenen tutar gerekçeyle düzeltildi; tahsilatlar değişmedi.' });
+                void reload();
+              }}>Düzeltmeyi kaydet</button>
+              <button type="button" className={small} onClick={() => setFixing(false)}>Vazgeç</button>
+            </div>
+          ) : <button type="button" className={`${small} justify-self-start`} onClick={() => { setFixing(true); setFixAmount(rec.amount ? rec.amount.replace('.', ',') : ''); setFixWhy(''); }}>Tutarı düzelt</button>}
+        </section>
       )}
 
       <section className="grid gap-3">

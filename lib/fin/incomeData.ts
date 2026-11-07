@@ -70,6 +70,16 @@ export async function updateReceivable(id: string, patch: Partial<ReceivableInpu
   return error ? finFriendly(error.message) : null;
 }
 
+/**
+ * Correct a wrongly entered expected amount. After a valid collection the
+ * database requires a new reason; collections are not touched and the history
+ * keeps the old → new amount, who and when.
+ */
+export async function correctReceivableAmount(id: string, amount: string, reason: string): Promise<string | null> {
+  const { error } = await db().from('fin_receivables').update({ amount, amount_note: reason }).eq('id', id).eq('status', 'open');
+  return error ? finFriendly(error.message) : null;
+}
+
 export async function cancelReceivable(id: string, reason: string): Promise<string | null> {
   const { error } = await db().from('fin_receivables').update({ status: 'cancelled', cancel_reason: reason }).eq('id', id).eq('status', 'open');
   return error ? finFriendly(error.message) : null;

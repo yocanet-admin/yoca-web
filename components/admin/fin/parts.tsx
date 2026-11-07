@@ -188,7 +188,7 @@ const FIELD_LABEL: Record<string, string> = {
   pay_account: 'ödeme hesabı', pay_method: 'yöntem', vendor_name: 'firma', provider_id: 'kayıtlı firma', note: 'not', archived_at: 'arşiv',
   status: 'durum', cancel_reason: 'iptal gerekçesi', voided_at: 'iptal', void_reason: 'iptal gerekçesi', auto_debit: 'otomatik talimat',
   paid_on: 'ödeme tarihi', kind: 'tür', reference: 'referans', method: 'yöntem',
-  period_month: 'dönem', payer_name: 'ödeyen', client_id: 'müşteri',
+  period_month: 'dönem', payer_name: 'ödeyen', client_id: 'müşteri', amount_note: 'tutar düzeltme gerekçesi',
 };
 const QUIET = new Set(['updated_at', 'cancelled_at', 'cancelled_by', 'voided_by', 'archived_by']);
 const short = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : String(v).length > 40 ? `${String(v).slice(0, 40)}…` : String(v));

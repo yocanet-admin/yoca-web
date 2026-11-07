@@ -53,6 +53,9 @@ export interface Receivable {
   pay_account: string | null;
   pay_method: string | null;
   note: string | null;
+  amount_note?: string | null;          // reason of the last amount correction
+  amount_corrected_by?: string | null;
+  amount_corrected_at?: string | null;
   status: 'open' | 'cancelled';
   cancel_reason: string | null;
   cancelled_by: string | null;

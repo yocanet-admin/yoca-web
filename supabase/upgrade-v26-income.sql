@@ -15,8 +15,12 @@
 --                       never edited; a wrong record is voided with a reason
 --    Status (bekliyor / kısmen / tahsil edildi / fazla / gecikti) is NOT stored:
 --    it is computed from the expected amount and the VALID collections.
---    An amount cannot change once a valid collection exists; a receivable is
---    cancelled with a reason (only without valid collections), never deleted.
+--    A wrongly entered expected amount can be corrected after collections only
+--    WITH a reason: the collections are not touched, the database stores who /
+--    when / why (amount_corrected_by / _at / amount_note) and audit_log keeps
+--    the old → new amount. The currency cannot change once a valid collection
+--    exists. A receivable is cancelled with a reason (only without valid
+--    collections), never deleted.
 --
 -- 2. Operasyon customer collections, seen from Finans — no copies:
 --      fin_ops_receivables  read-only: service name / kind, customer display
@@ -67,6 +71,9 @@ create table if not exists public.fin_receivables (
   pay_account text check (pay_account is null or length(pay_account) <= 200),     -- collecting account
   pay_method text check (pay_method is null or pay_method in ('bank_transfer', 'card', 'cash', 'direct_debit', 'other')),
   note text check (note is null or length(note) <= 4000),
+  amount_note text check (amount_note is null or length(amount_note) <= 500),   -- reason of the last amount correction
+  amount_corrected_by text,
+  amount_corrected_at timestamptz,
   status text not null default 'open' check (status in ('open', 'cancelled')),
   cancel_reason text,
   cancelled_by text,
@@ -75,6 +82,9 @@ create table if not exists public.fin_receivables (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table public.fin_receivables add column if not exists amount_note text check (amount_note is null or length(amount_note) <= 500);
+alter table public.fin_receivables add column if not exists amount_corrected_by text;
+alter table public.fin_receivables add column if not exists amount_corrected_at timestamptz;
 create index if not exists idx_fin_receivables_month on public.fin_receivables (period_month);
 create index if not exists idx_fin_receivables_client on public.fin_receivables (client_id);
 
@@ -115,6 +125,7 @@ begin
     new.updated_at := now();
     new.status := 'open';
     new.cancel_reason := null; new.cancelled_by := null; new.cancelled_at := null;
+    new.amount_note := null; new.amount_corrected_by := null; new.amount_corrected_at := null;
     return new;
   end if;
   new.created_by := old.created_by;
@@ -125,13 +136,29 @@ begin
     if public.fin_valid_collected(old.id) then raise exception 'Geçerli tahsilatı olan alacak iptal edilemez; önce tahsilatı gerekçeyle iptal edin.' using errcode = '42501'; end if;
     if length(btrim(coalesce(new.cancel_reason, ''))) < 3 then raise exception 'İptal gerekçesi gerekli.' using errcode = '23514'; end if;
     if (new.amount, new.currency) is distinct from (old.amount, old.currency) then raise exception 'İptal ederken tutar değiştirilemez.' using errcode = '42501'; end if;
+    new.amount_note := old.amount_note; new.amount_corrected_by := old.amount_corrected_by; new.amount_corrected_at := old.amount_corrected_at;
     new.cancelled_by := public.doc_actor();
     new.cancelled_at := now();
     return new;
   end if;
   new.cancel_reason := null; new.cancelled_by := null; new.cancelled_at := null;
-  if (new.amount, new.currency) is distinct from (old.amount, old.currency) and public.fin_valid_collected(old.id) then
-    raise exception 'Geçerli tahsilatı olan alacağın tutarı veya para birimi değiştirilemez; tahsilatı gerekçeyle iptal edin ya da düzeltme kaydı ekleyin.' using errcode = '42501';
+  if new.currency is distinct from old.currency and public.fin_valid_collected(old.id) then
+    raise exception 'Geçerli tahsilatı olan alacağın para birimi değiştirilemez (tahsilatlar o para biriminde); yanlışsa alacağı yeni para birimiyle yeniden açın.' using errcode = '42501';
+  end if;
+  if new.amount is distinct from old.amount then
+    if public.fin_valid_collected(old.id) then
+      -- correcting a wrongly entered amount after collections: allowed only with a NEW reason; collections are not touched
+      if new.amount is null then raise exception 'Tahsilatı olan alacağın tutarı boşaltılamaz.' using errcode = '23514'; end if;
+      if length(btrim(coalesce(new.amount_note, ''))) < 3 or new.amount_note is not distinct from old.amount_note then
+        raise exception 'Tahsilatı olan alacağın beklenen tutarını düzeltmek için gerekçe gerekli.' using errcode = '23514';
+      end if;
+    end if;
+    new.amount_note := nullif(btrim(coalesce(new.amount_note, '')), '');
+    new.amount_corrected_by := public.doc_actor();
+    new.amount_corrected_at := now();
+  else
+    -- the reason belongs to an amount change; it cannot be rewritten afterwards
+    new.amount_note := old.amount_note; new.amount_corrected_by := old.amount_corrected_by; new.amount_corrected_at := old.amount_corrected_at;
   end if;
   return new;
 end $$;

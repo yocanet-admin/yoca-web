@@ -260,3 +260,29 @@ test('v25 migration: roles, guards, no delete policy, private bucket, ops append
   assert.match(sql, /create or replace view public\.fin_audit/);
   assert.match(sql, /x\.direction = 'out'/);
 });
+
+test('digest window: Istanbul day, overdue + 7 days inclusive, boundaries at Istanbul midnight', async () => {
+  const { digestExpenseItems, digestUntil } = await import('../lib/fin/model');
+  const { istanbulDay } = await import('../lib/ops/model');
+  // 23:59:59 in Istanbul on 7 Nov (20:59:59 UTC) is still 7 Nov; one second later it is 8 Nov
+  const before = istanbulDay(new Date('2026-11-07T20:59:59Z'));
+  const after = istanbulDay(new Date('2026-11-07T21:00:00Z'));
+  assert.equal(before, '2026-11-07');
+  assert.equal(after, '2026-11-08');
+  assert.equal(istanbulDay(new Date('2026-11-07T00:30:00Z')), '2026-11-07'); // 03:30 Istanbul
+  assert.equal(digestUntil(before), '2026-11-14');
+  assert.equal(digestUntil(after), '2026-11-15');
+  assert.equal(digestUntil('2026-12-28'), '2027-01-04');                     // across the year end
+  const one = (id: string, due: string, extra: Partial<FinPeriod> = {}) => per({ id, expense_id: 'o', due_on: due, starts_on: null, ends_on: null, amount: '100', ...extra });
+  const items = (today: string) => buildItems({
+    expenses: [exp({ id: 'o', title: 'ÖRNEK', kind: 'once', recurrence: null })],
+    periods: [one('late', '2026-10-30'), one('d7', '2026-11-14'), one('d8', '2026-11-15'), one('d9', '2026-11-16'),
+      one('rev', '2026-11-02', { review_note: 'Ödendi, tarih yok' }), one('unk', '2026-11-10', { amount: null }), one('paid', '2026-11-12')],
+    payments: [pay({ period_id: 'paid', amount: '100' })], opsPayments: [], opsPeriods: [], parties: [], today,
+  });
+  const ids = (today: string) => digestExpenseItems(items(today), today).map((i) => i.periodId).sort();
+  // 7 Nov: due 14 Nov (7 days) listed, 15 Nov (8 days) not; overdue and unknown listed; "review" and paid never
+  assert.deepEqual(ids(before), ['d7', 'late', 'unk']);
+  // one second later (8 Nov in Istanbul): 15 Nov enters, 16 Nov not yet
+  assert.deepEqual(ids(after), ['d7', 'd8', 'late', 'unk']);
+});
