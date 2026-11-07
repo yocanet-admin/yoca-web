@@ -80,6 +80,24 @@ test('overview: per currency, never mixed', () => {
   assert.deepEqual(o.remainingThisMonth, { TRY: BigInt(600000 + 5000000), USD: BigInt(4000) });
 });
 
+test('review: paid in the source without a date — neither paid nor owed nor late, kept separately', () => {
+  const items = buildItems({
+    expenses: [exp({ id: 'w', title: 'Su', category: 'utilities', amount: null })],
+    periods: [per({ id: 'pw', expense_id: 'w', due_on: '2026-11-02', amount: '1075.00', review_note: 'Excel: Ödendi, tarih yok' })],
+    payments: [], opsPayments: [], opsPeriods: [], parties: [], today: TODAY,
+  });
+  assert.equal(items[0].summary.state, 'review');
+  const o = overview(items, TODAY);
+  assert.deepEqual(o.review, { TRY: BigInt(107500) });
+  assert.equal(o.reviewCount, 1);
+  assert.deepEqual(o.overdue, {});
+  assert.deepEqual(o.remainingThisMonth, {});
+  assert.deepEqual(o.paidThisMonth, {});
+  // once the real payment is recorded it is simply paid
+  const paid = buildItems({ expenses: [exp({ id: 'w', amount: null })], periods: [per({ id: 'pw', expense_id: 'w', due_on: '2026-11-02', amount: '1075.00', review_note: 'x' })], payments: [pay({ period_id: 'pw', amount: '1075', paid_on: '2026-11-05' })], opsPayments: [], opsPeriods: [], parties: [], today: TODAY });
+  assert.equal(paid[0].summary.state, 'paid');
+});
+
 test('filters: category, state, source, provider, date range, text', () => {
   const items = sample();
   assert.equal(filterItems(items, { category: 'ops' }).length, 1);

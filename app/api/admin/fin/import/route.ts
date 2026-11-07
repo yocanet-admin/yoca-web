@@ -68,7 +68,8 @@ export async function POST(request: NextRequest) {
     const e = byKey.get(r.key);
     const state = !e ? 'new' : e.row_hash === r.hash ? 'already' : 'changed';
     const sameName = ((exps.data ?? []) as Array<{ id: string; title: string }>).filter((x) => norm(x.title) === norm(r.name) && (!e || x.id !== e.expense_id)).map((x) => x.id);
-    const opsMatches = r.action === 'possible_duplicate' ? opsServices.filter((o) => ['domain', 'hosting', 'vps', 'server', 'email', 'ssl', 'saas'].includes(o.service_kind)).map((o) => ({ name: o.service_name, kind: o.service_kind, provider: o.provider_name })) : [];
+    // candidates only (same kind of service); never treated as proof of the same cost
+    const opsMatches = r.action === 'possible_duplicate' ? opsServices.filter((o) => r.opsKinds.includes(o.service_kind)).map((o) => ({ name: o.service_name, kind: o.service_kind, provider: o.provider_name })) : [];
     return { ...r, state, sameName, opsMatches };
   });
 

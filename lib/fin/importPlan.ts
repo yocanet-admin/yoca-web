@@ -34,8 +34,8 @@ const slug = (s: string) => lower(s).replace(/[çğıöşü]/g, (c) => ({ ç: 'c
 
 export type ImportAction = 'create' | 'pending_payment' | 'needs_info' | 'suggestion' | 'possible_duplicate' | 'skip_blank';
 export const ACTION_LABEL: Record<ImportAction, string> = {
-  create: 'Gider ve dönem oluşturulacak', pending_payment: 'Oluşturulacak; ödeme tarihi bekleniyor', needs_info: 'Tutar veya tarih eksik',
-  suggestion: 'Gider tanımı önerisi (oluşturulmaz)', possible_duplicate: 'Olası mükerrer (Operasyon)', skip_blank: 'Boş satır (atlanır)',
+  create: 'Gider ve dönem oluşturulacak', pending_payment: 'Kaynakta “Ödendi”; ödeme tarihi bekleniyor', needs_info: 'Tutar veya tarih eksik',
+  suggestion: 'Gider tanımı önerisi (oluşturulmaz)', possible_duplicate: 'Olası eşleşme (Operasyon) — doğrulanmadı', skip_blank: 'Boş satır (atlanır)',
 };
 
 export interface SourceRow {
@@ -59,6 +59,7 @@ export interface PlanRow {
   action: ImportAction;
   recurrence: 'monthly' | null;
   variable: boolean;            // amount differs month to month: new periods open without an amount
+  opsKinds: string[];           // Operasyon service kinds this row MIGHT overlap with (never proof)
   amount: string | null;        // numeric(14,2) text, or null = "Tutar bekleniyor"
   amountNote: string | null;    // why the amount is missing ('boş', '?', '-')
   due: string | null;           // YYYY-MM-DD
@@ -92,14 +93,14 @@ export interface ImportPlan {
 
 /* ── Category and recurrence suggestions (by item name) ──────────── */
 
-const RULES: Array<{ re: RegExp; category: Category; fixedMonthly?: boolean; variable?: boolean; ops?: boolean }> = [
+const RULES: Array<{ re: RegExp; category: Category; fixedMonthly?: boolean; variable?: boolean; ops?: string[] }> = [
   { re: /kira/, category: 'rent', fixedMonthly: true },
   { re: /aidat/, category: 'utilities', fixedMonthly: true },
   { re: /internet|i̇nternet/, category: 'internet', fixedMonthly: true },
   { re: /muhasebe/, category: 'accounting', fixedMonthly: true },
   { re: /elektrik|(^|\s)su$|doğalgaz|ısıtma|soğutma/, category: 'utilities', variable: true },
-  { re: /domain|hosting|sunucu|veritaban/, category: 'software', ops: true },
-  { re: /e-posta|bulut/, category: 'software', ops: true },
+  { re: /domain|hosting|sunucu|veritaban/, category: 'software', ops: ['domain', 'hosting', 'vps', 'server', 'ssl'] },
+  { re: /e-posta|bulut/, category: 'software', ops: ['email', 'saas'] },
   { re: /maaş|sgk|personel/, category: 'personnel' },
   { re: /vergi|resm[iî]/, category: 'tax' },
   { re: /temizlik hizmeti|freelancer|dış hizmet/, category: 'services' },
@@ -115,10 +116,10 @@ const RULES: Array<{ re: RegExp; category: Category; fixedMonthly?: boolean; var
   { re: /telefon|gsm/, category: 'phone' },
 ];
 
-export function suggest(name: string): { category: Category; fixedMonthly: boolean; variable: boolean; ops: boolean } {
+export function suggest(name: string): { category: Category; fixedMonthly: boolean; variable: boolean; ops: boolean; opsKinds: string[] } {
   const n = lower(name);
   const r = RULES.find((x) => x.re.test(n));
-  return { category: r?.category ?? 'other', fixedMonthly: Boolean(r?.fixedMonthly), variable: Boolean(r?.variable), ops: Boolean(r?.ops) };
+  return { category: r?.category ?? 'other', fixedMonthly: Boolean(r?.fixedMonthly), variable: Boolean(r?.variable), ops: Boolean(r?.ops), opsKinds: r?.ops ?? [] };
 }
 
 const METHOD: Array<[RegExp, PlanRow['method']]> = [[/havale|eft/, 'bank_transfer'], [/kredi kart|banka kart|kart/, 'card'], [/nakit/, 'cash'], [/otomatik|talimat/, 'direct_debit']];
@@ -229,7 +230,7 @@ export function planImport(input: {
     let action: ImportAction;
     if (!s.name) { action = 'needs_info'; reasons.push('Gider adı boş.'); }
     else if (nameOnly && /^diğer gider\s*\d*$/.test(lower(s.name))) { action = 'skip_blank'; reasons.push('Boş “Diğer gider” satırı.'); }
-    else if (sug.ops) { action = 'possible_duplicate'; reasons.push('Operasyon’daki hizmet maliyetleriyle kesişebilir; kendiliğinden oluşturulmaz.'); }
+    else if (sug.ops) { action = 'possible_duplicate'; reasons.push('Operasyon’daki hizmet maliyetleriyle kesişebilir (olası eşleşme, doğrulanmadı); kendiliğinden oluşturulmaz veya birleştirilmez.'); }
     else if (nameOnly) { action = 'suggestion'; reasons.push('Yalnızca başlık var; aylık borç olarak açılmaz.'); }
     else if (!amount || !due) { action = 'needs_info'; reasons.push('Eksik bilgi tamamlanınca gider olarak açılabilir.'); }
     else if (status === 'paid') { action = 'pending_payment'; reasons.push('Kaynakta “Ödendi” ama ödeme tarihi yok: vade tarihi ödeme tarihi sayılmaz; dönem inceleme bekler.'); }
@@ -245,7 +246,7 @@ export function planImport(input: {
       row: s.row,
       key: `xlsx|${slug(input.sheet)}|${month ?? 'ay-belirsiz'}|r${s.row}|${slug(s.name)}`,
       hash: input.hash(payloadText),
-      name: s.name, category: sug.category, action, recurrence, variable: sug.variable,
+      name: s.name, category: sug.category, action, recurrence, variable: sug.variable, opsKinds: sug.opsKinds,
       amount, amountNote, due, status, statusText: s.status, method, methodText: s.method, note: notes,
       missing, reasons, payload: s,
     };

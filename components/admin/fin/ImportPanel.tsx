@@ -107,8 +107,14 @@ export function ImportPanel({ onApplied }: { onApplied: () => void }) {
             </div>
             <p className="text-[12px] text-subtle">{preview.totals.computed.knownCount} satırın tutarı biliniyor; tutarı eksik {preview.totals.computed.missingCount} satır toplamlara katılmadı (sıfır sayılmadı).</p>
             <div className="grid gap-1 border-t border-line pt-2">
-              <p>Aktarımdan sonra sistemde (yeni satırlar): {monthName(preview.month)} dönemleri <strong>{tl(preview.totals.system.periods)}</strong> · onaylı ödeme <strong>{tl(preview.totals.system.paidImported)}</strong> · inceleme bekleyen <strong>{tl(preview.totals.system.review)}</strong> · kalan <strong>{tl(preview.totals.system.remaining)}</strong></p>
-              {BigInt(preview.totals.system.review) > BigInt(0) && <p className="text-[12px] text-yellow-200">Fark: kaynakta ödendi {tl(preview.totals.computed.paid)}, sisteme aktarılan ödeme {tl(preview.totals.system.paidImported)}. {tl(preview.totals.system.review)} tutarındaki dönem ödeme tarihi gelene kadar “İnceleme bekliyor”dur; gecikmiş sayılmaz, özette listelenmez.</p>}
+              <p className="font-bold">Aktarımdan sonra sistemde ({monthName(preview.month)}, yeni satırlar)</p>
+              <dl className="grid gap-1 sm:grid-cols-2">
+                <div className="flex justify-between gap-3 border border-line px-2 py-1"><dt>Bilinen gider toplamı</dt><dd className="font-bold tabular-nums">{tl(preview.totals.system.periods)}</dd></div>
+                <div className="flex justify-between gap-3 border border-line px-2 py-1"><dt>Kaydedilmiş ödeme</dt><dd className="font-bold tabular-nums">{tl(preview.totals.system.paidImported)}</dd></div>
+                <div className="flex justify-between gap-3 border border-line px-2 py-1"><dt>Ödenmediği bilinen tutar</dt><dd className="font-bold tabular-nums">{tl(preview.totals.system.remaining)}</dd></div>
+                <div className="flex justify-between gap-3 border border-yellow-400/40 px-2 py-1"><dt>Kaynakta “Ödendi”, ödeme tarihi bekleniyor</dt><dd className="font-bold tabular-nums">{tl(preview.totals.system.review)}</dd></div>
+              </dl>
+              {BigInt(preview.totals.system.review) > BigInt(0) && <p className="text-[12px] text-yellow-200">{tl(preview.totals.system.review)} kaybolmaz ve ödeme sayılmaz: dönem ödeme tarihi girilene kadar “İnceleme bekliyor”dur; gecikme bildirimine girmez. Kaynaktaki “ödendi” ({tl(preview.totals.computed.paid)}) ile kaydedilmiş ödeme ({tl(preview.totals.system.paidImported)}) arasındaki fark budur.</p>}
             </div>
           </div>
 
@@ -117,7 +123,7 @@ export function ImportPanel({ onApplied }: { onApplied: () => void }) {
           <Group title="Tutarı veya tarihi eksik olanlar" note="Oluşturulmaz; bekleyenler listesinde kalır, finans sorumlusu tamamlayınca gider olarak açılır." rows={by(['needs_info'])} render={(r) => <span><strong>{r.name}</strong> — eksik: {r.missing.join(', ')}{r.status === 'empty' ? ' · ödeme durumu boş' : ''}{r.note ? ' · iç not var' : ''}</span>} />
           <Group title="Tekrar ayarı önerileri" rows={rows.filter((r) => r.recurrence || r.variable)} render={(r) => <span><strong>{r.name}</strong> — aylık{r.variable ? ', tutar sabit değil: yeni dönemler “Tutar bekleniyor” açılır' : r.amount ? `, sonraki dönemlerin başlangıç tutarı ${formatAmount(r.amount, 'TRY')} (geçmiş dönemler değişmez)` : ''}{r.action === 'needs_info' ? ' · önce eksik bilgi tamamlanmalı' : ''}</span>} />
           <Group title="Gider tanımı önerileri (oluşturulmaz)" note="Yalnızca başlık var; Excel’de bulunduğu için aylık borç yapılmaz." rows={by(['suggestion'])} render={(r) => <span>{r.name} <span className="text-subtle">· öneri: {CATEGORY_LABEL[r.category]}</span></span>} />
-          <Group title="Olası mükerrerler" note="Kendiliğinden birleştirilmez veya oluşturulmaz." rows={rows.filter((r) => r.action === 'possible_duplicate' || r.sameName.length > 0)} render={(r) => <span><strong>{r.name}</strong>{r.opsMatches.length ? ` — Operasyon’da ${r.opsMatches.length} hizmet: ${r.opsMatches.map((o) => `${o.name} (${o.kind})`).join(', ')}` : r.action === 'possible_duplicate' ? ' — Operasyon maliyetleriyle kesişebilir' : ''}{r.sameName.length ? ' — aynı adla kayıtlı gider var' : ''}</span>} />
+          <Group title="Olası mükerrerler" note="Olası eşleşmedir, kanıt değildir: doğrulanmadan birleştirilmez, oluşturulmaz ve listeden düşmez." rows={rows.filter((r) => r.action === 'possible_duplicate' || r.sameName.length > 0)} render={(r) => <span><strong>{r.name}</strong>{r.action === 'possible_duplicate' ? (r.opsMatches.length ? ` — olası eşleşme (doğrulanmadı): Operasyon’daki ${r.opsMatches.map((o) => `${o.name} (${o.kind})`).join(', ')}` : ' — Operasyon’da bu türde hizmet yok; yine de doğrulanmadan oluşturulmaz') : ''}{r.sameName.length ? ' — aynı adla kayıtlı gider var' : ''}</span>} />
           <Group title="Atlanan boş satırlar" rows={by(['skip_blank'])} render={(r) => <span className="text-subtle">{r.name}</span>} />
 
           {preview.questions.length > 0 && <div className="border border-yellow-400/40 p-3 text-[13px]"><p className="font-bold">Gerekli bilgi</p>{preview.questions.map((q) => <p key={q}>{q}</p>)}</div>}
@@ -159,14 +165,14 @@ function PendingRows({ rows, reload }: { rows: ImportRowRecord[] | null; reload:
               <span className="ms-auto flex gap-2">
                 {r.expense_id ? <Link href={`/admin/expenses/${r.expense_id}${r.period_id ? `?period=${r.period_id}` : ''}`} className={small}>Gideri aç</Link>
                   : <Link href={`/admin/expenses/new?import=${r.id}`} className={small}>Gider olarak aç</Link>}
-                <button type="button" className={small} onClick={() => { setClosing(r.id); setWhy(''); }}>{r.changed_payload ? 'Gördüm' : 'Kapat'}</button>
+                <button type="button" className={small} onClick={() => { setClosing(r.id); setWhy(''); }}>{r.changed_payload ? 'Gördüm' : r.action === 'possible_duplicate' ? 'Doğrulayıp kapat' : 'Kapat'}</button>
               </span>
             </div>
             {r.changed_payload && <p className="text-[12px] text-yellow-200">Yeni dosyada değişen: {diffText(r.payload, r.changed_payload)} — mevcut finans kaydı değiştirilmedi; gerekiyorsa gider ekranından elle düzeltin.</p>}
             {Array.isArray((r.plan as { missing?: string[] }).missing) && (r.plan as { missing: string[] }).missing.length > 0 && r.action === 'needs_info' && <p className="text-[12px] text-subtle">Eksik: {(r.plan as { missing: string[] }).missing.join(', ')}</p>}
             {closing === r.id && (
               <div className="flex flex-wrap items-center gap-2">
-                <input className={`${field} max-w-md`} value={why} onChange={(e) => setWhy(e.target.value)} placeholder="Not (zorunlu), ör. Operasyon’da kayıtlı / bu ay yok" maxLength={300} />
+                <input className={`${field} max-w-md`} value={why} onChange={(e) => setWhy(e.target.value)} placeholder={r.action === 'possible_duplicate' ? 'Nasıl doğrulandı (zorunlu), ör. “Operasyon’daki X hizmetinin aynısı”' : 'Not (zorunlu), ör. bu ay yok'} maxLength={300} />
                 <button type="button" className="admin-btn" disabled={why.trim().length < 3} onClick={async () => { const e = await resolveImportRow(r.id, why.trim()); if (e) setErr(e); else { setClosing(null); reload(); } }}>Kaydet</button>
               </div>
             )}

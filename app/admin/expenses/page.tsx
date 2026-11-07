@@ -100,13 +100,14 @@ function ExpensesPage() {
         </>}
       />
 
-      <section aria-label="Genel bakış" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section aria-label="Genel bakış" className={`grid gap-3 sm:grid-cols-2 ${ov.reviewCount ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>
         <Card title={`Bu ay ödenen · ${monthName}`} totals={ov.paidThisMonth} sub="Geçerli ödeme kayıtları (iadeler düşülür)" />
         <Card title="Bu ay kalan" totals={ov.remainingThisMonth} sub="Bu ay vadesi gelen dönemlerden kalan" />
         <Card title="Geciken" totals={ov.overdue} sub={`${ov.overdueCount} dönem`} tone={ov.overdueCount ? 'bad' : undefined} />
+        {ov.reviewCount > 0 && <Card title="Ödendi işaretli · tarih bekleniyor" totals={ov.review} sub={`${ov.reviewCount} dönem · ödeme sayılmaz, gecikmeye girmez`} tone="warn" />}
         <Card title="Yaklaşan · 30 gün" totals={ov.upcoming} sub={`${ov.upcomingCount} dönem${ov.unknownCount ? ` · ${ov.unknownCount} dönemin tutarı bekleniyor` : ''}`} tone={ov.upcomingCount ? 'warn' : undefined} />
       </section>
-      <p className="-mt-3 text-[12px] text-subtle">Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Operasyon sağlayıcı ödemeleri tek kayıt olarak sayılır. Tutarı beklenen dönemler toplamlara katılmaz.{ov.reviewCount ? ` İnceleme bekleyen ${ov.reviewCount} dönem (${formatTotals(ov.review)}) ne ödenmiş ne kalan sayılır.` : ''}</p>
+      <p className="-mt-3 text-[12px] text-subtle">Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Operasyon sağlayıcı ödemeleri tek kayıt olarak sayılır. Tutarı beklenen dönemler toplamlara katılmaz.{ov.reviewCount ? ` Kaynakta “Ödendi” işaretli ama ödeme tarihi beklenen ${ov.reviewCount} dönem (${formatTotals(ov.review)}) ayrı gösterilir: ödeme sayılmaz, gecikmeye girmez.` : ''}</p>
 
       <div className="flex flex-wrap gap-2" role="tablist">
         {([['periods', 'Dönemler ve ödemeler'], ['defs', 'Gider tanımları'], ['import', 'Aktarım']] as const).map(([k, t]) => (
