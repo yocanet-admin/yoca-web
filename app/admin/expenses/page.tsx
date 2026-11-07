@@ -8,7 +8,7 @@ import { Remaining, SourceBadge, StateBadge, money } from '@/components/admin/fi
 import { ImportPanel } from '@/components/admin/fin/ImportPanel';
 import { loadFinance, type FinData } from '@/lib/fin/data';
 import {
-  CATEGORIES, CATEGORY_LABEL, CSV_HEADER, FIN_STATE_LABEL, RECURRENCE_LABEL, buildItems, csvRows, filterItems, overview,
+  CATEGORIES, CATEGORY_LABEL, CSV_HEADER, FIN_STATE_LABEL, MONTH_RE, RECURRENCE_LABEL, buildItems, csvRows, filterItems, listTotals, monthBounds, overview, shiftMonth,
   type Filter, type Item, type Totals,
 } from '@/lib/fin/model';
 import { toCsv } from '@/lib/ops/csv';
@@ -19,7 +19,11 @@ import { formatAmount, formatTotals } from '@/lib/ops/money';
  * Yoca — Giderler (overview + list). Recurring and one-off expenses together
  * with the Operasyon provider costs (shown once, "Kaynak: Operasyon").
  * Totals are per currency; a period without an amount is counted, not added.
- * Filters live in the URL (shareable): ?cat=&state=&prov=&from=&to=&src=&q=&view=
+ * Monthly figures and the list follow ONE selected month (?ay=YYYY-MM, default
+ * this month): a period belongs to the month of its due date, so periods created
+ * ahead of time for the next month never enter this month's totals. "Geciken"
+ * is the only point-in-time card (as of today, every month).
+ * Filters live in the URL (shareable): ?ay=&kapsam=tum&cat=&state=&prov=&from=&to=&src=&q=&view=
  */
 
 const BASE = '/admin/expenses';
@@ -54,26 +58,22 @@ function ExpensesPage() {
     router.replace(`${BASE}?${next.toString()}`, { scroll: false });
   };
   if (f.state === 'all') f.state = '';
+  const thisMonth = today.slice(0, 7);
+  const month = MONTH_RE.test(params.get('ay') ?? '') ? (params.get('ay') as string) : thisMonth;
+  // List scope: a custom due-date range if given, otherwise the selected month (or every month on request).
+  const custom = Boolean(f.from || f.to);
+  const allMonths = !custom && params.get('kapsam') === 'tum';
+  if (!custom && !allMonths) { const b = monthBounds(month); f.from = b.from; f.to = b.to; }
 
   const items = useMemo(() => (data?.ready ? buildItems({ ...data, today }) : []), [data, today]);
   const shown = useMemo(() => filterItems(items, f), [items, f.category, f.state, f.provider, f.from, f.to, f.source, f.q]); // eslint-disable-line react-hooks/exhaustive-deps
-  const ov = useMemo(() => overview(items, today), [items, today]);
+  const ov = useMemo(() => overview(items, today, month), [items, today, month]);
   const providers = useMemo(() => {
     const m = new Map<string, string>();
     for (const it of items) if (it.provider) m.set(it.providerId ?? it.provider, it.provider);
     return Array.from(m.entries()).sort((a, b) => a[1].localeCompare(b[1], 'tr'));
   }, [items]);
-  const shownTotals = useMemo(() => {
-    const amount: Totals = {}; const remaining: Totals = {};
-    let unknown = 0;
-    for (const it of shown) {
-      if (it.summary.state === 'cancelled') continue;
-      if (it.summary.expected === null || !it.currency) { unknown += 1; continue; }
-      amount[it.currency] = (amount[it.currency] ?? BigInt(0)) + it.summary.expected;
-      if (it.summary.remaining !== null && it.summary.remaining > BigInt(0)) remaining[it.currency] = (remaining[it.currency] ?? BigInt(0)) + it.summary.remaining;
-    }
-    return { amount, remaining, unknown };
-  }, [shown]);
+  const shownTotals = useMemo(() => listTotals(shown), [shown]);
 
   const exportCsv = () => {
     const blob = new Blob([toCsv(CSV_HEADER, csvRows(shown))], { type: 'text/csv;charset=utf-8' });
@@ -87,7 +87,10 @@ function ExpensesPage() {
   if (!data) return <p className="text-[14px] text-subtle">Yükleniyor…</p>;
   if (!data.ready) return <Flash tone="bad" message={data.error ?? 'Giderler yüklenemedi.'} />;
 
-  const monthName = new Intl.DateTimeFormat('tr-TR', { month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' }).format(new Date(`${today}T12:00:00Z`));
+  const monthText = (m: string) => new Intl.DateTimeFormat('tr-TR', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${m}-15T12:00:00Z`));
+  const monthName = monthText(month);
+  const goMonth = (m: string) => setParam({ ay: m === thisMonth ? '' : m, from: '', to: '', kapsam: '' });
+  const scopeText = custom ? `Vade ${f.from ? fmtDate(f.from) : '…'} – ${f.to ? fmtDate(f.to) : '…'}` : allMonths ? 'Tüm aylar' : monthName;
 
   return (
     <div className="grid gap-6">
@@ -100,14 +103,21 @@ function ExpensesPage() {
         </>}
       />
 
-      <section aria-label="Genel bakış" className={`grid gap-3 sm:grid-cols-2 ${ov.reviewCount ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>
-        <Card title={`Bu ay ödenen · ${monthName}`} totals={ov.paidThisMonth} sub="Geçerli ödeme kayıtları (iadeler düşülür)" />
-        <Card title="Bu ay kalan" totals={ov.remainingThisMonth} sub="Bu ay vadesi gelen dönemlerden kalan" />
-        <Card title="Geciken" totals={ov.overdue} sub={`${ov.overdueCount} dönem`} tone={ov.overdueCount ? 'bad' : undefined} />
+      <div className="flex flex-wrap items-center gap-2" aria-label="Dönem seçimi">
+        <span className="text-[12px] font-semibold text-muted">Dönem</span>
+        <button type="button" className={small} onClick={() => goMonth(shiftMonth(month, -1))} aria-label="Önceki ay">‹</button>
+        <input type="month" className={`${field} w-auto`} value={month} onChange={(e) => { if (MONTH_RE.test(e.target.value)) goMonth(e.target.value); }} aria-label="Ay" />
+        <button type="button" className={small} onClick={() => goMonth(shiftMonth(month, 1))} aria-label="Sonraki ay">›</button>
+        {month !== thisMonth && <button type="button" className={small} onClick={() => goMonth(thisMonth)}>Bu aya dön</button>}
+      </div>
+      <section aria-label="Genel bakış" className={`-mt-3 grid gap-3 sm:grid-cols-2 ${ov.reviewCount ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>
+        <Card title={`Gider · ${monthName}`} totals={ov.total} sub={`${ov.count} dönem${ov.unknownCount ? ` · ${ov.unknownCount} dönemin tutarı bekleniyor` : ''}`} />
+        <Card title={`Ödenen · ${monthName}`} totals={ov.paid} sub="Bu ayın dönemlerine kaydedilen geçerli ödemeler (iadeler düşülür)" />
+        <Card title={`Kalan · ${monthName}`} totals={ov.remaining} sub={`${ov.remainingCount} dönem`} />
         {ov.reviewCount > 0 && <Card title="Ödendi işaretli · tarih bekleniyor" totals={ov.review} sub={`${ov.reviewCount} dönem · ödeme sayılmaz, gecikmeye girmez`} tone="warn" />}
-        <Card title="Yaklaşan · 30 gün" totals={ov.upcoming} sub={`${ov.upcomingCount} dönem${ov.unknownCount ? ` · ${ov.unknownCount} dönemin tutarı bekleniyor` : ''}`} tone={ov.upcomingCount ? 'warn' : undefined} />
+        <Card title="Geciken · bugün itibarıyla" totals={ov.overdue} sub={`${ov.overdueCount} dönem · tüm aylar`} tone={ov.overdueCount ? 'bad' : undefined} />
       </section>
-      <p className="-mt-3 text-[12px] text-subtle">Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Operasyon sağlayıcı ödemeleri tek kayıt olarak sayılır. Tutarı beklenen dönemler toplamlara katılmaz.{ov.reviewCount ? ` Kaynakta “Ödendi” işaretli ama ödeme tarihi beklenen ${ov.reviewCount} dönem (${formatTotals(ov.review)}) ayrı gösterilir: ödeme sayılmaz, gecikmeye girmez.` : ''}</p>
+      <p className="-mt-3 text-[12px] text-subtle">Aylık kartlar yalnızca vadesi {monthName} içinde olan dönemleri sayar; sonraki ay için önceden açılan dönemler o ayın toplamına girer. Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Operasyon sağlayıcı ödemeleri tek kayıt olarak sayılır; vadesi bilinmeyen kayıtlar aylık toplamlara girmez. Tutarı beklenen dönemler toplamlara katılmaz.{ov.reviewCount ? ` Kaynakta “Ödendi” işaretli ama ödeme tarihi beklenen ${ov.reviewCount} dönem (${formatTotals(ov.review)}) ayrı gösterilir: ödeme sayılmaz, gecikmeye girmez.` : ''}</p>
 
       <div className="flex flex-wrap gap-2" role="tablist">
         {([['periods', 'Dönemler ve ödemeler'], ['defs', 'Gider tanımları'], ['import', 'Aktarım']] as const).map(([k, t]) => (
@@ -133,8 +143,8 @@ function ExpensesPage() {
                 <option value="">Tümü</option>{providers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
               </select>
             </label>
-            <label className="grid gap-1 text-[12px] font-semibold text-muted">Vade başı<input type="date" className={field} value={f.from} onChange={(e) => setParam({ from: e.target.value })} /></label>
-            <label className="grid gap-1 text-[12px] font-semibold text-muted">Vade sonu<input type="date" className={field} value={f.to} onChange={(e) => setParam({ to: e.target.value })} /></label>
+            <label className="grid gap-1 text-[12px] font-semibold text-muted">Vade başı<input type="date" className={field} value={f.from} onChange={(e) => setParam({ from: e.target.value, to: f.to ?? '', kapsam: '' })} /></label>
+            <label className="grid gap-1 text-[12px] font-semibold text-muted">Vade sonu<input type="date" className={field} value={f.to} onChange={(e) => setParam({ to: e.target.value, from: f.from ?? '', kapsam: '' })} /></label>
             <label className="grid gap-1 text-[12px] font-semibold text-muted">Kaynak
               <select className={field} value={f.source ?? ''} onChange={(e) => setParam({ src: e.target.value })}>
                 <option value="">Tümü</option><option value="fin">Giderler</option><option value="ops">Operasyon</option>
@@ -144,14 +154,17 @@ function ExpensesPage() {
           </section>
 
           <div className="flex flex-wrap gap-3 text-[13px]">
+            <span className="font-semibold">{scopeText}</span>
             <span className="text-subtle">{shown.length} dönem</span>
             <span>Tutar: <strong className="tabular-nums">{formatTotals(shownTotals.amount)}</strong></span>
             <span>Kalan: <strong className="tabular-nums">{formatTotals(shownTotals.remaining)}</strong></span>
+            {Object.keys(shownTotals.review).length > 0 && <span>Ödeme tarihi bekleyen: <strong className="tabular-nums">{formatTotals(shownTotals.review)}</strong></span>}
             {shownTotals.unknown > 0 && <span className="text-yellow-200">{shownTotals.unknown} dönemin tutarı bekleniyor (toplama katılmadı)</span>}
             <span className="ms-auto flex gap-2">
-              <button type="button" className={small} onClick={() => setParam({ from: `${today.slice(0, 7)}-01`, to: '', state: 'all' })}>Bu ay</button>
-              <button type="button" className={small} onClick={() => setParam({ state: 'overdue', from: '', to: '' })}>Gecikenler</button>
-              <button type="button" className={small} onClick={() => router.replace(BASE)}>Filtreleri temizle</button>
+              <button type="button" className={small} onClick={() => setParam({ from: '', to: '', kapsam: '' })}>Seçili ay</button>
+              <button type="button" className={small} onClick={() => setParam({ from: '', to: '', kapsam: 'tum' })}>Tüm aylar</button>
+              <button type="button" className={small} onClick={() => setParam({ state: 'overdue', from: '', to: '', kapsam: 'tum' })}>Gecikenler</button>
+              <button type="button" className={small} onClick={() => router.replace(month === thisMonth ? BASE : `${BASE}?ay=${month}`)}>Filtreleri temizle</button>
             </span>
           </div>
 
