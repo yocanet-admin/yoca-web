@@ -53,7 +53,7 @@ Finans sorumlusu (`admin_users.role = 'finance'`) Genel bakış, Gelirler ve Gid
 
 ## Testler (yerel)
 
-Tarihe bağlı testler yerel uygulamayı sabit saatle (libfaketime, `2026-11-07 09:00 UTC` = 12:00 İstanbul) çalıştırır; uygulama kodu değişmez. Ekip özetinin 7 günlük penceresi birim testinde İstanbul gece yarısı sınırlarıyla doğrulanır (`digestExpenseItems`, `digestUntil`).
+Kurulum ve çalıştırma: `tests/integration/README.md` (`setup-db.sh` → `run-finance.sh`; gerekenler: Node 20+, PostgreSQL 16, libfaketime, Playwright Chromium). Tarihe bağlı testler yerel uygulamayı sabit saatle (libfaketime, `2026-11-07 09:00 UTC` = 12:00 İstanbul) çalıştırır; uygulama kodu değişmez. Ekip özetinin 7 günlük penceresi birim testinde İstanbul gece yarısı sınırlarıyla doğrulanır (`digestExpenseItems`, `digestUntil`).
 
 ## Migration
 

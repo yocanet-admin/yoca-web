@@ -1,0 +1,12 @@
+import { createClient } from '@supabase/supabase-js';
+const GW = 'http://127.0.0.1:54331';
+const db = createClient(GW, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
+await db.auth.signInWithPassword({ email: 'finance@test.local', password: 'itest-finance-pw' });
+const { data: docs } = await db.from('fin_documents').select('entity, path').in('entity', ['expense', 'period', 'payment', 'ops_period', 'ops_payment']).limit(20);
+const one = (docs ?? [])[0];
+const { data: url } = one ? await db.storage.from('fin-docs').createSignedUrl(one.path, 60) : { data: null };
+const got = url?.signedUrl ? (await fetch(url.signedUrl)).status : 0;
+const id = crypto.randomUUID();
+const up = await db.storage.from('fin-docs').upload(`period/${id}/TEST-v26-uyum.pdf`, new Blob(['%PDF-1.4'], { type: 'application/pdf' }), { contentType: 'application/pdf' });
+const hist = await db.from('fin_audit').select('entity').in('entity', ['fin_expenses', 'fin_payments', 'fin_documents']).limit(5);
+console.log(JSON.stringify({ expenseDocs: (docs ?? []).length, readExisting: got, uploadExpensePath: up.error ? up.error.message : 'ok', expenseHistoryRows: (hist.data ?? []).length }));
