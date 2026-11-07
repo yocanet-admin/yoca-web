@@ -28,11 +28,11 @@ export function Badge({ tone = 'muted', children, title }: { tone?: Tone; childr
   return <span title={title} className={`inline-flex items-center whitespace-nowrap border px-1.5 py-0.5 text-[11px] font-bold ${TONE[tone]}`}>{children}</span>;
 }
 
-export function PageHead({ title, sub, actions }: { title: string; sub?: string; actions?: ReactNode }) {
+export function PageHead({ title, sub, actions, kicker = 'Operasyon' }: { title: string; sub?: string; actions?: ReactNode; kicker?: string }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
-        <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-subtle">Operasyon</p>
+        <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-subtle">{kicker}</p>
         <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>
         {sub && <p className="mt-1 max-w-[80ch] text-[13px] text-muted">{sub}</p>}
       </div>

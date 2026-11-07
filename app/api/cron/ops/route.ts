@@ -6,7 +6,9 @@ import { getNotifySettings } from '@/lib/cockpit/settings';
 import { sendMail } from '@/lib/documents/emailSend';
 import { readOpsSettings } from '@/lib/ops/serverSettings';
 import { realSendAllowed } from '@/lib/ops/settings';
-import { istanbulDay, KIND_LABEL, payState, renewState, type PeriodRow, type Payment, type Service } from '@/lib/ops/model';
+import { addDays, istanbulDay, KIND_LABEL, payState, renewState, type PeriodRow, type Payment, type Service } from '@/lib/ops/model';
+import { buildItems as buildFinItems, type Expense, type FinPayment, type FinPeriod } from '@/lib/fin/model';
+import { formatMinor } from '@/lib/ops/money';
 import { offsetText, planReminders, type PlannedReminder } from '@/lib/ops/reminders';
 import { buildOpsDigest, channelsToSend, digestOutcome, OPS_SITE, type DigestChannels, type DigestLine } from '@/lib/ops/digest';
 
@@ -137,7 +139,8 @@ export async function GET(request: NextRequest) {
     tone: 'amber', title: t.title, detail: `son gün ${t.due_on}${t.service_id && byId.get(t.service_id) ? ` · ${byId.get(t.service_id)!.name}` : ''}`,
     href: t.service_id ? link(t.service_id) : t.project_id ? `${OPS_SITE}/admin/ops/projects/${t.project_id}` : `${OPS_SITE}/admin/ops`,
   }));
-  const digestContent = buildOpsDigest({ today, reminders, renewals, payments: paymentLines, tasks });
+  const expenseLines = await expenseDigestLines(db, today);
+  const digestContent = buildOpsDigest({ today, reminders, renewals, payments: paymentLines, tasks, expenses: expenseLines });
 
   // ── One digest per Istanbul day, each channel tracked on its own ──
   type StoredDigest = { subject: string; email: string; text: string; telegram: string; items: string[]; emailTo: string; chatId: string | null; channels: DigestChannels };
@@ -200,4 +203,38 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({ ok: true, today, planned: planned.length, claimed: claimed.length, retried: retry.length, digest, channels: channelsOut ? { email: channelsOut.email.state, telegram: channelsOut.telegram.state } : null, counts: digestContent.counts, environment: allowed.reason });
+}
+
+/**
+ * Giderler (v25) for the same team digest: overdue periods and periods due
+ * within 7 days that are not fully paid. Creates the missing recurring periods
+ * first (idempotent; a new period is never "paid" by itself). Operasyon
+ * provider payments are NOT listed here (they are in "Ödemeler" already).
+ * Before v25 (no tables) this returns nothing.
+ */
+async function expenseDigestLines(db: NonNullable<ReturnType<typeof getSupabaseAdmin>>, today: string): Promise<DigestLine[]> {
+  try {
+    await db.rpc('fin_roll_periods', { p_until: addDays(today, 45) });
+    const [exp, per, pay] = await Promise.all([
+      db.from('fin_expenses').select('*').is('archived_at', null),
+      db.from('fin_periods').select('*').eq('status', 'open').lte('due_on', addDays(today, 7)),
+      db.from('fin_payments').select('*').is('voided_at', null),
+    ]);
+    if (exp.error || per.error || pay.error) return [];
+    const items = buildFinItems({ expenses: (exp.data ?? []) as Expense[], periods: (per.data ?? []) as FinPeriod[], payments: (pay.data ?? []) as FinPayment[], opsPeriods: [], opsPayments: [], parties: [], today });
+    return items
+      .filter((it) => ['overdue', 'pending', 'partial', 'unknown'].includes(it.summary.state))
+      .map((it) => {
+        const late = it.summary.state === 'overdue';
+        const left = it.summary.remaining !== null && it.currency ? formatMinor(it.summary.remaining, it.currency) : 'tutar bilinmiyor';
+        return {
+          tone: late ? 'red' : 'amber',
+          title: it.title,
+          detail: `${late ? 'gecikti' : 'vade'} ${it.dueOn}${it.periodText ? ` · ${it.periodText}` : ''} · kalan ${left}`,
+          href: `${OPS_SITE}/admin/expenses/${it.expenseId}?period=${it.periodId}`,
+        } as DigestLine;
+      });
+  } catch {
+    return [];
+  }
 }
