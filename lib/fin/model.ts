@@ -15,11 +15,11 @@ import { parseAmount, type Minor } from '@/lib/ops/money';
 
 const ZERO = BigInt(0);
 
-export const CATEGORIES = ['rent', 'internet', 'phone', 'accounting', 'software', 'subscription', 'utilities', 'tax', 'equipment', 'travel', 'office', 'marketing', 'other'] as const;
+export const CATEGORIES = ['rent', 'internet', 'phone', 'accounting', 'software', 'subscription', 'utilities', 'tax', 'personnel', 'services', 'equipment', 'maintenance', 'travel', 'office', 'marketing', 'insurance', 'bank', 'other'] as const;
 export type Category = (typeof CATEGORIES)[number];
 export const CATEGORY_LABEL: Record<Category | 'ops', string> = {
   rent: 'Kira', internet: 'İnternet', phone: 'Telefon', accounting: 'Muhasebe', software: 'Yazılım', subscription: 'Abonelik',
-  utilities: 'Fatura ve aidat', tax: 'Vergi ve harç', equipment: 'Ekipman', travel: 'Ulaşım', office: 'Ofis alışverişi',
+  utilities: 'Fatura ve aidat', tax: 'Vergi ve harç', personnel: 'Personel', services: 'Dış hizmet', equipment: 'Ekipman', maintenance: 'Bakım ve onarım', insurance: 'Sigorta', bank: 'Banka, komisyon ve kredi', travel: 'Ulaşım', office: 'Ofis alışverişi',
   marketing: 'Reklam ve tanıtım', other: 'Diğer', ops: 'Operasyon (sağlayıcı)',
 };
 export const RECURRING_HINT: Category[] = ['rent', 'internet', 'phone', 'accounting', 'software', 'subscription', 'utilities'];
@@ -67,6 +67,7 @@ export interface FinPeriod {
   amount: string | null;
   currency: string;
   status: 'open' | 'cancelled';
+  review_note?: string | null;
   cancel_reason: string | null;
   cancelled_by: string | null;
   cancelled_at: string | null;
@@ -114,12 +115,12 @@ export interface FinParty { id: string; name: string }
 
 /* ── Status ─────────────────────────────────────────────────────── */
 
-export type FinState = 'pending' | 'partial' | 'paid' | 'overdue' | 'over' | 'unknown' | 'cancelled';
+export type FinState = 'pending' | 'partial' | 'paid' | 'overdue' | 'over' | 'unknown' | 'review' | 'cancelled';
 export const FIN_STATE_LABEL: Record<FinState, string> = {
-  pending: 'Bekliyor', partial: 'Kısmen ödendi', paid: 'Ödendi', overdue: 'Gecikti', over: 'Fazla ödendi', unknown: 'Tutar bilinmiyor', cancelled: 'İptal edildi',
+  pending: 'Bekliyor', partial: 'Kısmen ödendi', paid: 'Ödendi', overdue: 'Gecikti', over: 'Fazla ödendi', unknown: 'Tutar bekleniyor', review: 'İnceleme bekliyor', cancelled: 'İptal edildi',
 };
 export const FIN_STATE_TONE: Record<FinState, 'ok' | 'warn' | 'bad' | 'info' | 'muted'> = {
-  pending: 'info', partial: 'warn', paid: 'ok', overdue: 'bad', over: 'warn', unknown: 'muted', cancelled: 'muted',
+  pending: 'info', partial: 'warn', paid: 'ok', overdue: 'bad', over: 'warn', unknown: 'muted', review: 'warn', cancelled: 'muted',
 };
 
 export interface StateSummary {
@@ -131,7 +132,7 @@ export interface StateSummary {
   remaining: Minor | null;
 }
 
-export function obligationState(input: { amount: string | null; currency: string | null; due_on: string | null; cancelled?: boolean }, payments: FinPayment[], today: string): StateSummary {
+export function obligationState(input: { amount: string | null; currency: string | null; due_on: string | null; cancelled?: boolean; review?: string | null }, payments: FinPayment[], today: string): StateSummary {
   let paid = ZERO;
   for (const p of payments) {
     if (p.voided_at) continue;
@@ -146,6 +147,8 @@ export function obligationState(input: { amount: string | null; currency: string
   const remaining = expected - paid;
   if (remaining < ZERO) return { state: 'over', partialLate: false, expected, paid, remaining };
   if (remaining === ZERO) return { state: 'paid', partialLate: false, expected, paid, remaining };
+  // e.g. imported as "Ödendi" without a payment date: not overdue, not paid — waits for the real date
+  if (input.review) return { state: 'review', partialLate: false, expected, paid, remaining };
   const late = Boolean(input.due_on && daysUntil(input.due_on, today) < 0);
   if (late) return { state: 'overdue', partialLate: paid > ZERO, expected, paid, remaining };
   return { state: paid > ZERO ? 'partial' : 'pending', partialLate: false, expected, paid, remaining };
@@ -211,7 +214,7 @@ export function buildItems(input: {
       owner: e.owner_email, recurrence: e.recurrence, dueOn: per.due_on,
       periodText: e.kind === 'recurring' ? periodLabel(per, e.recurrence) : null,
       amount: per.amount, currency: per.currency, payments: pays,
-      summary: obligationState({ amount: per.amount, currency: per.currency, due_on: per.due_on, cancelled: per.status === 'cancelled' }, pays, input.today),
+      summary: obligationState({ amount: per.amount, currency: per.currency, due_on: per.due_on, cancelled: per.status === 'cancelled', review: per.review_note ?? null }, pays, input.today),
     });
   }
   for (const op of input.opsPeriods) {
@@ -268,11 +271,12 @@ export interface Overview {
   overdue: Totals; overdueCount: number;
   upcoming: Totals; upcomingCount: number;   // due in the next `days` days (after today)
   unknownCount: number;       // open periods without an amount (counted, not added)
+  review: Totals; reviewCount: number;     // waiting for review (e.g. "Ödendi" in the source without a date): neither paid nor owed
 }
 
 export function overview(items: Item[], today: string, days = 30): Overview {
   const month = today.slice(0, 7);
-  const o: Overview = { month, paidThisMonth: {}, remainingThisMonth: {}, overdue: {}, overdueCount: 0, upcoming: {}, upcomingCount: 0, unknownCount: 0 };
+  const o: Overview = { month, paidThisMonth: {}, remainingThisMonth: {}, overdue: {}, overdueCount: 0, upcoming: {}, upcomingCount: 0, unknownCount: 0, review: {}, reviewCount: 0 };
   for (const it of items) {
     for (const p of it.payments) {
       if (p.voided_at || p.paid_on.slice(0, 7) !== month) continue;
@@ -283,6 +287,7 @@ export function overview(items: Item[], today: string, days = 30): Overview {
     const s = it.summary;
     if (s.state === 'cancelled' || s.state === 'paid' || s.state === 'over') continue;
     if (s.state === 'unknown') { if (it.dueOn && daysUntil(it.dueOn, today) <= days) o.unknownCount += 1; continue; }
+    if (s.state === 'review') { add(o.review, it.currency, s.remaining); o.reviewCount += 1; continue; }
     if (it.dueOn && it.dueOn.slice(0, 7) === month) add(o.remainingThisMonth, it.currency, s.remaining);
     if (s.state === 'overdue') { add(o.overdue, it.currency, s.remaining); o.overdueCount += 1; continue; }
     if (it.dueOn) {

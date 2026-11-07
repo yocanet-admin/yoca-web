@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Details, Flash, PageHead, fmtDate } from '@/components/admin/ops/ui';
-import { FinDocs, PaymentForm, PaymentList, SourceBadge, StateBadge, money } from '@/components/admin/fin/parts';
+import { FinDocs, FinHistory, PaymentForm, PaymentList, SourceBadge, StateBadge, money } from '@/components/admin/fin/parts';
 import { addOpsPayment, loadFinance, voidOpsPayment, type FinData } from '@/lib/fin/data';
 import { buildItems } from '@/lib/fin/model';
 import { dueText, istanbulDay } from '@/lib/ops/model';
@@ -64,6 +64,10 @@ export default function OpsCostPage() {
 
       <Details title="Fatura ve dekontlar (finans belgeleri)" open>
         <FinDocs entity="ops_period" entityId={per.id} />
+      </Details>
+
+      <Details title="İşlem geçmişi" hint="Yalnızca bu dönemin sağlayıcı ödemeleri ve finans belgeleri.">
+        <FinHistory ids={[per.id, ...it.payments.map((p) => p.id)]} refreshKey={it.payments.map((p) => `${p.id}:${p.voided_at ?? ''}`).join(',')} />
       </Details>
     </div>
   );

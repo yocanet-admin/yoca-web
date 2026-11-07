@@ -174,3 +174,65 @@ export async function finDocumentUrl(path: string): Promise<string | null> {
   const { data } = await db().storage.from('fin-docs').createSignedUrl(path, 60);
   return data?.signedUrl ?? null;
 }
+
+/* ── History (fin_audit: Giderler records + Operasyon provider payments only) ── */
+
+export interface FinAuditRow { id: number; at: string; actor: string | null; action: string; entity: string; entity_id: string | null; label: string | null; changes: Record<string, { from: unknown; to: unknown }> | null }
+
+/** History of the given records and of their files (not the general audit log). */
+export async function loadFinHistory(ids: string[]): Promise<FinAuditRow[]> {
+  const list = Array.from(new Set(ids.filter(Boolean)));
+  if (!list.length) return [];
+  const { data: docs } = await db().from('fin_documents').select('id').in('entity_id', list);
+  const all = [...list, ...((docs ?? []) as Array<{ id: string }>).map((d) => d.id)];
+  const { data, error } = await db().from('fin_audit').select('*').in('entity_id', all).order('at', { ascending: false }).limit(300);
+  if (error) return [];
+  return (data ?? []) as FinAuditRow[];
+}
+
+/* ── Excel import (server reads the file; apply = one database transaction) ── */
+
+export interface ImportRowRecord { id: string; import_id: string; source_key: string; file_name: string; sheet: string; source_row: number; payload: Record<string, unknown>; plan: Record<string, unknown>; action: string; expense_id: string | null; period_id: string | null; payment_id: string | null; changed_payload: Record<string, unknown> | null; changed_at: string | null; resolved_at: string | null; resolved_by: string | null; resolution: string | null; created_by: string | null; created_at: string }
+
+async function fileBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...Array.from(bytes.subarray(i, i + 0x8000)));
+  return btoa(bin);
+}
+
+export async function importRequest<T>(action: 'preview' | 'apply', file: File, month?: string): Promise<{ ok: boolean; error?: string } & T> {
+  const { data } = await db().auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) return { ok: false, error: 'Oturum yok.' } as { ok: boolean; error?: string } & T;
+  const res = await fetch('/api/admin/fin/import', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ action, fileName: file.name, data: await fileBase64(file), month }) });
+  const body = (await res.json().catch(() => ({ ok: false, error: `Sunucu hatası (${res.status})` }))) as { ok: boolean; error?: string } & T;
+  return body;
+}
+
+export async function listImportRows(): Promise<ImportRowRecord[]> {
+  const { data } = await db().from('fin_import_rows').select('*').order('source_row');
+  return (data ?? []) as ImportRowRecord[];
+}
+
+export async function getImportRow(id: string): Promise<ImportRowRecord | null> {
+  const { data } = await db().from('fin_import_rows').select('*').eq('id', id).maybeSingle();
+  return (data as ImportRowRecord | null) ?? null;
+}
+
+export async function resolveImportRow(id: string, resolution: string, expenseId?: string): Promise<string | null> {
+  const patch: Record<string, unknown> = { resolved_at: new Date().toISOString(), resolution };
+  if (expenseId) patch.expense_id = expenseId;
+  const { error } = await db().from('fin_import_rows').update(patch).eq('id', id);
+  return error ? finFriendly(error.message) : null;
+}
+
+export async function importRowsOfExpense(expenseId: string): Promise<ImportRowRecord[]> {
+  const { data } = await db().from('fin_import_rows').select('*').eq('expense_id', expenseId);
+  return (data ?? []) as ImportRowRecord[];
+}
+
+export async function clearReview(periodId: string): Promise<string | null> {
+  const { error } = await db().from('fin_periods').update({ review_note: null }).eq('id', periodId);
+  return error ? finFriendly(error.message) : null;
+}

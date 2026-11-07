@@ -5,8 +5,8 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Badge, Details, Flash, PageHead, field, fmtDate, fmtDateTime, small } from '@/components/admin/ops/ui';
 import { ExpenseForm } from '@/components/admin/fin/ExpenseForm';
-import { FinDocs, PaymentForm, PaymentList, StateBadge, money } from '@/components/admin/fin/parts';
-import { addPayment, archiveExpense, cancelPeriod, loadFinance, updateExpense, updatePeriod, voidPayment, type ExpenseInput, type FinData } from '@/lib/fin/data';
+import { FinDocs, FinHistory, PaymentForm, PaymentList, StateBadge, money } from '@/components/admin/fin/parts';
+import { addPayment, archiveExpense, cancelPeriod, clearReview, importRowsOfExpense, loadFinance, updateExpense, updatePeriod, voidPayment, type ExpenseInput, type FinData, type ImportRowRecord } from '@/lib/fin/data';
 import { CATEGORY_LABEL, METHOD_LABEL, RECURRENCE_LABEL, buildItems, type Item } from '@/lib/fin/model';
 import { dueText, istanbulDay } from '@/lib/ops/model';
 import { formatAmount, minorToDb, parseAmount } from '@/lib/ops/money';
@@ -28,6 +28,8 @@ function ExpenseDetail() {
   const today = istanbulDay();
   const reload = useCallback(() => loadFinance().then(setData), []);
   useEffect(() => { void reload(); }, [reload]);
+  const [sources, setSources] = useState<ImportRowRecord[]>([]);
+  useEffect(() => { void importRowsOfExpense(id).then(setSources).catch(() => setSources([])); }, [id]);
 
   const expense = data?.expenses.find((e) => e.id === id) ?? null;
   const items = useMemo(() => (data?.ready ? buildItems({ ...data, today }).filter((it) => it.expenseId === id) : []), [data, id, today]);
@@ -70,6 +72,7 @@ function ExpenseDetail() {
         </>}
       />
       {flash && <Flash tone={flash.tone} message={flash.text} onClose={() => setFlash(null)} />}
+      {sources.map((src) => <p key={src.id} className="text-[12px] text-subtle">Kaynak: Excel aktarımı — {src.file_name} · {src.sheet} · satır {src.source_row} · {src.created_by ?? '—'} · {fmtDate(src.created_at)}{src.changed_payload ? ' · dosyanın sonraki sürümünde bu satır değişmiş (uygulanmadı; Aktarım sekmesinde)' : ''}</p>)}
 
       {editing ? (
         <div className="admin-card p-5">
@@ -102,6 +105,10 @@ function ExpenseDetail() {
       <Details title="Gider belgeleri (sözleşme, fatura vb.)" open>
         <FinDocs entity="expense" entityId={expense.id} />
       </Details>
+
+      <Details title="İşlem geçmişi" hint="Bu gider, dönemleri, ödemeleri ve belgeleri; kim, ne zaman, ne yaptı. Değiştirilemez.">
+        <FinHistory ids={[expense.id, ...items.map((it) => it.periodId), ...items.flatMap((it) => it.payments.map((p) => p.id))]} refreshKey={[...data.payments.map((p) => `${p.id}:${p.voided_at ?? ''}`), ...data.periods.map((p) => `${p.id}:${p.status}:${p.amount}`), expense.updated_at].join(',')} />
+      </Details>
     </div>
   );
 }
@@ -124,13 +131,19 @@ function PeriodCard({ it, data, today, open, onToggle, onDone }: { it: Item; dat
       <button type="button" className="flex flex-wrap items-center gap-3 text-left" onClick={onToggle} aria-expanded={open}>
         <strong className="text-[14px]">{it.periodText ?? fmtDate(per.due_on)}</strong>
         <span className="text-[13px] text-subtle">Vade {fmtDate(per.due_on)}{!cancelled && !['paid', 'over'].includes(it.summary.state) ? ` · ${dueText(per.due_on, today)}` : ''}</span>
-        <span className="tabular-nums text-[13px]">{per.amount ? formatAmount(per.amount, per.currency) : 'Tutar bilinmiyor'}</span>
+        <span className="tabular-nums text-[13px]">{per.amount ? formatAmount(per.amount, per.currency) : 'Tutar bekleniyor'}</span>
         <StateBadge s={it.summary} />
         <span className="ms-auto text-[12px] text-subtle">Ödenen {money(it.summary.paid, per.currency)} · Kalan {money(it.summary.remaining, per.currency)}</span>
       </button>
       {open && (
         <div className="grid gap-4">
           {cancelled && <p className="text-[13px] text-subtle">İptal edildi: {per.cancel_reason} · {per.cancelled_by} · {fmtDateTime(per.cancelled_at)}</p>}
+          {per.review_note && !cancelled && (
+            <div className="flex flex-wrap items-center gap-2 border border-yellow-400/40 p-2 text-[12px] text-yellow-100">
+              <span>İnceleme bekliyor: {per.review_note}</span>
+              <button type="button" className={small} onClick={async () => { const e = await clearReview(per.id); if (e) setErr(e); else onDone('İnceleme notu kaldırıldı; dönem normal durumuna döndü.'); }}>İncelemeyi kapat</button>
+            </div>
+          )}
           {!cancelled && <PaymentForm currency={per.currency} suggested={it.summary.remaining} defaultAccount={data.expenses.find((e) => e.id === per.expense_id)?.pay_account ?? ''} defaultMethod={data.expenses.find((e) => e.id === per.expense_id)?.pay_method ?? ''} onSave={async (p, key) => {
             const r = await addPayment(per.id, p, key);
             if (r.error) return r.error;

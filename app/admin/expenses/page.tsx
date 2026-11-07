@@ -5,6 +5,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Badge, Empty, Flash, PageHead, field, fmtDate, small } from '@/components/admin/ops/ui';
 import { Remaining, SourceBadge, StateBadge, money } from '@/components/admin/fin/parts';
+import { ImportPanel } from '@/components/admin/fin/ImportPanel';
 import { loadFinance, type FinData } from '@/lib/fin/data';
 import {
   CATEGORIES, CATEGORY_LABEL, CSV_HEADER, FIN_STATE_LABEL, RECURRENCE_LABEL, buildItems, csvRows, filterItems, overview,
@@ -22,7 +23,7 @@ import { formatAmount, formatTotals } from '@/lib/ops/money';
  */
 
 const BASE = '/admin/expenses';
-const STATE_OPTIONS: Array<[string, string]> = [['open', 'Ödenmemiş'], ['', 'Tümü'], ['pending', FIN_STATE_LABEL.pending], ['partial', FIN_STATE_LABEL.partial], ['overdue', FIN_STATE_LABEL.overdue], ['paid', FIN_STATE_LABEL.paid], ['over', FIN_STATE_LABEL.over], ['unknown', FIN_STATE_LABEL.unknown], ['cancelled', FIN_STATE_LABEL.cancelled]];
+const STATE_OPTIONS: Array<[string, string]> = [['open', 'Ödenmemiş'], ['', 'Tümü'], ['pending', FIN_STATE_LABEL.pending], ['partial', FIN_STATE_LABEL.partial], ['overdue', FIN_STATE_LABEL.overdue], ['paid', FIN_STATE_LABEL.paid], ['review', FIN_STATE_LABEL.review], ['over', FIN_STATE_LABEL.over], ['unknown', FIN_STATE_LABEL.unknown], ['cancelled', FIN_STATE_LABEL.cancelled]];
 
 function Card({ title, totals, sub, tone }: { title: string; totals: Totals; sub?: string; tone?: 'bad' | 'warn' }) {
   return (
@@ -45,7 +46,7 @@ function ExpensesPage() {
     category: params.get('cat') ?? '', state: params.get('state') ?? 'open', provider: params.get('prov') ?? '',
     from: params.get('from') ?? '', to: params.get('to') ?? '', source: (params.get('src') ?? '') as Filter['source'], q: params.get('q') ?? '',
   };
-  const view = params.get('view') === 'defs' ? 'defs' : 'periods';
+  const view = params.get('view') === 'defs' ? 'defs' : params.get('view') === 'import' ? 'import' : 'periods';
   const setParam = (patch: Record<string, string>) => {
     const next = new URLSearchParams(params.toString());
     for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
@@ -103,17 +104,17 @@ function ExpensesPage() {
         <Card title={`Bu ay ödenen · ${monthName}`} totals={ov.paidThisMonth} sub="Geçerli ödeme kayıtları (iadeler düşülür)" />
         <Card title="Bu ay kalan" totals={ov.remainingThisMonth} sub="Bu ay vadesi gelen dönemlerden kalan" />
         <Card title="Geciken" totals={ov.overdue} sub={`${ov.overdueCount} dönem`} tone={ov.overdueCount ? 'bad' : undefined} />
-        <Card title="Yaklaşan · 30 gün" totals={ov.upcoming} sub={`${ov.upcomingCount} dönem${ov.unknownCount ? ` · ${ov.unknownCount} tutarı bilinmiyor` : ''}`} tone={ov.upcomingCount ? 'warn' : undefined} />
+        <Card title="Yaklaşan · 30 gün" totals={ov.upcoming} sub={`${ov.upcomingCount} dönem${ov.unknownCount ? ` · ${ov.unknownCount} dönemin tutarı bekleniyor` : ''}`} tone={ov.upcomingCount ? 'warn' : undefined} />
       </section>
-      <p className="-mt-3 text-[12px] text-subtle">Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Operasyon sağlayıcı ödemeleri tek kayıt olarak sayılır.</p>
+      <p className="-mt-3 text-[12px] text-subtle">Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Operasyon sağlayıcı ödemeleri tek kayıt olarak sayılır. Tutarı beklenen dönemler toplamlara katılmaz.{ov.reviewCount ? ` İnceleme bekleyen ${ov.reviewCount} dönem (${formatTotals(ov.review)}) ne ödenmiş ne kalan sayılır.` : ''}</p>
 
       <div className="flex flex-wrap gap-2" role="tablist">
-        {([['periods', 'Dönemler ve ödemeler'], ['defs', 'Gider tanımları']] as const).map(([k, t]) => (
-          <button key={k} type="button" role="tab" aria-selected={view === k} className={`${small} ${view === k ? '!border-yoca-lime !text-yoca-lime' : ''}`} onClick={() => setParam({ view: k === 'defs' ? 'defs' : '' })}>{t}</button>
+        {([['periods', 'Dönemler ve ödemeler'], ['defs', 'Gider tanımları'], ['import', 'Aktarım']] as const).map(([k, t]) => (
+          <button key={k} type="button" role="tab" aria-selected={view === k} className={`${small} ${view === k ? '!border-yoca-lime !text-yoca-lime' : ''}`} onClick={() => setParam({ view: k === 'periods' ? '' : k })}>{t}</button>
         ))}
       </div>
 
-      {view === 'defs' ? <Definitions data={data} items={items} /> : (
+      {view === 'import' ? <ImportPanel onApplied={() => void loadFinance().then(setData)} /> : view === 'defs' ? <Definitions data={data} items={items} /> : (
         <>
           <section aria-label="Filtreler" className="grid grid-cols-2 gap-3 border border-line p-3 lg:grid-cols-4 xl:grid-cols-7">
             <label className="grid gap-1 text-[12px] font-semibold text-muted">Kategori
@@ -145,7 +146,7 @@ function ExpensesPage() {
             <span className="text-subtle">{shown.length} dönem</span>
             <span>Tutar: <strong className="tabular-nums">{formatTotals(shownTotals.amount)}</strong></span>
             <span>Kalan: <strong className="tabular-nums">{formatTotals(shownTotals.remaining)}</strong></span>
-            {shownTotals.unknown > 0 && <span className="text-yellow-200">{shownTotals.unknown} dönemin tutarı bilinmiyor</span>}
+            {shownTotals.unknown > 0 && <span className="text-yellow-200">{shownTotals.unknown} dönemin tutarı bekleniyor (toplama katılmadı)</span>}
             <span className="ms-auto flex gap-2">
               <button type="button" className={small} onClick={() => setParam({ from: `${today.slice(0, 7)}-01`, to: '', state: 'all' })}>Bu ay</button>
               <button type="button" className={small} onClick={() => setParam({ state: 'overdue', from: '', to: '' })}>Gecikenler</button>
@@ -188,7 +189,7 @@ function Row({ it, today }: { it: Item; today: string }) {
       </td>
       <td className={td}>{it.categoryText}</td>
       <td className={td}>{it.provider ?? <span className="text-subtle">—</span>}</td>
-      <td className={`${td} tabular-nums`}>{it.amount ? formatAmount(it.amount, it.currency) : <span className="text-subtle">Tutar bilinmiyor</span>}</td>
+      <td className={`${td} tabular-nums`}>{it.amount ? formatAmount(it.amount, it.currency) : <span className="text-subtle">Tutar bekleniyor</span>}</td>
       <td className={`${td} tabular-nums`}>{money(it.summary.paid, it.currency)}</td>
       <td className={td}><Remaining it={it} /></td>
       <td className={td}><StateBadge s={it.summary} /></td>

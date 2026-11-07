@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Badge, field, fmtDate, fmtDateTime, label, small } from '@/components/admin/ops/ui';
 import { newKey } from '@/lib/documents/client';
-import { archiveFinDocument, finDocumentUrl, listFinDocuments, uploadFinDocument, type FinDocument, type PaymentInput } from '@/lib/fin/data';
+import { archiveFinDocument, finDocumentUrl, listFinDocuments, loadFinHistory, uploadFinDocument, type FinAuditRow, type FinDocument, type PaymentInput } from '@/lib/fin/data';
 import { FIN_STATE_TONE, METHODS, METHOD_LABEL, PAYMENT_KIND_LABEL, stateText, type FinPayment, type Item, type StateSummary } from '@/lib/fin/model';
 import { istanbulDay } from '@/lib/ops/model';
 import { formatAmount, formatMinor, parseAmount } from '@/lib/ops/money';
@@ -175,5 +175,38 @@ export function FinDocs({ entity, entityId }: { entity: 'expense' | 'period' | '
         {busy && <span>Yükleniyor…</span>}
       </label>
     </div>
+  );
+}
+
+const ENTITY_LABEL: Record<string, string> = { fin_expenses: 'Gider', fin_periods: 'Dönem', fin_payments: 'Ödeme', fin_documents: 'Belge', ops_payments: 'Sağlayıcı ödemesi' };
+const ACTION_LABEL: Record<string, string> = { insert: 'ekledi', update: 'değiştirdi', delete: 'sildi' };
+const FIELD_LABEL: Record<string, string> = {
+  title: 'açıklama', category: 'kategori', amount: 'tutar', currency: 'para birimi', due_on: 'vade', ends_on: 'bitiş', owner_email: 'sorumlu',
+  pay_account: 'ödeme hesabı', pay_method: 'yöntem', vendor_name: 'firma', provider_id: 'kayıtlı firma', note: 'not', archived_at: 'arşiv',
+  status: 'durum', cancel_reason: 'iptal gerekçesi', voided_at: 'iptal', void_reason: 'iptal gerekçesi', auto_debit: 'otomatik talimat',
+  paid_on: 'ödeme tarihi', kind: 'tür', reference: 'referans', method: 'yöntem',
+};
+const QUIET = new Set(['updated_at', 'cancelled_at', 'cancelled_by', 'voided_by', 'archived_by']);
+const short = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : String(v).length > 40 ? `${String(v).slice(0, 40)}…` : String(v));
+
+/** Who did what on these records (read-only; nobody can edit this history). */
+export function FinHistory({ ids, refreshKey = '' }: { ids: string[]; refreshKey?: string }) {
+  const [rows, setRows] = useState<FinAuditRow[] | null>(null);
+  const key = ids.join(',');
+  useEffect(() => { void loadFinHistory(ids).then(setRows); }, [key, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (rows === null) return <p className="text-[13px] text-subtle">İşlem geçmişi yükleniyor…</p>;
+  if (!rows.length) return <p className="text-[13px] text-subtle">Kayıt yok.</p>;
+  return (
+    <ul className="grid gap-1 text-[12px]">
+      {rows.map((r) => {
+        const changed = Object.entries(r.changes ?? {}).filter(([k]) => !QUIET.has(k));
+        return (
+          <li key={r.id} className="grid gap-0.5 border-t border-line py-1.5">
+            <span><span className="tabular-nums text-subtle">{fmtDateTime(r.at)}</span> · <strong>{r.actor ?? '—'}</strong> {ENTITY_LABEL[r.entity] ?? r.entity} {r.label ? `“${r.label}” ` : ''}{ACTION_LABEL[r.action] ?? r.action}</span>
+            {changed.length > 0 && <span className="text-subtle">{changed.slice(0, 6).map(([k, v]) => `${FIELD_LABEL[k] ?? k}: ${short(v?.from)} → ${short(v?.to)}`).join(' · ')}</span>}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

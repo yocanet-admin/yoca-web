@@ -16,6 +16,8 @@ import { CURRENCIES, minorToDb, parseAmount } from '@/lib/ops/money';
 
 interface Props {
   initial?: Expense;
+  /** starting values for a NEW expense (e.g. from an imported Excel row) */
+  prefill?: Partial<Expense>;
   parties: FinParty[];
   /** names of Operasyon providers: a matching provider gets a "no double entry" hint */
   opsProviders: string[];
@@ -27,13 +29,15 @@ interface Props {
 
 const amountText = (v: string | null) => (v ? v.replace('.', ',') : '');
 
-export function ExpenseForm({ initial, parties, opsProviders, locked = false, busy = false, onSubmit, onCancel }: Props) {
+export function ExpenseForm({ initial: edit, prefill, parties, opsProviders, locked = false, busy = false, onSubmit, onCancel }: Props) {
   const today = istanbulDay();
+  const initial = edit ?? (prefill as Expense | undefined);
+  const isEdit = Boolean(edit);
   const [title, setTitle] = useState(initial?.title ?? '');
   const [category, setCategory] = useState<Category>(initial?.category ?? 'rent');
   const [kind, setKind] = useState<'recurring' | 'once'>(initial?.kind ?? 'recurring');
   const [recurrence, setRecurrence] = useState<Recurrence>(initial?.recurrence ?? 'monthly');
-  const [firstDue, setFirstDue] = useState(initial?.first_due_on ?? defaultFirstDue(today, 1));
+  const [firstDue, setFirstDue] = useState(initial?.first_due_on ?? (prefill ? '' : defaultFirstDue(today, 1)));
   const [endsOn, setEndsOn] = useState(initial?.ends_on ?? '');
   const [amount, setAmount] = useState(amountText(initial?.amount ?? null));
   const [currency, setCurrency] = useState(initial?.currency ?? 'TRY');
@@ -76,7 +80,7 @@ export function ExpenseForm({ initial, parties, opsProviders, locked = false, bu
       <div className="grid gap-3 sm:grid-cols-2">
         <label className={label}>Açıklama<input className={field} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder="ör. Ofis kirası" /></label>
         <label className={label}>Kategori
-          <select className={field} value={category} onChange={(e) => { const c = e.target.value as Category; setCategory(c); if (!initial) setKind(RECURRING_HINT.includes(c) ? 'recurring' : 'once'); }}>
+          <select className={field} value={category} onChange={(e) => { const c = e.target.value as Category; setCategory(c); if (!isEdit) setKind(RECURRING_HINT.includes(c) ? 'recurring' : 'once'); }}>
             {CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}
           </select>
         </label>
@@ -108,7 +112,7 @@ export function ExpenseForm({ initial, parties, opsProviders, locked = false, bu
         </label>
         {kind === 'recurring' && <label className={label}>Bitiş (isteğe bağlı)<input type="date" className={field} value={endsOn} min={firstDue} onChange={(e) => setEndsOn(e.target.value)} /></label>}
       </div>
-      {initial && kind === 'recurring' && <p className="-mt-2 text-[12px] text-subtle">Tutar değişikliği yalnızca bundan sonra oluşacak dönemlere uygulanır; oluşmuş dönemler kendi tutarını korur (ödemesiz bir dönemin tutarı dönem satırından düzeltilebilir).</p>}
+      {isEdit && kind === 'recurring' && <p className="-mt-2 text-[12px] text-subtle">Tutar değişikliği yalnızca bundan sonra oluşacak dönemlere uygulanır; oluşmuş dönemler kendi tutarını korur (ödemesiz bir dönemin tutarı dönem satırından düzeltilebilir).</p>}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className={label}>Sağlayıcı / firma (kayıtlı)
@@ -139,7 +143,7 @@ export function ExpenseForm({ initial, parties, opsProviders, locked = false, bu
 
       {problems.length > 0 && <ul className="list-disc ps-5 text-[12px] text-yellow-200">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="admin-btn admin-btn-primary" disabled={busy || problems.length > 0} onClick={submit}>{busy ? 'Kaydediliyor…' : initial ? 'Değişiklikleri kaydet' : 'Gideri kaydet'}</button>
+        <button type="button" className="admin-btn admin-btn-primary" disabled={busy || problems.length > 0} onClick={submit}>{busy ? 'Kaydediliyor…' : isEdit ? 'Değişiklikleri kaydet' : 'Gideri kaydet'}</button>
         {onCancel && <button type="button" className="admin-btn" onClick={onCancel} disabled={busy}>Vazgeç</button>}
       </div>
     </div>

@@ -22,6 +22,9 @@
 --      fin_payments   payment / refund / adjustment; never deleted, never edited;
 --                     a wrong record is voided with a reason (who/when kept)
 --      fin_documents  metadata of files in the private bucket "fin-docs"
+--      fin_imports / fin_import_rows  Excel imports: file, sheet, source row,
+--                     content hash; re-import creates nothing, a changed row is
+--                     reported and never applied silently (fin_import_apply)
 --    Status (bekliyor / kısmen ödendi / ödendi / gecikti) is NOT stored: it is
 --    computed from the period amount, its due date and its valid payments. A new
 --    period starts with no payment, so it is never "paid" by itself.
@@ -29,7 +32,11 @@
 --    by the database from the signed-in session (not from the request), and every
 --    change is written to audit_log (audit_row). No one can rewrite payments.
 --
--- 3. Operasyon link — no copies, no double totals. Provider payments stay in
+-- 3. Finance history: view fin_audit = audit_log rows of the fin_* tables and of
+--    Operasyon PROVIDER payments only (payment fields). The general audit_log
+--    stays admin-only.
+--
+-- 3b. Operasyon link — no copies, no double totals. Provider payments stay in
 --    ops_payments (direction 'out'). Finance users see Operasyon provider costs
 --    through two read-only views with only the fields they need (service name and
 --    kind, provider name, dates, cost, payments — no customer, sale price, notes,
@@ -114,8 +121,7 @@ grant execute on function public.panel_role() to authenticated, service_role;
 create table if not exists public.fin_expenses (
   id uuid primary key default gen_random_uuid(),
   title text not null check (length(btrim(title)) between 1 and 200),
-  category text not null check (category in ('rent', 'internet', 'phone', 'accounting', 'software', 'subscription', 'utilities', 'tax',
-                                              'equipment', 'travel', 'office', 'marketing', 'other')),
+  category text not null,
   kind text not null check (kind in ('recurring', 'once')),
   recurrence text check (recurrence is null or recurrence in ('monthly', 'quarterly', 'yearly')),
   first_due_on date not null,          -- once: the due date; recurring: due date of the first tracked period
@@ -136,6 +142,10 @@ create table if not exists public.fin_expenses (
   constraint fin_expenses_recurrence check ((kind = 'recurring') = (recurrence is not null)),
   constraint fin_expenses_ends check (ends_on is null or ends_on >= first_due_on)
 );
+alter table public.fin_expenses drop constraint if exists fin_expenses_category_check;
+alter table public.fin_expenses add constraint fin_expenses_category_check check (category in (
+  'rent', 'internet', 'phone', 'accounting', 'software', 'subscription', 'utilities', 'tax', 'personnel', 'services',
+  'equipment', 'maintenance', 'travel', 'office', 'marketing', 'insurance', 'bank', 'other'));
 create index if not exists idx_fin_expenses_category on public.fin_expenses (category);
 create index if not exists idx_fin_expenses_provider on public.fin_expenses (provider_id);
 
@@ -149,6 +159,7 @@ create table if not exists public.fin_periods (
   amount numeric(14, 2) check (amount is null or amount > 0),
   currency text not null check (currency in ('TRY', 'USD', 'EUR', 'AZN', 'GBP')),
   status text not null default 'open' check (status in ('open', 'cancelled')),
+  review_note text check (review_note is null or length(review_note) <= 500),  -- "İnceleme bekliyor" (e.g. imported as paid without a date)
   cancel_reason text,
   cancelled_by text,
   cancelled_at timestamptz,
@@ -158,6 +169,7 @@ create table if not exists public.fin_periods (
   updated_at timestamptz not null default now(),
   constraint fin_periods_once unique (expense_id, seq)
 );
+alter table public.fin_periods add column if not exists review_note text check (review_note is null or length(review_note) <= 500);
 create index if not exists idx_fin_periods_due on public.fin_periods (due_on);
 
 create table if not exists public.fin_payments (
@@ -198,6 +210,45 @@ create table if not exists public.fin_documents (
   constraint fin_documents_path check (path like entity || '/' || entity_id::text || '/%')
 );
 create index if not exists idx_fin_documents_entity on public.fin_documents (entity, entity_id);
+
+-- Imports (e.g. an Excel expense sheet): one row per run, one row per source row.
+-- source_key (sheet + month + row + item) is unique: importing the same file again
+-- creates nothing; a changed source row is stored as "changed", never applied.
+create table if not exists public.fin_imports (
+  id uuid primary key default gen_random_uuid(),
+  file_name text not null check (length(file_name) between 1 and 200),
+  file_sha256 text not null check (file_sha256 ~ '^[0-9a-f]{64}$'),
+  sheet text not null check (length(sheet) between 1 and 100),
+  period_month text not null check (period_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
+  summary jsonb not null default '{}'::jsonb,
+  imported_by text,
+  created_at timestamptz not null default now()
+);
+create table if not exists public.fin_import_rows (
+  id uuid primary key default gen_random_uuid(),
+  import_id uuid not null references public.fin_imports(id) on delete restrict,
+  source_key text not null unique check (length(source_key) <= 400),
+  file_name text not null,
+  sheet text not null,
+  source_row integer not null check (source_row > 0),
+  row_hash text not null,
+  payload jsonb not null,           -- the source values, exact text
+  plan jsonb not null default '{}'::jsonb,
+  action text not null check (action in ('create', 'pending_payment', 'needs_info', 'suggestion', 'possible_duplicate')),
+  expense_id uuid references public.fin_expenses(id) on delete restrict,
+  period_id uuid references public.fin_periods(id) on delete restrict,
+  payment_id uuid references public.fin_payments(id) on delete restrict,
+  changed_payload jsonb,            -- a later file had different values for this row (NOT applied)
+  changed_hash text,
+  changed_import_id uuid references public.fin_imports(id) on delete restrict,
+  changed_at timestamptz,
+  resolved_at timestamptz,
+  resolved_by text,
+  resolution text check (resolution is null or length(resolution) <= 500),
+  created_by text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_fin_import_rows_expense on public.fin_import_rows (expense_id);
 
 -- ── 3. Guards (all roles; the service role included) ───────────────
 create or replace function public.fin_valid_paid(p_period uuid) returns boolean
@@ -327,6 +378,49 @@ begin
   return new;
 end $$;
 
+create or replace function public.fin_imports_guard() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Aktarım kaydı silinemez.' using errcode = '42501'; end if;
+  if tg_op = 'INSERT' then new.imported_by := public.doc_actor(); new.created_at := now(); return new; end if;
+  if (new.file_name, new.file_sha256, new.sheet, new.period_month, new.imported_by, new.created_at)
+     is distinct from (old.file_name, old.file_sha256, old.sheet, old.period_month, old.imported_by, old.created_at) then
+    raise exception 'Aktarım kaydı değiştirilemez.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+create or replace function public.fin_import_rows_guard() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Aktarım satırı silinemez.' using errcode = '42501'; end if;
+  if tg_op = 'INSERT' then
+    new.created_by := public.doc_actor(); new.created_at := now();
+    new.resolved_at := null; new.resolved_by := null; new.changed_payload := null; new.changed_hash := null; new.changed_at := null; new.changed_import_id := null;
+    return new;
+  end if;
+  -- the source facts never change
+  if (new.import_id, new.source_key, new.file_name, new.sheet, new.source_row, new.row_hash, new.payload, new.plan, new.created_by, new.created_at)
+     is distinct from (old.import_id, old.source_key, old.file_name, old.sheet, old.source_row, old.row_hash, old.payload, old.plan, old.created_by, old.created_at) then
+    raise exception 'Aktarılan kaynak satır değiştirilemez.' using errcode = '42501';
+  end if;
+  if old.expense_id is not null and new.expense_id is distinct from old.expense_id then raise exception 'Bağlı gider değiştirilemez.' using errcode = '42501'; end if;
+  if old.period_id is not null and new.period_id is distinct from old.period_id then raise exception 'Bağlı dönem değiştirilemez.' using errcode = '42501'; end if;
+  if old.payment_id is not null and new.payment_id is distinct from old.payment_id then raise exception 'Bağlı ödeme değiştirilemez.' using errcode = '42501'; end if;
+  if new.resolved_at is distinct from old.resolved_at then
+    new.resolved_at := case when new.resolved_at is null then null else now() end;
+    new.resolved_by := case when new.resolved_at is null then null else public.doc_actor() end;
+  else
+    new.resolved_by := old.resolved_by;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists fin_imports_guard on public.fin_imports;
+create trigger fin_imports_guard before insert or update or delete on public.fin_imports for each row execute function public.fin_imports_guard();
+drop trigger if exists fin_import_rows_guard on public.fin_import_rows;
+create trigger fin_import_rows_guard before insert or update or delete on public.fin_import_rows for each row execute function public.fin_import_rows_guard();
+
 drop trigger if exists fin_expenses_guard on public.fin_expenses;
 create trigger fin_expenses_guard before insert or update or delete on public.fin_expenses for each row execute function public.fin_expenses_guard();
 drop trigger if exists fin_expenses_first_period on public.fin_expenses;
@@ -342,7 +436,7 @@ create trigger fin_documents_guard before insert or update or delete on public.f
 do $$
 declare t text;
 begin
-  foreach t in array array['fin_expenses', 'fin_periods', 'fin_payments', 'fin_documents'] loop
+  foreach t in array array['fin_expenses', 'fin_periods', 'fin_payments', 'fin_documents', 'fin_imports', 'fin_import_rows'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "finance read %1$s" on public.%1$I', t);
     execute format('create policy "finance read %1$s" on public.%1$I for select to authenticated using (public.can_finance())', t);
@@ -396,6 +490,78 @@ end $$;
 revoke all on function public.fin_roll_periods(date) from public, anon;
 grant execute on function public.fin_roll_periods(date) to authenticated, service_role;
 
+-- Apply a previewed import in ONE transaction (security invoker: RLS + guards).
+-- p_rows: [{key, row, hash, name, category, action, recurrence, variable, amount,
+--           due, method, note, payload}] — produced by the panel's preview.
+--   same key + same hash      → nothing (already imported)
+--   same key + different hash → stored as "changed" on the existing row; the
+--                               expense / period / payment are NOT touched
+--   new key, create           → expense + its first period (source amount)
+--   new key, pending_payment  → same, period "İnceleme bekliyor" (paid in the
+--                               source without a payment date; no payment invented)
+--   new key, other actions    → kept as an import row only (nothing created)
+--   skip_blank                → not stored
+-- No notification is sent by this function.
+create or replace function public.fin_import_apply(p_file_name text, p_file_sha256 text, p_sheet text, p_month text, p_summary jsonb, p_rows jsonb)
+returns jsonb language plpgsql security invoker set search_path = public as $$
+declare
+  imp uuid;
+  r jsonb;
+  ex public.fin_import_rows%rowtype;
+  e_id uuid;
+  p_id uuid;
+  act text;
+  n_created integer := 0; n_held integer := 0; n_already integer := 0; n_changed integer := 0; n_skipped integer := 0;
+begin
+  if not public.can_finance() then raise exception 'Yetki yok.' using errcode = '42501'; end if;
+  if p_month !~ '^[0-9]{4}-(0[1-9]|1[0-2])$' then raise exception 'Aktarım ayı gerekli (YYYY-MM).'; end if;
+  if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) > 500 then raise exception 'Geçersiz satır listesi.'; end if;
+  insert into public.fin_imports (file_name, file_sha256, sheet, period_month, summary)
+  values (p_file_name, p_file_sha256, p_sheet, p_month, coalesce(p_summary, '{}'::jsonb)) returning id into imp;
+  for r in select value from jsonb_array_elements(p_rows) loop
+    act := r->>'action';
+    if act = 'skip_blank' then n_skipped := n_skipped + 1; continue; end if;
+    if (r->>'key') is null or (r->>'hash') is null or (r->>'row') is null then raise exception 'Eksik satır anahtarı.'; end if;
+    select * into ex from public.fin_import_rows where source_key = r->>'key' for update;
+    if found then
+      if ex.row_hash = r->>'hash' then n_already := n_already + 1;
+      else
+        if ex.changed_hash is distinct from r->>'hash' then
+          update public.fin_import_rows set changed_payload = r->'payload', changed_hash = r->>'hash', changed_import_id = imp, changed_at = now() where id = ex.id;
+        end if;
+        n_changed := n_changed + 1;
+      end if;
+      continue;
+    end if;
+    e_id := null; p_id := null;
+    if act in ('create', 'pending_payment') then
+      if (r->>'amount') is null or (r->>'due') is null then raise exception 'Satır %: tutar ve vade olmadan gider oluşturulamaz.', r->>'row'; end if;
+      insert into public.fin_expenses (title, category, kind, recurrence, first_due_on, amount, currency, pay_method, note)
+      values (r->>'name', r->>'category',
+              case when r->>'recurrence' = 'monthly' then 'recurring' else 'once' end,
+              case when r->>'recurrence' = 'monthly' then 'monthly' end,
+              (r->>'due')::date,
+              case when coalesce((r->>'variable')::boolean, false) then null else (r->>'amount')::numeric end,
+              'TRY', nullif(r->>'method', ''), nullif(r->>'note', ''))
+      returning id into e_id;
+      select id into p_id from public.fin_periods where expense_id = e_id and seq = 0;
+      update public.fin_periods
+         set amount = (r->>'amount')::numeric,
+             review_note = case when act = 'pending_payment' then 'Excel’de “Ödendi” işaretli; ödeme tarihi bilinmiyor. Gerçek tarih girilince ödemeyi kaydedin.' end
+       where id = p_id;
+      n_created := n_created + 1;
+    else
+      n_held := n_held + 1;
+    end if;
+    insert into public.fin_import_rows (import_id, source_key, file_name, sheet, source_row, row_hash, payload, plan, action, expense_id, period_id)
+    values (imp, r->>'key', p_file_name, p_sheet, (r->>'row')::integer, r->>'hash', coalesce(r->'payload', '{}'::jsonb), r - 'payload', act, e_id, p_id);
+  end loop;
+  update public.fin_imports set summary = summary || jsonb_build_object('created', n_created, 'held', n_held, 'already', n_already, 'changed', n_changed, 'skipped', n_skipped) where id = imp;
+  return jsonb_build_object('import_id', imp, 'created', n_created, 'held', n_held, 'already', n_already, 'changed', n_changed, 'skipped', n_skipped);
+end $$;
+revoke all on function public.fin_import_apply(text, text, text, text, jsonb, jsonb) from public, anon;
+grant execute on function public.fin_import_apply(text, text, text, text, jsonb, jsonb) to authenticated;
+
 -- ── 6. Operasyon provider costs for finance (read-only, minimal fields) ─
 -- Owner views (they read ops_* as the owner) filtered by can_finance().
 create or replace view public.fin_ops_periods with (security_barrier = true) as
@@ -436,9 +602,14 @@ declare
   new_id uuid;
 begin
   if not public.can_finance() then raise exception 'Yetki yok.' using errcode = '42501'; end if;
+  -- Only a payment TO the provider (direction 'out'): payment, refund from the provider, or adjustment.
+  -- Customer collections (direction 'in'), prices and every other Operasyon field are out of reach.
+  if p_kind is null or p_kind not in ('payment', 'refund', 'adjustment') then raise exception 'Geçersiz işlem türü: yalnızca sağlayıcı ödemesi, iade veya düzeltme.' using errcode = '22023'; end if;
+  if p_amount is null or (p_kind = 'adjustment' and p_amount = 0) or (p_kind <> 'adjustment' and p_amount <= 0) then raise exception 'Geçersiz tutar.' using errcode = '22023'; end if;
   if p_request_key is null then raise exception 'İstek anahtarı gerekli.'; end if;
-  select id into new_id from public.ops_payments where request_key = p_request_key;
+  select id into new_id from public.ops_payments where request_key = p_request_key and direction = 'out' and period_id = p_period;
   if found then return new_id; end if;
+  if exists (select 1 from public.ops_payments where request_key = p_request_key) then raise exception 'İstek anahtarı başka bir kayda ait.' using errcode = '22023'; end if;
   select * into per from public.ops_periods where id = p_period;
   if not found or not exists (select 1 from public.fin_ops_periods v where v.id = p_period) then raise exception 'Operasyon dönemi bulunamadı.'; end if;
   if per.cost_currency is not null and p_currency <> per.cost_currency then
@@ -446,7 +617,7 @@ begin
   end if;
   if p_paid_on is null or p_paid_on > current_date + 1 then raise exception 'Geçerli bir ödeme tarihi gerekli.' using errcode = '23514'; end if;
   insert into public.ops_payments (period_id, service_id, direction, kind, amount, currency, paid_on, method, reference, request_key, created_by)
-  values (per.id, per.service_id, 'out', coalesce(p_kind, 'payment'), p_amount, p_currency, p_paid_on, p_method, p_reference, p_request_key, public.doc_actor())
+  values (per.id, per.service_id, 'out', p_kind, p_amount, p_currency, p_paid_on, p_method, p_reference, p_request_key, public.doc_actor())
   on conflict (request_key) do nothing
   returning id into new_id;
   if new_id is null then select id into new_id from public.ops_payments where request_key = p_request_key; end if;
@@ -462,6 +633,23 @@ begin
    where id = p_payment and direction = 'out' and voided_at is null;
   if not found then raise exception 'Sağlayıcı ödemesi bulunamadı ya da zaten iptal edilmiş.'; end if;
 end $$;
+
+-- Finance history: who did what on expenses, periods, payments, files and on
+-- Operasyon PROVIDER payments only — never the general audit_log (other modules)
+-- and, for ops_payments, only the payment fields (no note / customer link).
+create or replace view public.fin_audit with (security_barrier = true) as
+  select a.id, a.at, a.actor, a.action, a.entity, a.entity_id, a.label,
+         case when a.entity = 'ops_payments'
+              then (select jsonb_object_agg(e.k, e.v) from jsonb_each(coalesce(a.changes, '{}'::jsonb)) as e(k, v)
+                     where e.k in ('kind', 'amount', 'currency', 'paid_on', 'method', 'reference', 'voided_at', 'void_reason'))
+              else a.changes end as changes
+    from public.audit_log a
+   where public.can_finance()
+     and (a.entity in ('fin_expenses', 'fin_periods', 'fin_payments', 'fin_documents', 'fin_imports', 'fin_import_rows')
+          or (a.entity = 'ops_payments'
+              and exists (select 1 from public.ops_payments x where x.id::text = a.entity_id and x.direction = 'out')));
+revoke all on public.fin_audit from public, anon, authenticated;
+grant select on public.fin_audit to authenticated, service_role;
 
 revoke all on function public.fin_ops_pay(uuid, text, numeric, text, date, text, text, uuid) from public, anon;
 revoke all on function public.fin_ops_void(uuid, text) from public, anon;
@@ -515,8 +703,11 @@ commit;
 --   drop function if exists public.ops_payments_append_only();
 --   drop function if exists public.fin_ops_pay(uuid, text, numeric, text, date, text, text, uuid);
 --   drop function if exists public.fin_ops_void(uuid, text);
---   drop view if exists public.fin_ops_periods, public.fin_ops_payments, public.fin_parties;
+--   drop view if exists public.fin_audit, public.fin_ops_periods, public.fin_ops_payments, public.fin_parties;
 --   drop function if exists public.fin_roll_periods(date);
+--   drop function if exists public.fin_import_apply(text, text, text, text, jsonb, jsonb);
+--   drop table if exists public.fin_import_rows, public.fin_imports;
+--   drop function if exists public.fin_imports_guard(), public.fin_import_rows_guard();
 --   drop table if exists public.fin_documents, public.fin_payments, public.fin_periods, public.fin_expenses;
 --   drop function if exists public.fin_expenses_guard(), public.fin_expenses_first_period(), public.fin_periods_guard(),
 --     public.fin_payments_guard(), public.fin_documents_guard(), public.fin_valid_paid(uuid);

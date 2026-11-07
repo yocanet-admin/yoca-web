@@ -128,4 +128,10 @@ test('v25 migration: roles, guards, no delete policy, private bucket, ops append
   assert.match(sql, /values \('fin-docs', 'fin-docs', false/);
   assert.match(sql, /create trigger ops_payments_append_only/);
   assert.match(sql, /new\.created_by := public\.doc_actor\(\)/);
+  // provider payment function: only payment / refund / adjustment, always direction 'out'
+  assert.match(sql, /p_kind not in \('payment', 'refund', 'adjustment'\)/);
+  assert.match(sql, /values \(per\.id, per\.service_id, 'out', p_kind/);
+  // finance history view: fin_* tables and provider payments only
+  assert.match(sql, /create or replace view public\.fin_audit/);
+  assert.match(sql, /x\.direction = 'out'/);
 });
