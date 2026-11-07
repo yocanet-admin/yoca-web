@@ -136,3 +136,28 @@ export function digestOutcome(c: DigestChannels, attempts: number): { status: 's
   const status = retryable ? 'failed' : anySent ? 'sent' : allSkipped ? 'suppressed' : 'failed';
   return { status, retry: retryable, anySent, error: notes.length ? notes.join(' ') : allSkipped ? 'Bildirim kanalı kurulu değil (e-posta/Telegram).' : null };
 }
+
+/**
+ * What a cron run does with today's digest (one digest per Istanbul day):
+ *   off     — the digest is switched off in the Operasyon settings
+ *   skip    — nothing to send and nothing stored yet
+ *   first   — store the content + channels, then send
+ *   retry   — only a stored digest still waiting for a failed channel (due, under 3 attempts)
+ *   already — sent (or not due yet): nothing is sent again
+ * It deliberately does NOT depend on the Giderler result: a run that is reported as
+ * partial (HTTP 500) is re-run like any other and never re-sends a delivered channel.
+ */
+export type DigestRowLite = { status: string; attempts: number; next_attempt_at: string | null; hasChannels: boolean };
+export function digestRunAction(input: { enabled: boolean; row: DigestRowLite | null; empty: boolean; now: number }): 'off' | 'skip' | 'first' | 'retry' | 'already' {
+  if (!input.enabled) return 'off';
+  if (!input.row) return input.empty ? 'skip' : 'first';
+  const r = input.row;
+  const due = r.status === 'failed' && r.attempts < 3 && (!r.next_attempt_at || Date.parse(r.next_attempt_at) <= input.now) && r.hasChannels;
+  return due ? 'retry' : 'already';
+}
+
+/** The cron's own result: a run whose Giderler part failed is not a clean success. */
+export function cronRunResult(expenseError: string | null): { ok: boolean; partial: boolean; status: 200 | 500 } {
+  const partial = Boolean(expenseError);
+  return { ok: !partial, partial, status: partial ? 500 : 200 };
+}

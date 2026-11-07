@@ -10,7 +10,7 @@ import { addDays, istanbulDay, KIND_LABEL, payState, renewState, type PeriodRow,
 import { buildItems as buildFinItems, type Expense, type FinPayment, type FinPeriod } from '@/lib/fin/model';
 import { formatMinor } from '@/lib/ops/money';
 import { offsetText, planReminders, type PlannedReminder } from '@/lib/ops/reminders';
-import { buildOpsDigest, channelsToSend, digestOutcome, OPS_SITE, type DigestChannels, type DigestLine } from '@/lib/ops/digest';
+import { buildOpsDigest, channelsToSend, cronRunResult, digestOutcome, digestRunAction, OPS_SITE, type DigestChannels, type DigestLine } from '@/lib/ops/digest';
 
 /**
  * Yoca Operasyon — TEAM reminders (Vercel Cron 06:00 and 12:00 UTC =
@@ -151,11 +151,12 @@ export async function GET(request: NextRequest) {
   const { data: existingRow } = await db.from('ops_notifications').select('id, status, attempts, next_attempt_at, payload').eq('dedupe_key', digestKey).maybeSingle();
   type DigestRow = { id: string; status: string; attempts: number; next_attempt_at: string | null; payload: StoredDigest | Record<string, never> };
   let row = existingRow as DigestRow | null;
+  const action = digestRunAction({ enabled: settings.digest, row: row ? { status: row.status, attempts: row.attempts, next_attempt_at: row.next_attempt_at, hasChannels: 'channels' in row.payload } : null, empty: digestContent.empty, now: Date.now() });
 
-  if (!settings.digest) {
+  if (action === 'off') {
     digest = 'off';
     await mark(teamItems.map((r) => r.dedupeKey), 'suppressed', 'Günlük özet kapalı (Operasyon ayarları).');
-  } else if (!row && !digestContent.empty) {
+  } else if (action === 'first') {
     // First attempt today: store the content and the channels, then claim the row.
     const notify = await getNotifySettings();
     const channels: DigestChannels = {
@@ -166,10 +167,9 @@ export async function GET(request: NextRequest) {
     const ins = await db.from('ops_notifications').upsert({ dedupe_key: digestKey, kind: 'digest', audience: 'team', target_date: today, status: 'pending', payload }, { onConflict: 'dedupe_key', ignoreDuplicates: true }).select('id, status, attempts, next_attempt_at, payload');
     row = ins.data?.length ? (ins.data[0] as DigestRow) : null;
     if (!row) digest = 'already';
-  } else if (row) {
-    // Same day again: only a digest still waiting for a failed channel is ours to send.
-    const due = row.status === 'failed' && row.attempts < 3 && (!row.next_attempt_at || Date.parse(row.next_attempt_at) <= Date.now()) && 'channels' in row.payload;
-    if (!due) { digest = 'already'; row = null; }
+  } else if (action === 'already') {
+    // Same day again: only a digest still waiting for a failed channel ('retry') is ours to send.
+    digest = 'already'; row = null;
   }
 
   if (row && settings.digest && 'channels' in row.payload) {
@@ -205,8 +205,8 @@ export async function GET(request: NextRequest) {
 
   // A run whose Giderler part failed is NOT reported as a clean success (HTTP 500, ok: false,
   // partial: true), even though the rest of the digest was built and sent as usual above.
-  const partial = Boolean(expenseRun.error);
-  return NextResponse.json({ ok: !partial, partial, today, planned: planned.length, claimed: claimed.length, retried: retry.length, digest, channels: channelsOut ? { email: channelsOut.email.state, telegram: channelsOut.telegram.state } : null, counts: digestContent.counts, expenses: { rolled: expenseRun.rolled, lines: expenseRun.lines.length, error: expenseRun.error }, environment: allowed.reason }, { status: partial ? 500 : 200 });
+  const run = cronRunResult(expenseRun.error);
+  return NextResponse.json({ ok: run.ok, partial: run.partial, today, planned: planned.length, claimed: claimed.length, retried: retry.length, digest, channels: channelsOut ? { email: channelsOut.email.state, telegram: channelsOut.telegram.state } : null, counts: digestContent.counts, expenses: { rolled: expenseRun.rolled, lines: expenseRun.lines.length, error: expenseRun.error }, environment: allowed.reason }, { status: run.status });
 }
 
 /**

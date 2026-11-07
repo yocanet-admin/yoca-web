@@ -218,3 +218,28 @@ test('v23 only guards forward rows and revokes TRUNCATE on ops_notifications (no
   assert.match(sql, /current_user <> 'service_role'/);
   assert.ok(!/delete from|truncate table|drop table|alter table|update public\./.test(sql), 'no data or table change');
 });
+
+test('digest after a partial cron run (Giderler failed, HTTP 500): a re-run never sends a delivered channel again', async () => {
+  const { channelsToSend, cronRunResult, digestRunAction } = await import('../lib/ops/digest');
+  const NOW = Date.parse('2026-11-08T06:05:00Z');
+  const ch = (email: string, telegram: string) => ({ email: { state: email }, telegram: { state: telegram } }) as Parameters<typeof channelsToSend>[0];
+  // 09:00 — Giderler could not roll periods: the run is reported as partial, the digest is still sent once
+  assert.deepEqual(cronRunResult('dönemler oluşturulamadı: permission denied'), { ok: false, partial: true, status: 500 });
+  assert.equal(digestRunAction({ enabled: true, row: null, empty: false, now: NOW }), 'first');
+  // re-run (manual or 15:00) with the error still there: both channels delivered → nothing again
+  const sent = { status: 'sent', attempts: 1, next_attempt_at: null, hasChannels: true };
+  assert.equal(digestRunAction({ enabled: true, row: sent, empty: false, now: NOW + 6 * 3_600_000 }), 'already');
+  assert.equal(cronRunResult('still failing').status, 500);
+  // after the fix: a clean result, still nothing sent again the same day
+  assert.deepEqual(cronRunResult(null), { ok: true, partial: false, status: 200 });
+  assert.equal(digestRunAction({ enabled: true, row: sent, empty: false, now: NOW + 7 * 3_600_000 }), 'already');
+  // partial run AND Telegram refused: the retry is due only after next_attempt_at, and resends ONLY Telegram
+  const tgFailed = { status: 'failed', attempts: 1, next_attempt_at: new Date(NOW + 3 * 3_600_000).toISOString(), hasChannels: true };
+  assert.equal(digestRunAction({ enabled: true, row: tgFailed, empty: false, now: NOW + 3_600_000 }), 'already');
+  assert.equal(digestRunAction({ enabled: true, row: tgFailed, empty: false, now: NOW + 4 * 3_600_000 }), 'retry');
+  assert.deepEqual(channelsToSend(ch('sent', 'failed')), ['telegram']);
+  // after the third attempt it stops; an empty day stores and sends nothing; switched off → off
+  assert.equal(digestRunAction({ enabled: true, row: { ...tgFailed, attempts: 3, next_attempt_at: null }, empty: false, now: NOW }), 'already');
+  assert.equal(digestRunAction({ enabled: true, row: null, empty: true, now: NOW }), 'skip');
+  assert.equal(digestRunAction({ enabled: false, row: null, empty: false, now: NOW }), 'off');
+});
