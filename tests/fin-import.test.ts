@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { exactNumber, excelDate, readWorkbook } from '../lib/fin/xlsx';
-import { planImport, readExpenseSheet } from '../lib/fin/importPlan';
+import { planImport, readExpenseSheet, settleOpsOverlap, suggest } from '../lib/fin/importPlan';
 
 // Synthetic fixture only (tests/fixtures/fin-import-sample.xlsx) — no real data in the repository.
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -83,4 +83,22 @@ test('keys are stable; a changed cell changes the hash, not the key', () => {
   const a = plan.rows.find((r) => r.name === 'ÖRNEK Ofis kirası')!; const b = changed.rows.find((r) => r.name === 'ÖRNEK Ofis kirası')!;
   assert.equal(a.key, b.key);
   assert.notEqual(a.hash, b.hash);
+});
+
+test('possible duplicate only when Operasyon has a service of that kind; otherwise an ordinary suggestion (nothing created)', () => {
+  const domain = row('Domain, hosting, sunucu ve veritabanı');
+  const mail = { ...domain, row: 99, key: 'x|r99|kurumsal-e-posta', name: 'Kurumsal e-posta ve bulut depolama', opsKinds: suggest('Kurumsal e-posta ve bulut depolama').opsKinds };
+  assert.equal(mail.action, 'possible_duplicate');
+  // Operasyon has a VPS only (as in production)
+  const settled = settleOpsOverlap([domain, mail, row('Çalışan maaşları')], ['vps']);
+  assert.equal(settled[0].action, 'possible_duplicate');
+  assert.equal(settled[1].action, 'suggestion');
+  assert.match(settled[1].reasons[0], /Operasyon’da bu türde hizmet yok/);
+  assert.equal(settled[1].amount, mail.amount); // nothing else changes
+  assert.equal(settled[1].hash, mail.hash);     // same source hash → a re-upload is still "already"
+  assert.equal(settled[2].action, 'suggestion');
+  // an e-mail service in Operasyon makes it a candidate again (still never merged)
+  assert.equal(settleOpsOverlap([mail], ['email'])[0].action, 'possible_duplicate');
+  // no Operasyon service at all → no possible duplicates
+  assert.ok(settleOpsOverlap(plan.rows, []).every((r) => r.action !== 'possible_duplicate'));
 });

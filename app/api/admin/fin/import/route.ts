@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, panelRole, sessionUser } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser } from '@/lib/supabase';
 import { readWorkbook } from '@/lib/fin/xlsx';
-import { planImport, readExpenseSheet, type ImportPlan } from '@/lib/fin/importPlan';
+import { planImport, readExpenseSheet, settleOpsOverlap, type ImportPlan } from '@/lib/fin/importPlan';
 
 /**
  * Yoca Giderler — Excel import (admin or finance user).
@@ -64,7 +64,8 @@ export async function POST(request: NextRequest) {
   const byKey = new Map(((existing.data ?? []) as Array<{ source_key: string; row_hash: string; expense_id: string | null; action: string }>).map((e) => [e.source_key, e] as const));
   const opsServices = Array.from(new Map(((ops.data ?? []) as Array<{ service_id: string; service_name: string; service_kind: string; provider_name: string | null }>).map((o) => [o.service_id, o] as const)).values());
   const norm = (s: string) => s.toLocaleLowerCase('tr-TR').trim();
-  const rows = plan.rows.map((r) => {
+  // no Operasyon service of that kind → an ordinary suggestion, not a "possible duplicate" (unchanged if Operasyon could not be read)
+  const rows = (ops.error ? plan.rows : settleOpsOverlap(plan.rows, opsServices.map((o) => o.service_kind))).map((r) => {
     const e = byKey.get(r.key);
     const state = !e ? 'new' : e.row_hash === r.hash ? 'already' : 'changed';
     const sameName = ((exps.data ?? []) as Array<{ id: string; title: string }>).filter((x) => norm(x.title) === norm(r.name) && (!e || x.id !== e.expense_id)).map((x) => x.id);

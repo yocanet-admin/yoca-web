@@ -285,3 +285,18 @@ export function planImport(input: {
   if (!month) questions.push('Aktarım hangi aya (dönem) ait?');
   return { sheet: input.sheet, headerRow: input.headerRow, month, monthEvidence: evidence, warnings, rows, totals, questions };
 }
+
+/**
+ * "Olası eşleşme" needs something to match: a row is kept as a possible Operasyon
+ * overlap only when Operasyon has a service of one of its kinds. Otherwise it is
+ * an ordinary expense-definition suggestion — still never created, never a debt.
+ * Neither case merges, copies or creates anything; the amounts and totals do not change.
+ */
+export function settleOpsOverlap(rows: PlanRow[], opsKindsPresent: Iterable<string>): PlanRow[] {
+  const have = new Set(opsKindsPresent);
+  return rows.map((r) => (r.action !== 'possible_duplicate' || r.opsKinds.some((k) => have.has(k)) ? r : {
+    ...r,
+    action: 'suggestion' as const,
+    reasons: ['Operasyon’da bu türde hizmet yok: olası eşleşme değil, gider tanımı önerisi. Kendiliğinden oluşturulmaz, borç açılmaz.'],
+  }));
+}

@@ -139,8 +139,9 @@ export async function GET(request: NextRequest) {
     tone: 'amber', title: t.title, detail: `son gün ${t.due_on}${t.service_id && byId.get(t.service_id) ? ` · ${byId.get(t.service_id)!.name}` : ''}`,
     href: t.service_id ? link(t.service_id) : t.project_id ? `${OPS_SITE}/admin/ops/projects/${t.project_id}` : `${OPS_SITE}/admin/ops`,
   }));
-  const expenseLines = await expenseDigestLines(db, today);
-  const digestContent = buildOpsDigest({ today, reminders, renewals, payments: paymentLines, tasks, expenses: expenseLines });
+  const expenseRun = await expenseDigestLines(db, today);
+  if (expenseRun.error) console.error(`[cron/ops] Giderler: ${expenseRun.error}`);
+  const digestContent = buildOpsDigest({ today, reminders, renewals, payments: paymentLines, tasks, expenses: expenseRun.lines });
 
   // ── One digest per Istanbul day, each channel tracked on its own ──
   type StoredDigest = { subject: string; email: string; text: string; telegram: string; items: string[]; emailTo: string; chatId: string | null; channels: DigestChannels };
@@ -202,7 +203,7 @@ export async function GET(request: NextRequest) {
     channelsOut = channels;
   }
 
-  return NextResponse.json({ ok: true, today, planned: planned.length, claimed: claimed.length, retried: retry.length, digest, channels: channelsOut ? { email: channelsOut.email.state, telegram: channelsOut.telegram.state } : null, counts: digestContent.counts, environment: allowed.reason });
+  return NextResponse.json({ ok: true, today, planned: planned.length, claimed: claimed.length, retried: retry.length, digest, channels: channelsOut ? { email: channelsOut.email.state, telegram: channelsOut.telegram.state } : null, counts: digestContent.counts, expenses: { rolled: expenseRun.rolled, lines: expenseRun.lines.length, error: expenseRun.error }, environment: allowed.reason });
 }
 
 /**
@@ -210,19 +211,27 @@ export async function GET(request: NextRequest) {
  * within 7 days that are not fully paid. Creates the missing recurring periods
  * first (idempotent; a new period is never "paid" by itself). Operasyon
  * provider payments are NOT listed here (they are in "Ödemeler" already).
+ * This runs on every cron run (09:00 / 15:00 Istanbul), whether or not anyone
+ * opens the Giderler screen. A failure is no longer silent: it is logged and
+ * returned as expenses.error (the rest of the digest is still built).
  * Before v25 (no tables) this returns nothing.
  */
-async function expenseDigestLines(db: NonNullable<ReturnType<typeof getSupabaseAdmin>>, today: string): Promise<DigestLine[]> {
+type ExpenseRun = { lines: DigestLine[]; rolled: number | null; error: string | null };
+async function expenseDigestLines(db: NonNullable<ReturnType<typeof getSupabaseAdmin>>, today: string): Promise<ExpenseRun> {
   try {
-    await db.rpc('fin_roll_periods', { p_until: addDays(today, 45) });
+    const roll = await db.rpc('fin_roll_periods', { p_until: addDays(today, 45) });
+    if (roll.error && /does not exist|schema cache/i.test(roll.error.message)) return { lines: [], rolled: null, error: null }; // before v25
+    const rolled = typeof roll.data === 'number' ? roll.data : null;
+    const rollError = roll.error ? `dönemler oluşturulamadı: ${roll.error.message}` : null;
     const [exp, per, pay] = await Promise.all([
       db.from('fin_expenses').select('*').is('archived_at', null),
       db.from('fin_periods').select('*').eq('status', 'open').lte('due_on', addDays(today, 7)),
       db.from('fin_payments').select('*').is('voided_at', null),
     ]);
-    if (exp.error || per.error || pay.error) return [];
+    const readError = exp.error ?? per.error ?? pay.error;
+    if (readError) return { lines: [], rolled, error: [rollError, `okunamadı: ${readError.message}`].filter(Boolean).join(' · ') };
     const items = buildFinItems({ expenses: (exp.data ?? []) as Expense[], periods: (per.data ?? []) as FinPeriod[], payments: (pay.data ?? []) as FinPayment[], opsPeriods: [], opsPayments: [], parties: [], today });
-    return items
+    const lines = items
       .filter((it) => ['overdue', 'pending', 'partial', 'unknown'].includes(it.summary.state))
       .map((it) => {
         const late = it.summary.state === 'overdue';
@@ -234,7 +243,8 @@ async function expenseDigestLines(db: NonNullable<ReturnType<typeof getSupabaseA
           href: `${OPS_SITE}/admin/expenses/${it.expenseId}?period=${it.periodId}`,
         } as DigestLine;
       });
-  } catch {
-    return [];
+    return { lines, rolled, error: rollError };
+  } catch (error) {
+    return { lines: [], rolled: null, error: (error as Error).message };
   }
 }

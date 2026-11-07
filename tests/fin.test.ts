@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildItems, csvRows, defaultFirstDue, filterItems, obligationState, overview, periodLabel, stateText, type Expense, type FinPayment, type FinPeriod, type OpsCostPeriod } from '../lib/fin/model';
+import { buildItems, csvRows, defaultFirstDue, filterItems, listTotals, monthBounds, obligationState, overview, periodLabel, shiftMonth, stateText, type Expense, type FinPayment, type FinPeriod, type OpsCostPeriod } from '../lib/fin/model';
 import { buildOpsDigest } from '../lib/ops/digest';
 
 const pay = (o: Partial<FinPayment>): FinPayment => ({ id: Math.random().toString(16).slice(2), period_id: 'p1', kind: 'payment', amount: '0', currency: 'TRY', paid_on: '2026-11-01', method: null, reference: null, voided_at: null, void_reason: null, created_by: 'x', created_at: '2026-11-01', ...o });
@@ -68,33 +68,88 @@ test('items: one list from both sources, each counted once', () => {
   assert.equal(items.find((i) => i.periodId === 'o1')!.summary.state, 'partial');
 });
 
-test('overview: per currency, never mixed', () => {
+test('overview: per currency, never mixed; monthly figures = periods due in the selected month', () => {
   const o = overview(sample(), TODAY);
   assert.equal(o.month, '2026-11');
-  assert.deepEqual(o.paidThisMonth, { TRY: BigInt(400000), USD: BigInt(6000) });
+  // November: rent p2 (10 000, 4 000 paid, late) + laptop (50 000) + ops hosting (USD 100, 60 paid)
+  assert.deepEqual(o.total, { TRY: BigInt(1000000 + 5000000), USD: BigInt(10000) });
+  assert.equal(o.count, 3);
+  assert.deepEqual(o.paid, { TRY: BigInt(400000), USD: BigInt(6000) });
+  assert.deepEqual(o.remaining, { TRY: BigInt(600000 + 5000000), USD: BigInt(4000) });
+  assert.equal(o.remainingCount, 3);
   assert.deepEqual(o.overdue, { TRY: BigInt(600000) });
   assert.equal(o.overdueCount, 1);
-  // laptop 15 Nov + ops hosting 10 Nov (USD 40 left) + December rent 5 Dec (within 30 days)
-  assert.deepEqual(o.upcoming, { TRY: BigInt(5000000 + 1200000), USD: BigInt(4000) });
-  assert.equal(o.upcomingCount, 3);
-  assert.deepEqual(o.remainingThisMonth, { TRY: BigInt(600000 + 5000000), USD: BigInt(4000) });
+  // the December rent (12 000, already created) is NOT in November
+  const dec = overview(sample(), TODAY, '2026-12');
+  assert.deepEqual(dec.total, { TRY: BigInt(1200000) });
+  assert.deepEqual(dec.remaining, { TRY: BigInt(1200000) });
+  assert.deepEqual(dec.paid, {});
+  // October: paid in full on 4 Oct
+  const oct = overview(sample(), TODAY, '2026-10');
+  assert.deepEqual(oct.total, { TRY: BigInt(1000000) });
+  assert.deepEqual(oct.paid, { TRY: BigInt(1000000) });
+  assert.deepEqual(oct.remaining, {});
+  // "Geciken" is as of today, whatever month is selected
+  assert.deepEqual(dec.overdue, { TRY: BigInt(600000) });
+});
+
+test('overview: periods created ahead for December never enter November (synthetic office sheet)', () => {
+  const e = (id: string, title: string, amount: string | null) => exp({ id, title, amount });
+  const p = (id: string, expense_id: string, seq: number, due_on: string, amount: string | null, review_note: string | null = null) => per({ id, expense_id, seq, due_on, starts_on: due_on, ends_on: null, amount, review_note });
+  const items = buildItems({
+    expenses: [e('k', 'ÖRNEK kira', '10000'), e('a', 'ÖRNEK aidat', '500'), e('s', 'ÖRNEK su', null), e('i', 'ÖRNEK internet', '700'), e('m', 'ÖRNEK muhasebe', '2000')],
+    periods: [
+      p('k0', 'k', 0, '2026-11-20', '10000'), p('k1', 'k', 1, '2026-12-20', '10000'),
+      p('a0', 'a', 0, '2026-11-30', '500'),
+      p('s0', 's', 0, '2026-11-02', '300', 'Excel: Ödendi, tarih yok'), p('s1', 's', 1, '2026-12-02', null),
+      p('i0', 'i', 0, '2026-11-16', '700'), p('i1', 'i', 1, '2026-12-16', '700'),
+      p('m0', 'm', 0, '2026-11-30', '2000'),
+    ],
+    payments: [], opsPayments: [], opsPeriods: [], parties: [], today: TODAY,
+  });
+  const nov = overview(items, TODAY, '2026-11');
+  assert.deepEqual(nov.total, { TRY: BigInt(1350000) });
+  assert.deepEqual(nov.paid, {});
+  assert.deepEqual(nov.remaining, { TRY: BigInt(1320000) });
+  assert.deepEqual(nov.review, { TRY: BigInt(30000) });
+  assert.equal(nov.unknownCount, 0);
+  const dec = overview(items, TODAY, '2026-12');
+  assert.deepEqual(dec.total, { TRY: BigInt(1070000) });
+  assert.equal(dec.unknownCount, 1); // December water: amount unknown → counted, never a debt
+  assert.deepEqual(dec.review, {});
+  // the list of the selected month uses the same bounds and keeps "review" apart from "Kalan"
+  const b = monthBounds('2026-11');
+  const shown = filterItems(items, { from: b.from, to: b.to });
+  assert.equal(shown.length, 5);
+  const t = listTotals(shown);
+  assert.deepEqual(t.amount, { TRY: BigInt(1350000) });
+  assert.deepEqual(t.remaining, { TRY: BigInt(1320000) });
+  assert.deepEqual(t.review, { TRY: BigInt(30000) });
+});
+
+test('month helpers', () => {
+  assert.deepEqual(monthBounds('2026-11'), { from: '2026-11-01', to: '2026-11-30' });
+  assert.deepEqual(monthBounds('2028-02'), { from: '2028-02-01', to: '2028-02-29' });
+  assert.equal(shiftMonth('2026-12', 1), '2027-01');
+  assert.equal(shiftMonth('2026-01', -1), '2025-12');
 });
 
 test('review: paid in the source without a date — neither paid nor owed nor late, kept separately', () => {
   const items = buildItems({
     expenses: [exp({ id: 'w', title: 'Su', category: 'utilities', amount: null })],
-    periods: [per({ id: 'pw', expense_id: 'w', due_on: '2026-11-02', amount: '1075.00', review_note: 'Excel: Ödendi, tarih yok' })],
+    periods: [per({ id: 'pw', expense_id: 'w', due_on: '2026-11-02', amount: '250.00', review_note: 'Excel: Ödendi, tarih yok' })],
     payments: [], opsPayments: [], opsPeriods: [], parties: [], today: TODAY,
   });
   assert.equal(items[0].summary.state, 'review');
   const o = overview(items, TODAY);
-  assert.deepEqual(o.review, { TRY: BigInt(107500) });
+  assert.deepEqual(o.review, { TRY: BigInt(25000) });
   assert.equal(o.reviewCount, 1);
   assert.deepEqual(o.overdue, {});
-  assert.deepEqual(o.remainingThisMonth, {});
-  assert.deepEqual(o.paidThisMonth, {});
+  assert.deepEqual(o.remaining, {});
+  assert.deepEqual(o.paid, {});
+  assert.deepEqual(o.total, { TRY: BigInt(25000) });
   // once the real payment is recorded it is simply paid
-  const paid = buildItems({ expenses: [exp({ id: 'w', amount: null })], periods: [per({ id: 'pw', expense_id: 'w', due_on: '2026-11-02', amount: '1075.00', review_note: 'x' })], payments: [pay({ period_id: 'pw', amount: '1075', paid_on: '2026-11-05' })], opsPayments: [], opsPeriods: [], parties: [], today: TODAY });
+  const paid = buildItems({ expenses: [exp({ id: 'w', amount: null })], periods: [per({ id: 'pw', expense_id: 'w', due_on: '2026-11-02', amount: '250.00', review_note: 'x' })], payments: [pay({ period_id: 'pw', amount: '250', paid_on: '2026-11-05' })], opsPayments: [], opsPeriods: [], parties: [], today: TODAY });
   assert.equal(paid[0].summary.state, 'paid');
 });
 

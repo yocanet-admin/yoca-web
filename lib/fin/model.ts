@@ -264,38 +264,66 @@ export function filterItems(items: Item[], f: Filter): Item[] {
 export type Totals = Record<string, Minor>;
 const add = (t: Totals, cur: string | null, v: Minor | null) => { if (cur && v !== null) t[cur] = (t[cur] ?? ZERO) + v; };
 
-export interface Overview {
-  month: string;              // YYYY-MM
-  paidThisMonth: Totals;      // valid payments with paid_on in this month (refunds subtract)
-  remainingThisMonth: Totals; // what is still open of the periods due this month
-  overdue: Totals; overdueCount: number;
-  upcoming: Totals; upcomingCount: number;   // due in the next `days` days (after today)
-  unknownCount: number;       // open periods without an amount (counted, not added)
-  review: Totals; reviewCount: number;     // waiting for review (e.g. "Ödendi" in the source without a date): neither paid nor owed
+/* Monthly figures belong to ONE month: the selected one (default: this month in
+ * Istanbul). A period belongs to the month of its due date; another month's
+ * periods (e.g. the December rent created ahead of time) never enter November's
+ * totals. Only "Geciken" is a point-in-time figure (as of today, every month). */
+
+export const MONTH_RE = /^[0-9]{4}-(0[1-9]|1[0-2])$/;
+
+/** First and last day of a YYYY-MM month. */
+export function monthBounds(month: string): { from: string; to: string } {
+  const y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7));
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, '0')}` };
 }
 
-export function overview(items: Item[], today: string, days = 30): Overview {
-  const month = today.slice(0, 7);
-  const o: Overview = { month, paidThisMonth: {}, remainingThisMonth: {}, overdue: {}, overdueCount: 0, upcoming: {}, upcomingCount: 0, unknownCount: 0, review: {}, reviewCount: 0 };
+/** YYYY-MM moved by `by` months. */
+export function shiftMonth(month: string, by: number): string {
+  const d = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1 + by, 1));
+  return d.toISOString().slice(0, 7);
+}
+
+export interface Overview {
+  month: string;                  // YYYY-MM (the selected month)
+  total: Totals; count: number;   // amounts of the month's periods (cancelled excluded)
+  unknownCount: number;           // the month's periods without an amount (counted, never added, never a debt)
+  paid: Totals;                   // valid payments recorded on the month's periods (refunds subtract), whatever their payment date
+  remaining: Totals; remainingCount: number;   // still open of the month's periods ("review" excluded)
+  review: Totals; reviewCount: number;         // the month's periods waiting for a payment date ("Ödendi" in the source): neither paid nor owed
+  overdue: Totals; overdueCount: number;       // as of today, every month (not a monthly figure)
+}
+
+export function overview(items: Item[], today: string, month = today.slice(0, 7)): Overview {
+  const o: Overview = { month, total: {}, count: 0, unknownCount: 0, paid: {}, remaining: {}, remainingCount: 0, review: {}, reviewCount: 0, overdue: {}, overdueCount: 0 };
   for (const it of items) {
-    for (const p of it.payments) {
-      if (p.voided_at || p.paid_on.slice(0, 7) !== month) continue;
-      const amt = parseAmount(p.amount);
-      if (amt === null || amt === undefined) continue;
-      add(o.paidThisMonth, p.currency, p.kind === 'refund' ? -amt : amt);
-    }
     const s = it.summary;
-    if (s.state === 'cancelled' || s.state === 'paid' || s.state === 'over') continue;
-    if (s.state === 'unknown') { if (it.dueOn && daysUntil(it.dueOn, today) <= days) o.unknownCount += 1; continue; }
+    if (s.state === 'cancelled') continue;
+    if (s.state === 'overdue') { add(o.overdue, it.currency, s.remaining); o.overdueCount += 1; }
+    if (!it.dueOn || it.dueOn.slice(0, 7) !== month) continue;
+    o.count += 1;
+    if (s.paid !== ZERO) add(o.paid, it.currency, s.paid);
+    if (s.state === 'unknown') { o.unknownCount += 1; continue; }
+    add(o.total, it.currency, s.expected);
+    if (s.state === 'paid' || s.state === 'over') continue;
     if (s.state === 'review') { add(o.review, it.currency, s.remaining); o.reviewCount += 1; continue; }
-    if (it.dueOn && it.dueOn.slice(0, 7) === month) add(o.remainingThisMonth, it.currency, s.remaining);
-    if (s.state === 'overdue') { add(o.overdue, it.currency, s.remaining); o.overdueCount += 1; continue; }
-    if (it.dueOn) {
-      const d = daysUntil(it.dueOn, today);
-      if (d >= 0 && d <= days) { add(o.upcoming, it.currency, s.remaining); o.upcomingCount += 1; }
-    }
+    add(o.remaining, it.currency, s.remaining); o.remainingCount += 1;
   }
   return o;
+}
+
+/** Totals of the rows shown in the list (same rules as the overview: no amount → counted only; "review" kept apart from "Kalan"). */
+export function listTotals(items: Item[]): { amount: Totals; remaining: Totals; review: Totals; unknown: number } {
+  const t = { amount: {} as Totals, remaining: {} as Totals, review: {} as Totals, unknown: 0 };
+  for (const it of items) {
+    const s = it.summary;
+    if (s.state === 'cancelled') continue;
+    if (s.expected === null || !it.currency) { t.unknown += 1; continue; }
+    add(t.amount, it.currency, s.expected);
+    if (s.remaining === null || s.remaining <= ZERO) continue;
+    add(s.state === 'review' ? t.review : t.remaining, it.currency, s.remaining);
+  }
+  return t;
 }
 
 /* ── CSV ────────────────────────────────────────────────────────── */
