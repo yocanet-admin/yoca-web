@@ -127,6 +127,58 @@ test('overview: periods created ahead for December never enter November (synthet
   assert.deepEqual(t.review, { TRY: BigInt(30000) });
 });
 
+test('overview: net paid of the month with refund, partial and over-payment — real values, nothing trimmed', () => {
+  const items = buildItems({
+    expenses: [exp({ id: 'x' })],
+    periods: [
+      per({ id: 'a', expense_id: 'x', seq: 0, due_on: '2026-11-05', amount: '1000' }),  // paid 1 200, refund 300 → net 900 (partial, late)
+      per({ id: 'b', expense_id: 'x', seq: 1, due_on: '2026-11-10', amount: '400' }),   // paid 500 → over by 100
+      per({ id: 'c', expense_id: 'x', seq: 2, due_on: '2026-11-20', amount: '600' }),   // paid 250 (partial)
+      per({ id: 'd', expense_id: 'x', seq: 3, due_on: '2026-11-25', amount: null }),    // no amount, 80 paid
+      per({ id: 'e', expense_id: 'x', seq: 4, due_on: '2026-12-01', amount: '700' }),   // December, paid in November → not November's
+    ],
+    payments: [
+      pay({ period_id: 'a', amount: '1200', paid_on: '2026-11-03' }), pay({ period_id: 'a', kind: 'refund', amount: '300', paid_on: '2026-11-06' }),
+      pay({ period_id: 'b', amount: '500', paid_on: '2026-10-28' }),   // paid in October, still November's period
+      pay({ period_id: 'c', amount: '250', paid_on: '2026-11-15' }),
+      pay({ period_id: 'd', amount: '80', paid_on: '2026-11-02' }),
+      pay({ period_id: 'e', amount: '700', paid_on: '2026-11-04' }),
+      pay({ period_id: 'c', amount: '999', paid_on: '2026-11-15', voided_at: '2026-11-16' }), // voided: ignored
+    ],
+    opsPayments: [], opsPeriods: [], parties: [], today: TODAY,
+  });
+  const o = overview(items, TODAY, '2026-11');
+  assert.deepEqual(o.total, { TRY: BigInt(200000) });                  // 1 000 + 400 + 600 (unknown not added)
+  assert.deepEqual(o.paid, { TRY: BigInt(90000 + 50000 + 25000 + 8000) }); // net, by period, whatever the payment date
+  assert.deepEqual(o.over, { TRY: BigInt(10000) });
+  assert.deepEqual(o.paidUnknown, { TRY: BigInt(8000) });
+  assert.deepEqual(o.remaining, { TRY: BigInt(10000 + 35000) });
+  assert.equal(o.unknownCount, 1);
+  // total = paid − over − paidUnknown + remaining + review
+  const t = o.total.TRY, p = o.paid.TRY - o.over.TRY - o.paidUnknown.TRY + o.remaining.TRY + (o.review.TRY ?? BigInt(0));
+  assert.equal(p, t);
+  // the over-paid period keeps its real amount and payments
+  assert.equal(items.find((i) => i.periodId === 'b')!.summary.state, 'over');
+  assert.deepEqual(overview(items, TODAY, '2026-12').paid, { TRY: BigInt(70000) });
+});
+
+test('overdue (all months, as of today): "review" and unknown amounts never count as overdue debt', () => {
+  const items = buildItems({
+    expenses: [exp({ id: 'x' })],
+    periods: [
+      per({ id: 'r', expense_id: 'x', seq: 0, due_on: '2026-09-02', amount: '300', review_note: 'Ödendi, tarih yok' }),
+      per({ id: 'u', expense_id: 'x', seq: 1, due_on: '2026-10-02', amount: null }),
+      per({ id: 'l', expense_id: 'x', seq: 2, due_on: '2026-10-20', amount: '200' }),
+    ],
+    payments: [], opsPayments: [], opsPeriods: [], parties: [], today: TODAY,
+  });
+  for (const m of ['2026-09', '2026-11', '2027-01']) {
+    const o = overview(items, TODAY, m);
+    assert.deepEqual(o.overdue, { TRY: BigInt(20000) });
+    assert.equal(o.overdueCount, 1);
+  }
+});
+
 test('month helpers', () => {
   assert.deepEqual(monthBounds('2026-11'), { from: '2026-11-01', to: '2026-11-30' });
   assert.deepEqual(monthBounds('2028-02'), { from: '2028-02-01', to: '2028-02-29' });
