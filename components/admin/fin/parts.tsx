@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react';
 import { Badge, field, fmtDate, fmtDateTime, label, small } from '@/components/admin/ops/ui';
 import { newKey } from '@/lib/documents/client';
-import { archiveFinDocument, finDocumentUrl, listFinDocuments, loadFinHistory, uploadFinDocument, type FinAuditRow, type FinDocument, type PaymentInput } from '@/lib/fin/data';
+import { archiveFinDocument, finDocumentUrl, listFinDocuments, loadFinHistory, uploadFinDocument, type FinAuditRow, type FinDocEntity, type FinDocument, type PaymentInput } from '@/lib/fin/data';
 import { FIN_STATE_TONE, METHODS, METHOD_LABEL, PAYMENT_KIND_LABEL, stateText, type FinPayment, type Item, type StateSummary } from '@/lib/fin/model';
 import { istanbulDay } from '@/lib/ops/model';
-import { formatAmount, formatMinor, parseAmount } from '@/lib/ops/money';
+import { formatAmount, formatMinor, formatTotals, parseAmount } from '@/lib/ops/money';
 
 /**
  * Yoca Giderler — shared pieces: state badge, payment form (one request key
@@ -18,10 +18,10 @@ export function StateBadge({ s }: { s: StateSummary }) {
   return <Badge tone={FIN_STATE_TONE[s.state]}>{stateText(s)}</Badge>;
 }
 
-export function SourceBadge({ source }: { source: 'fin' | 'ops' }) {
+export function SourceBadge({ source, income = false }: { source: 'fin' | 'ops'; income?: boolean }) {
   return source === 'ops'
-    ? <Badge tone="info" title="Kayıt Operasyon'daki sağlayıcı ödemesidir; burada ikinci kez tutulmaz.">Kaynak: Operasyon</Badge>
-    : <Badge tone="muted">Giderler</Badge>;
+    ? <Badge tone="info" title={income ? "Kayıt Operasyon'daki müşteri tahsilatıdır; burada ikinci kez tutulmaz." : "Kayıt Operasyon'daki sağlayıcı ödemesidir; burada ikinci kez tutulmaz."}>Kaynak: Operasyon</Badge>
+    : <Badge tone="muted">{income ? 'Gelirler' : 'Giderler'}</Badge>;
 }
 
 export const money = (v: bigint | null, currency: string | null) => (v !== null && currency ? formatMinor(v, currency) : '—');
@@ -32,8 +32,8 @@ export function Remaining({ it }: { it: Item }) {
 }
 
 /** Payment / refund / adjustment form. The key is fixed per form: a double click or retry is one record. */
-export function PaymentForm({ currency, suggested, ops = false, defaultAccount = '', defaultMethod = '', onSave }: {
-  currency: string; suggested: bigint | null; ops?: boolean; defaultAccount?: string; defaultMethod?: string;
+export function PaymentForm({ currency, suggested, ops = false, income = false, defaultAccount = '', defaultMethod = '', onSave }: {
+  currency: string; suggested: bigint | null; ops?: boolean; income?: boolean; defaultAccount?: string; defaultMethod?: string;
   onSave: (p: PaymentInput, key: string) => Promise<string | null>;
 }) {
   const [key, setKey] = useState(newKey);
@@ -66,11 +66,13 @@ export function PaymentForm({ currency, suggested, ops = false, defaultAccount =
       <div className="grid gap-3 sm:grid-cols-4">
         <label className={label}>Tür
           <select className={field} value={kind} onChange={(e) => setKind(e.target.value as PaymentInput['kind'])}>
-            <option value="payment">Ödeme</option><option value="refund">İade (geri gelen)</option><option value="adjustment">Düzeltme (+/−)</option>
+            {income
+              ? <><option value="payment">Tahsilat</option><option value="refund">İade (müşteriye geri ödenen)</option><option value="adjustment">Düzeltme (+/−)</option></>
+              : <><option value="payment">Ödeme</option><option value="refund">İade (geri gelen)</option><option value="adjustment">Düzeltme (+/−)</option></>}
           </select>
         </label>
         <label className={label}>Tutar ({currency})<input className={field} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" /></label>
-        <label className={label}>Tarih<input type="date" className={field} value={paidOn} max={istanbulDay()} onChange={(e) => setPaidOn(e.target.value)} /></label>
+        <label className={label}>{income ? 'Tahsilat tarihi' : 'Tarih'}<input type="date" className={field} value={paidOn} max={istanbulDay()} onChange={(e) => setPaidOn(e.target.value)} /></label>
         <label className={label}>Yöntem
           <select className={field} value={method} onChange={(e) => setMethod(e.target.value)}>
             <option value="">—</option>{METHODS.map((m) => <option key={m} value={m}>{METHOD_LABEL[m]}</option>)}
@@ -78,7 +80,7 @@ export function PaymentForm({ currency, suggested, ops = false, defaultAccount =
         </label>
       </div>
       <div className={`grid gap-3 ${ops ? 'sm:grid-cols-1' : 'sm:grid-cols-3'}`}>
-        {!ops && <label className={label}>Ödeme hesabı<input className={field} value={account} onChange={(e) => setAccount(e.target.value)} placeholder="ör. şirket kartı" maxLength={200} /></label>}
+        {!ops && <label className={label}>{income ? 'Tahsilat hesabı' : 'Ödeme hesabı'}<input className={field} value={account} onChange={(e) => setAccount(e.target.value)} placeholder={income ? 'ör. şirket TL hesabı' : 'ör. şirket kartı'} maxLength={200} /></label>}
         <label className={label}>Dekont / referans no<input className={field} value={reference} onChange={(e) => setReference(e.target.value)} maxLength={200} /></label>
         {!ops && <label className={label}>Not<input className={field} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} /></label>}
       </div>
@@ -86,26 +88,26 @@ export function PaymentForm({ currency, suggested, ops = false, defaultAccount =
         <button type="button" className="admin-btn admin-btn-primary" disabled={busy || Boolean(problem)} onClick={() => void save()}>{busy ? 'Kaydediliyor…' : 'Kaydı ekle'}</button>
         {problem && amount && <span className="text-[12px] text-yellow-200">{problem}</span>}
         {msg && <span className={`text-[12px] ${msg.tone === 'ok' ? 'text-yoca-green' : 'text-red-300'}`}>{msg.text}</span>}
-        <span className="text-[12px] text-subtle">Bu yalnızca kayıttır; banka işlemi yapılmaz. Dekontu kaydettikten sonra aşağıdan ekleyin.</span>
+        <span className="text-[12px] text-subtle">Bu yalnızca kayıttır; banka işlemi yapılmaz. Tarih gerçek {income ? 'tahsilat' : 'ödeme'} tarihidir. Dekontu kaydettikten sonra aşağıdan ekleyin.</span>
       </div>
     </div>
   );
 }
 
 /** Payment history: voided rows stay visible with who / when / why. */
-export function PaymentList({ payments, onVoid, docEntity }: { payments: FinPayment[]; onVoid: (id: string, reason: string) => Promise<string | null>; docEntity: 'payment' | 'ops_payment' }) {
+export function PaymentList({ payments, onVoid, docEntity, income = false }: { payments: FinPayment[]; onVoid: (id: string, reason: string) => Promise<string | null>; docEntity: 'payment' | 'ops_payment' | 'collection' | 'ops_collection'; income?: boolean }) {
   const [voiding, setVoiding] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [openDocs, setOpenDocs] = useState<string | null>(null);
-  if (!payments.length) return <p className="text-[13px] text-subtle">Ödeme kaydı yok.</p>;
+  if (!payments.length) return <p className="text-[13px] text-subtle">{income ? 'Tahsilat kaydı yok.' : 'Ödeme kaydı yok.'}</p>;
   return (
     <ul className="grid gap-1 text-[13px]">
       {payments.map((p) => (
         <li key={p.id} className={`grid gap-1 border-t border-line py-2 ${p.voided_at ? 'opacity-70' : ''}`}>
           <div className="flex flex-wrap items-center gap-2">
             <span className="tabular-nums">{fmtDate(p.paid_on)}</span>
-            <Badge tone={p.kind === 'payment' ? 'ok' : p.kind === 'refund' ? 'warn' : 'info'}>{PAYMENT_KIND_LABEL[p.kind] ?? p.kind}</Badge>
+            <Badge tone={p.kind === 'payment' ? 'ok' : p.kind === 'refund' ? 'warn' : 'info'}>{(income ? INCOME_KIND_LABEL : PAYMENT_KIND_LABEL)[p.kind] ?? p.kind}</Badge>
             <strong className={`tabular-nums ${p.voided_at ? 'line-through' : ''}`}>{p.kind === 'refund' ? '−' : ''}{formatAmount(p.amount, p.currency)}</strong>
             {p.method && <span className="text-subtle">{METHOD_LABEL[p.method] ?? p.method}</span>}
             {p.account && <span className="text-subtle">· {p.account}</span>}
@@ -135,7 +137,7 @@ export function PaymentList({ payments, onVoid, docEntity }: { payments: FinPaym
 }
 
 /** Files of one record: private bucket "fin-docs", 60-second links, archive instead of delete. */
-export function FinDocs({ entity, entityId }: { entity: 'expense' | 'period' | 'payment' | 'ops_period' | 'ops_payment'; entityId: string }) {
+export function FinDocs({ entity, entityId }: { entity: FinDocEntity; entityId: string }) {
   const [docs, setDocs] = useState<FinDocument[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -178,13 +180,15 @@ export function FinDocs({ entity, entityId }: { entity: 'expense' | 'period' | '
   );
 }
 
-const ENTITY_LABEL: Record<string, string> = { fin_expenses: 'Gider', fin_periods: 'Dönem', fin_payments: 'Ödeme', fin_documents: 'Belge', ops_payments: 'Sağlayıcı ödemesi' };
+const INCOME_KIND_LABEL: Record<string, string> = { payment: 'Tahsilat', refund: 'İade (müşteriye)', adjustment: 'Düzeltme' };
+const ENTITY_LABEL: Record<string, string> = { fin_expenses: 'Gider', fin_periods: 'Dönem', fin_payments: 'Ödeme', fin_documents: 'Belge', ops_payments: 'Operasyon ödemesi', fin_receivables: 'Alacak', fin_collections: 'Tahsilat' };
 const ACTION_LABEL: Record<string, string> = { insert: 'ekledi', update: 'değiştirdi', delete: 'sildi' };
 const FIELD_LABEL: Record<string, string> = {
   title: 'açıklama', category: 'kategori', amount: 'tutar', currency: 'para birimi', due_on: 'vade', ends_on: 'bitiş', owner_email: 'sorumlu',
   pay_account: 'ödeme hesabı', pay_method: 'yöntem', vendor_name: 'firma', provider_id: 'kayıtlı firma', note: 'not', archived_at: 'arşiv',
   status: 'durum', cancel_reason: 'iptal gerekçesi', voided_at: 'iptal', void_reason: 'iptal gerekçesi', auto_debit: 'otomatik talimat',
   paid_on: 'ödeme tarihi', kind: 'tür', reference: 'referans', method: 'yöntem',
+  period_month: 'dönem', payer_name: 'ödeyen', client_id: 'müşteri',
 };
 const QUIET = new Set(['updated_at', 'cancelled_at', 'cancelled_by', 'voided_by', 'archived_by']);
 const short = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : String(v).length > 40 ? `${String(v).slice(0, 40)}…` : String(v));
@@ -208,5 +212,16 @@ export function FinHistory({ ids, refreshKey = '' }: { ids: string[]; refreshKey
         );
       })}
     </ul>
+  );
+}
+
+/** One overview card: totals per currency (never converted), a short explanation underneath. */
+export function TotalsCard({ title, totals, sub, tone }: { title: string; totals: Record<string, bigint>; sub?: string; tone?: 'bad' | 'warn' | 'ok' }) {
+  return (
+    <div className={`grid content-start gap-0.5 border px-3 py-2.5 ${tone === 'bad' ? 'border-red-500/50' : tone === 'warn' ? 'border-yellow-400/40' : tone === 'ok' ? 'border-yoca-lime/40' : 'border-line'}`}>
+      <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-subtle">{title}</span>
+      <span className="text-[16px] font-extrabold tabular-nums">{formatTotals(totals)}</span>
+      {sub && <span className="text-[12px] text-subtle">{sub}</span>}
+    </div>
   );
 }

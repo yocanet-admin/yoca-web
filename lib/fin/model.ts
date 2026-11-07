@@ -179,10 +179,10 @@ export interface Item {
   summary: StateSummary;
 }
 
-const OPS_KIND: Record<string, string> = { domain: 'Alan adı', hosting: 'Hosting', vps: 'VPS', server: 'Sunucu', email: 'E-posta', ssl: 'SSL', saas: 'Yazılım', maintenance: 'Bakım', other: 'Diğer' };
+export const OPS_KIND: Record<string, string> = { domain: 'Alan adı', hosting: 'Hosting', vps: 'VPS', server: 'Sunucu', email: 'E-posta', ssl: 'SSL', saas: 'Yazılım', maintenance: 'Bakım', other: 'Diğer' };
 const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
-const shortDate = (d: string) => `${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1].slice(0, 3)} ${d.slice(0, 4)}`;
-const monthYear = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
+export const shortDate = (d: string) => `${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1].slice(0, 3)} ${d.slice(0, 4)}`;
+export const monthYear = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
 
 /** "Kasım 2026" (monthly), "Kasım 2026 – Ocak 2027" (quarterly), "2026–2027" (yearly). */
 export function periodLabel(p: { starts_on: string | null; ends_on: string | null }, recurrence: string | null): string | null {
