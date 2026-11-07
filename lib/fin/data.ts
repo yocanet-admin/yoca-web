@@ -144,7 +144,9 @@ export async function voidOpsPayment(id: string, reason: string): Promise<string
 export const FIN_DOC_MAX = 20 * 1024 * 1024;
 export const FIN_DOC_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'text/plain', 'text/csv', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
 
-export async function uploadFinDocument(entity: 'expense' | 'period' | 'payment' | 'ops_period' | 'ops_payment', entityId: string, file: File): Promise<{ doc?: FinDocument; error?: string }> {
+export type FinDocEntity = 'expense' | 'period' | 'payment' | 'ops_period' | 'ops_payment' | 'receivable' | 'collection' | 'ops_receivable' | 'ops_collection';
+
+export async function uploadFinDocument(entity: FinDocEntity, entityId: string, file: File): Promise<{ doc?: FinDocument; error?: string }> {
   if (file.size > FIN_DOC_MAX) return { error: 'Dosya 20 MB’tan büyük.' };
   if (!FIN_DOC_TYPES.includes(file.type)) return { error: `Bu dosya türü yüklenemez (${file.type || 'bilinmiyor'}). PDF, görsel, metin, CSV, Word veya Excel.` };
   const safe = file.name.normalize('NFD').replace(/[^\w.\-]+/g, '_').slice(-80) || 'belge';
@@ -175,7 +177,7 @@ export async function finDocumentUrl(path: string): Promise<string | null> {
   return data?.signedUrl ?? null;
 }
 
-/* ── History (fin_audit: Giderler records + Operasyon provider payments only) ── */
+/* ── History (fin_audit: Finans records + Operasyon customer / provider payments; not the general audit log) ── */
 
 export interface FinAuditRow { id: number; at: string; actor: string | null; action: string; entity: string; entity_id: string | null; label: string | null; changes: Record<string, { from: unknown; to: unknown }> | null }
 

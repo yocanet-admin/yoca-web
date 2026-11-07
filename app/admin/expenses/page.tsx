@@ -6,9 +6,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Badge, Empty, Flash, PageHead, field, fmtDate, small } from '@/components/admin/ops/ui';
 import { Remaining, SourceBadge, StateBadge, money } from '@/components/admin/fin/parts';
 import { ImportPanel } from '@/components/admin/fin/ImportPanel';
+import { MonthPicker } from '@/components/admin/fin/MonthPicker';
+import { FinanceNav } from '@/components/admin/fin/FinanceNav';
 import { loadFinance, type FinData } from '@/lib/fin/data';
 import {
-  CATEGORIES, CATEGORY_LABEL, CSV_HEADER, FIN_STATE_LABEL, MONTH_RE, RECURRENCE_LABEL, buildItems, csvRows, filterItems, listTotals, monthBounds, overview, shiftMonth,
+  CATEGORIES, CATEGORY_LABEL, CSV_HEADER, FIN_STATE_LABEL, MONTH_RE, RECURRENCE_LABEL, buildItems, csvRows, filterItems, listTotals, monthBounds, overview,
   type Filter, type Item, type Totals,
 } from '@/lib/fin/model';
 import { toCsv } from '@/lib/ops/csv';
@@ -103,11 +105,9 @@ function ExpensesPage() {
         </>}
       />
 
-      <div className="flex flex-wrap items-center gap-2" aria-label="Dönem seçimi">
-        <span className="text-[12px] font-semibold text-muted">Dönem</span>
-        <button type="button" className={small} onClick={() => goMonth(shiftMonth(month, -1))} aria-label="Önceki ay">‹</button>
-        <input type="month" className={`${field} w-auto`} value={month} onChange={(e) => { if (MONTH_RE.test(e.target.value)) goMonth(e.target.value); }} aria-label="Ay" />
-        <button type="button" className={small} onClick={() => goMonth(shiftMonth(month, 1))} aria-label="Sonraki ay">›</button>
+      <FinanceNav active="expenses" />
+      <div className="flex flex-wrap items-center gap-2">
+        <MonthPicker value={month} onChange={goMonth} thisMonth={thisMonth} />
         {month !== thisMonth && <button type="button" className={small} onClick={() => goMonth(thisMonth)}>Bu aya dön</button>}
       </div>
       <section aria-label="Genel bakış" className={`-mt-3 grid gap-3 sm:grid-cols-2 ${ov.reviewCount ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>

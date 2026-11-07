@@ -10,7 +10,7 @@
  * Money is per currency; nothing is converted or mixed.
  */
 
-import { daysUntil } from '@/lib/ops/model';
+import { addDays, daysUntil } from '@/lib/ops/model';
 import { parseAmount, type Minor } from '@/lib/ops/money';
 
 const ZERO = BigInt(0);
@@ -179,10 +179,10 @@ export interface Item {
   summary: StateSummary;
 }
 
-const OPS_KIND: Record<string, string> = { domain: 'Alan adı', hosting: 'Hosting', vps: 'VPS', server: 'Sunucu', email: 'E-posta', ssl: 'SSL', saas: 'Yazılım', maintenance: 'Bakım', other: 'Diğer' };
+export const OPS_KIND: Record<string, string> = { domain: 'Alan adı', hosting: 'Hosting', vps: 'VPS', server: 'Sunucu', email: 'E-posta', ssl: 'SSL', saas: 'Yazılım', maintenance: 'Bakım', other: 'Diğer' };
 const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
-const shortDate = (d: string) => `${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1].slice(0, 3)} ${d.slice(0, 4)}`;
-const monthYear = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
+export const shortDate = (d: string) => `${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1].slice(0, 3)} ${d.slice(0, 4)}`;
+export const monthYear = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
 
 /** "Kasım 2026" (monthly), "Kasım 2026 – Ocak 2027" (quarterly), "2026–2027" (yearly). */
 export function periodLabel(p: { starts_on: string | null; ends_on: string | null }, recurrence: string | null): string | null {
@@ -357,4 +357,16 @@ export function defaultFirstDue(today: string, day = 1): string {
     return new Date(Date.UTC(yy, mm, Math.min(day, last))).toISOString().slice(0, 10);
   };
   return d <= day ? pick(y, m) : pick(y, m + 1);
+}
+
+/* ── Team digest window ─────────────────────────────────────────── */
+
+/** Giderler lines of the team digest: overdue, or due within this many days of today (Istanbul day). */
+export const DIGEST_DAYS = 7;
+export const digestUntil = (today: string) => addDays(today, DIGEST_DAYS);
+
+/** What the digest lists: open, not settled, due on or before today + 7 days. "review" and paid periods never. */
+export function digestExpenseItems(items: Item[], today: string): Item[] {
+  const until = digestUntil(today);
+  return items.filter((it) => it.dueOn !== null && it.dueOn <= until && ['overdue', 'pending', 'partial', 'unknown'].includes(it.summary.state));
 }

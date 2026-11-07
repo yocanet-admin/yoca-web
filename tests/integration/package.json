@@ -1,0 +1,10 @@
+{
+  "name": "yoca-integration-tests",
+  "private": true,
+  "description": "Yoca local integration tests (test gateway + PostgreSQL + Playwright). Never points at production.",
+  "dependencies": {
+    "pg": "8.13.1",
+    "playwright": "1.63.0",
+    "tsx": "4.23.12"
+  }
+}

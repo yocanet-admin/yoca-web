@@ -15,7 +15,7 @@ import { clearDocBackups } from '@/lib/documents/backup';
  * signed out and the sidebar + content layout when signed in.
  *
  * Roles (v25, /api/admin/me): an admin sees every section; a finance user
- * ("Finans sorumlusu") sees only Giderler. The menu is not the protection:
+ * ("Finans sorumlusu") sees only Finans (Genel bakış, Gelirler, Giderler). The menu is not the protection:
  * the database (RLS: is_admin() / can_finance()) and the admin API routes
  * (requireAdmin) refuse a finance user everywhere else.
  */
@@ -46,7 +46,11 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
   },
   {
     title: 'Finans',
-    items: [{ href: '/admin/expenses', label: 'Giderler', icon: '⊖' }],
+    items: [
+      { href: '/admin/finance', label: 'Genel bakış', icon: '≡' },
+      { href: '/admin/finance/income', label: 'Gelirler', icon: '⊕' },
+      { href: '/admin/expenses', label: 'Giderler', icon: '⊖' },
+    ],
   },
   {
     title: 'Site içeriği',
@@ -72,13 +76,14 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
 ];
 
 const NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
-// Finance user: the Giderler section only.
-const FINANCE_HOME = '/admin/expenses';
+// Finance user: the Finans section only (Genel bakış, Gelirler, Giderler).
+const FINANCE_HOME = '/admin/finance';
+const FINANCE_ROOTS = ['/admin/finance', '/admin/expenses'];
 const FINANCE_GROUPS = NAV_GROUPS.filter((group) => group.title === 'Finans');
-const financePath = (pathname: string) => pathname === FINANCE_HOME || pathname.startsWith(`${FINANCE_HOME}/`);
+const financePath = (pathname: string) => FINANCE_ROOTS.some((root) => pathname === root || pathname.startsWith(`${root}/`));
 
 // Section roots that have their own sub-pages in the menu match exactly.
-const EXACT = new Set(['/admin', '/admin/ops']);
+const EXACT = new Set(['/admin', '/admin/ops', '/admin/finance']);
 const isActive = (href: string, pathname: string) => (EXACT.has(href) ? pathname === href : pathname === href || pathname.startsWith(`${href}/`));
 
 const NOT_ALLOWED = 'Bu hesabın yönetim paneline erişim izni yok. Yetkili bir hesapla giriş yapın.';
@@ -137,7 +142,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     };
   }, [userId, token, supabase, access?.userId]);
 
-  // A finance user outside Giderler goes to Giderler (the data is closed to them anyway).
+  // A finance user outside Finans goes to the Finans overview (the data is closed to them anyway).
   const isFinance = access?.role === 'finance';
   useEffect(() => {
     if (isFinance && !financePath(pathname)) router.replace(FINANCE_HOME);
@@ -338,7 +343,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       {/* Mobile / tablet: compact top bar + slide-down menu */}
       <div className="sticky top-0 z-40 lg:hidden">
         <div className="flex h-14 items-center justify-between gap-3 border-b border-line bg-surface-deep/95 px-4 backdrop-blur">
-          <Link href={home} className="flex-none" aria-label={isFinance ? 'Giderler' : 'Kokpit'}>
+          <Link href={home} className="flex-none" aria-label={isFinance ? 'Finans' : 'Kokpit'}>
             <img src="/brand/yoca-logo-primary.svg" alt="Yoca" width={104} height={26} className="h-6 w-auto" />
           </Link>
           <span className="min-w-0 flex-1 truncate text-center text-[13px] font-bold text-soft">{current?.label ?? 'Yönetim'}</span>
