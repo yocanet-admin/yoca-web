@@ -288,14 +288,17 @@ export interface Overview {
   month: string;                  // YYYY-MM (the selected month)
   total: Totals; count: number;   // amounts of the month's periods (cancelled excluded)
   unknownCount: number;           // the month's periods without an amount (counted, never added, never a debt)
-  paid: Totals;                   // valid payments recorded on the month's periods (refunds subtract), whatever their payment date
+  paid: Totals;                   // NET valid payments recorded on the month's periods (refunds subtract, adjustments signed), whatever their payment date
+  over: Totals;                   // part of `paid` above the amount of over-paid periods (real values, never trimmed)
+  paidUnknown: Totals;            // part of `paid` on periods without an amount (not in `total`)
   remaining: Totals; remainingCount: number;   // still open of the month's periods ("review" excluded)
   review: Totals; reviewCount: number;         // the month's periods waiting for a payment date ("Ödendi" in the source): neither paid nor owed
-  overdue: Totals; overdueCount: number;       // as of today, every month (not a monthly figure)
+  overdue: Totals; overdueCount: number;       // as of today, every month (not a monthly figure); "review" and unknown amounts never count as overdue
 }
+// For the month: total = paid − over − paidUnknown + remaining + review (each figure is the real one; nothing is adjusted to make it add up).
 
 export function overview(items: Item[], today: string, month = today.slice(0, 7)): Overview {
-  const o: Overview = { month, total: {}, count: 0, unknownCount: 0, paid: {}, remaining: {}, remainingCount: 0, review: {}, reviewCount: 0, overdue: {}, overdueCount: 0 };
+  const o: Overview = { month, total: {}, count: 0, unknownCount: 0, paid: {}, over: {}, paidUnknown: {}, remaining: {}, remainingCount: 0, review: {}, reviewCount: 0, overdue: {}, overdueCount: 0 };
   for (const it of items) {
     const s = it.summary;
     if (s.state === 'cancelled') continue;
@@ -303,9 +306,10 @@ export function overview(items: Item[], today: string, month = today.slice(0, 7)
     if (!it.dueOn || it.dueOn.slice(0, 7) !== month) continue;
     o.count += 1;
     if (s.paid !== ZERO) add(o.paid, it.currency, s.paid);
-    if (s.state === 'unknown') { o.unknownCount += 1; continue; }
+    if (s.state === 'unknown') { o.unknownCount += 1; if (s.paid !== ZERO) add(o.paidUnknown, it.currency, s.paid); continue; }
     add(o.total, it.currency, s.expected);
-    if (s.state === 'paid' || s.state === 'over') continue;
+    if (s.state === 'over') { add(o.over, it.currency, s.remaining === null ? null : -s.remaining); continue; }
+    if (s.state === 'paid') continue;
     if (s.state === 'review') { add(o.review, it.currency, s.remaining); o.reviewCount += 1; continue; }
     add(o.remaining, it.currency, s.remaining); o.remainingCount += 1;
   }

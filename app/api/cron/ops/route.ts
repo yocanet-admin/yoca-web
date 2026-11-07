@@ -203,7 +203,10 @@ export async function GET(request: NextRequest) {
     channelsOut = channels;
   }
 
-  return NextResponse.json({ ok: true, today, planned: planned.length, claimed: claimed.length, retried: retry.length, digest, channels: channelsOut ? { email: channelsOut.email.state, telegram: channelsOut.telegram.state } : null, counts: digestContent.counts, expenses: { rolled: expenseRun.rolled, lines: expenseRun.lines.length, error: expenseRun.error }, environment: allowed.reason });
+  // A run whose Giderler part failed is NOT reported as a clean success (HTTP 500, ok: false,
+  // partial: true), even though the rest of the digest was built and sent as usual above.
+  const partial = Boolean(expenseRun.error);
+  return NextResponse.json({ ok: !partial, partial, today, planned: planned.length, claimed: claimed.length, retried: retry.length, digest, channels: channelsOut ? { email: channelsOut.email.state, telegram: channelsOut.telegram.state } : null, counts: digestContent.counts, expenses: { rolled: expenseRun.rolled, lines: expenseRun.lines.length, error: expenseRun.error }, environment: allowed.reason }, { status: partial ? 500 : 200 });
 }
 
 /**
@@ -212,8 +215,9 @@ export async function GET(request: NextRequest) {
  * first (idempotent; a new period is never "paid" by itself). Operasyon
  * provider payments are NOT listed here (they are in "Ödemeler" already).
  * This runs on every cron run (09:00 / 15:00 Istanbul), whether or not anyone
- * opens the Giderler screen. A failure is no longer silent: it is logged and
- * returned as expenses.error (the rest of the digest is still built).
+ * opens the Giderler screen. A failure is no longer silent: it is logged,
+ * returned as expenses.error and the run answers ok: false / partial: true
+ * (HTTP 500); the rest of the digest is still built and sent.
  * Before v25 (no tables) this returns nothing.
  */
 type ExpenseRun = { lines: DigestLine[]; rolled: number | null; error: string | null };

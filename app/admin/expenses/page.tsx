@@ -112,12 +112,12 @@ function ExpensesPage() {
       </div>
       <section aria-label="Genel bakış" className={`-mt-3 grid gap-3 sm:grid-cols-2 ${ov.reviewCount ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>
         <Card title={`Gider · ${monthName}`} totals={ov.total} sub={`${ov.count} dönem${ov.unknownCount ? ` · ${ov.unknownCount} dönemin tutarı bekleniyor` : ''}`} />
-        <Card title={`Ödenen · ${monthName}`} totals={ov.paid} sub="Bu ayın dönemlerine kaydedilen geçerli ödemeler (iadeler düşülür)" />
+        <Card title={`Ödenen · ${monthName}`} totals={ov.paid} sub={`${monthName} dönemlerine kaydedilen net ödemeler (iadeler düşülür); ödeme tarihine göre değil${Object.keys(ov.over).length ? ` · ${formatTotals(ov.over)} fazla ödeme dahil` : ''}${Object.keys(ov.paidUnknown).length ? ` · ${formatTotals(ov.paidUnknown)} tutarı bilinmeyen dönemlere` : ''}`} />
         <Card title={`Kalan · ${monthName}`} totals={ov.remaining} sub={`${ov.remainingCount} dönem`} />
         {ov.reviewCount > 0 && <Card title="Ödendi işaretli · tarih bekleniyor" totals={ov.review} sub={`${ov.reviewCount} dönem · ödeme sayılmaz, gecikmeye girmez`} tone="warn" />}
-        <Card title="Geciken · bugün itibarıyla" totals={ov.overdue} sub={`${ov.overdueCount} dönem · tüm aylar`} tone={ov.overdueCount ? 'bad' : undefined} />
+        <Card title="Geciken · Tüm aylar · bugün itibarıyla" totals={ov.overdue} sub={`${ov.overdueCount} dönem · ödeme tarihi bekleyen ve tutarı bilinmeyen dönemler hariç`} tone={ov.overdueCount ? 'bad' : undefined} />
       </section>
-      <p className="-mt-3 text-[12px] text-subtle">Aylık kartlar yalnızca vadesi {monthName} içinde olan dönemleri sayar; sonraki ay için önceden açılan dönemler o ayın toplamına girer. Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Operasyon sağlayıcı ödemeleri tek kayıt olarak sayılır; vadesi bilinmeyen kayıtlar aylık toplamlara girmez. Tutarı beklenen dönemler toplamlara katılmaz.{ov.reviewCount ? ` Kaynakta “Ödendi” işaretli ama ödeme tarihi beklenen ${ov.reviewCount} dönem (${formatTotals(ov.review)}) ayrı gösterilir: ödeme sayılmaz, gecikmeye girmez.` : ''}</p>
+      <p className="-mt-3 text-[12px] text-subtle">Aylık kartlar yalnızca vadesi {monthName} içinde olan dönemleri sayar; sonraki ay için önceden açılan dönemler o ayın toplamına girer. “Ödenen”, bu dönemlere kaydedilen net ödemedir (iadeler düşülür); ödemenin hangi tarihte yapıldığına bakılmaz. Fazla ödeme olduğu gibi gösterilir, toplamlar eşitlensin diye değiştirilmez. Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Operasyon sağlayıcı ödemeleri tek kayıt olarak sayılır; vadesi bilinmeyen kayıtlar aylık toplamlara girmez. Tutarı beklenen dönemler toplamlara katılmaz.{ov.reviewCount ? ` Kaynakta “Ödendi” işaretli ama ödeme tarihi beklenen ${ov.reviewCount} dönem (${formatTotals(ov.review)}) ayrı gösterilir: ödeme sayılmaz, gecikmeye girmez.` : ''}</p>
 
       <div className="flex flex-wrap gap-2" role="tablist">
         {([['periods', 'Dönemler ve ödemeler'], ['defs', 'Gider tanımları'], ['import', 'Aktarım']] as const).map(([k, t]) => (
