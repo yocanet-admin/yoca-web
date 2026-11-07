@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminCheck, bearerToken, isAllowedAdminEmail, sessionUser } from '@/lib/cockpit/auth';
+import { adminCheck, bearerToken, isAllowedAdminEmail, panelRole, sessionUser } from '@/lib/cockpit/auth';
 import { getWorkSourceStatus } from '@/lib/work';
 
 /**
  * Yoca cockpit — "may this signed-in user use the panel?" (admin shell check).
  * Same rule as every admin API route: valid session + optional ADMIN_EMAILS +
- * database is_admin(). Returns { ok, allowed, reason }; lists are never exposed.
+ * database is_admin(). Returns { ok, allowed, role, reason }; lists are never
+ * exposed. role: 'admin', or 'finance' (v25: Giderler screens only).
  *   reason "not_admin"    → not in public.admin_users (or not in ADMIN_EMAILS)
  *   reason "check_failed" → is_admin() missing/unreachable (fails closed)
  * For an allowed admin it also returns `warnings`: configuration problems the
@@ -25,10 +26,16 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const user = await sessionUser(request);
   if (!user) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-  if (!isAllowedAdminEmail(user.email)) return NextResponse.json({ ok: true, allowed: false, reason: 'not_admin' });
-  const check = await adminCheck(bearerToken(request));
+  const token = bearerToken(request);
+  const role = await panelRole(token);
+  if (role === 'check_failed') return NextResponse.json({ ok: true, allowed: false, reason: 'check_failed' });
+  // Finance user: only the Giderler screens (data access is enforced by RLS / can_finance()).
+  // ADMIN_EMAILS narrows the ADMINS only; it is not a finance list.
+  if (role === 'finance') return NextResponse.json({ ok: true, allowed: true, role: 'finance', warnings: [] });
+  if (role !== 'admin' || !isAllowedAdminEmail(user.email)) return NextResponse.json({ ok: true, allowed: false, reason: 'not_admin' });
+  const check = await adminCheck(token);
   if (!check.ok) return NextResponse.json({ ok: true, allowed: false, reason: check.reason });
   const work = await getWorkSourceStatus();
   const warnings = WORK_WARNINGS[work] ? [WORK_WARNINGS[work]] : [];
-  return NextResponse.json({ ok: true, allowed: true, warnings });
+  return NextResponse.json({ ok: true, allowed: true, role: 'admin', warnings });
 }

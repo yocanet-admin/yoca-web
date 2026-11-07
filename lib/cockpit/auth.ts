@@ -67,6 +67,33 @@ export async function adminCheck(token: string): Promise<AdminCheck> {
   }
 }
 
+/**
+ * The panel role of this session (v25): 'admin' | 'finance' | null, or
+ * 'check_failed'. A finance user ("Finans sorumlusu") only gets the Giderler
+ * screens: is_admin() is false for them, so every admin API route
+ * (requireAdmin) and every is_admin() policy still refuses them. Before v25
+ * (no panel_role()) this falls back to is_admin().
+ */
+export async function panelRole(token: string): Promise<'admin' | 'finance' | null | 'check_failed'> {
+  const client = getSupabaseAsUser(token);
+  if (!client) return 'check_failed';
+  try {
+    const { data, error } = await client.rpc('panel_role');
+    if (error) {
+      if (/function|does not exist|schema cache/i.test(error.message)) {
+        const check = await adminCheck(token);
+        return check.ok ? 'admin' : check.reason === 'not_admin' ? null : 'check_failed';
+      }
+      console.error('panelRole: panel_role() failed:', error.message);
+      return 'check_failed';
+    }
+    return data === 'admin' || data === 'finance' ? data : null;
+  } catch (error) {
+    console.error('panelRole: panel_role() failed:', (error as Error).message);
+    return 'check_failed';
+  }
+}
+
 export function bearerToken(request: NextRequest): string {
   const header = request.headers.get('authorization') ?? '';
   return header.startsWith('Bearer ') ? header.slice(7) : '';

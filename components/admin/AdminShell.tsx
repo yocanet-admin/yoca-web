@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/adminClient';
@@ -13,6 +13,11 @@ import { clearDocBackups } from '@/lib/documents/backup';
  * Yoca — admin shell (Client Component).
  * Handles Supabase Auth (email + password), renders the login screen when
  * signed out and the sidebar + content layout when signed in.
+ *
+ * Roles (v25, /api/admin/me): an admin sees every section; a finance user
+ * ("Finans sorumlusu") sees only Giderler. The menu is not the protection:
+ * the database (RLS: is_admin() / can_finance()) and the admin API routes
+ * (requireAdmin) refuse a finance user everywhere else.
  */
 
 const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: string; icon: string }> }> = [
@@ -40,6 +45,10 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
     ],
   },
   {
+    title: 'Finans',
+    items: [{ href: '/admin/expenses', label: 'Giderler', icon: '⊖' }],
+  },
+  {
     title: 'Site içeriği',
     items: [
       { href: '/admin/sections', label: 'Bölümler', icon: '◧' },
@@ -63,6 +72,10 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
 ];
 
 const NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
+// Finance user: the Giderler section only.
+const FINANCE_HOME = '/admin/expenses';
+const FINANCE_GROUPS = NAV_GROUPS.filter((group) => group.title === 'Finans');
+const financePath = (pathname: string) => pathname === FINANCE_HOME || pathname.startsWith(`${FINANCE_HOME}/`);
 
 // Section roots that have their own sub-pages in the menu match exactly.
 const EXACT = new Set(['/admin', '/admin/ops']);
@@ -73,6 +86,7 @@ const CHECK_FAILED = 'Yönetici kontrolü yapılamadı (veritabanındaki is_admi
 
 export default function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const supabase = getAdminClient();
 
   const [session, setSession] = useState<Session | null>(null);
@@ -83,7 +97,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const [signingIn, setSigningIn] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // Optional ADMIN_EMAILS allowlist, checked on the server (the list itself is never sent here).
-  const [access, setAccess] = useState<{ userId: string; allowed: boolean } | null>(null);
+  const [access, setAccess] = useState<{ userId: string; allowed: boolean; role: 'admin' | 'finance' | null } | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const userId = session?.user.id ?? null;
   const token = session?.access_token ?? null;
@@ -97,10 +111,12 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       // and the database policies (v12) enforce the same admin rule on every request.
       let allowed = true;
       let reason: string | undefined;
+      let role: 'admin' | 'finance' | null = null;
       try {
         const response = await fetch('/api/admin/me', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
-        const body = (await response.json().catch(() => null)) as { ok?: boolean; allowed?: boolean; reason?: string; warnings?: string[] } | null;
+        const body = (await response.json().catch(() => null)) as { ok?: boolean; allowed?: boolean; role?: string; reason?: string; warnings?: string[] } | null;
         if (!cancelled) setWarnings(Array.isArray(body?.warnings) ? body.warnings : []);
+        if (body?.role === 'admin' || body?.role === 'finance') role = body.role;
         if (response.ok && body?.ok && body.allowed === false) {
           allowed = false;
           reason = body.reason;
@@ -109,7 +125,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         /* network error: see above */
       }
       if (cancelled) return;
-      setAccess({ userId, allowed });
+      setAccess({ userId, allowed, role });
       if (!allowed) {
         setError(reason === 'check_failed' ? CHECK_FAILED : NOT_ALLOWED);
         await supabase.auth.signOut();
@@ -120,6 +136,12 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [userId, token, supabase, access?.userId]);
+
+  // A finance user outside Giderler goes to Giderler (the data is closed to them anyway).
+  const isFinance = access?.role === 'finance';
+  useEffect(() => {
+    if (isFinance && !financePath(pathname)) router.replace(FINANCE_HOME);
+  }, [isFinance, pathname, router]);
 
   // The mobile menu closes on navigation and with Escape.
   useEffect(() => setMenuOpen(false), [pathname]);
@@ -194,7 +216,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
 
   // ── Loading (session, then the allowlist check) ─────────────
   const checkingAccess = Boolean(session) && access?.userId !== session?.user.id;
-  if (loading || checkingAccess || (session && access && !access.allowed)) {
+  if (loading || checkingAccess || (session && access && !access.allowed) || (isFinance && !financePath(pathname))) {
     return (
       <div className="relative z-[7] flex min-h-screen items-center justify-center">
         <span className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-yoca-lime" />
@@ -258,11 +280,13 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   }
 
   // ── Authenticated layout ─────────────────────────────────────
+  const groups = isFinance ? FINANCE_GROUPS : NAV_GROUPS;
+  const home = isFinance ? FINANCE_HOME : '/admin';
   const current = NAV_ITEMS.find((item) => isActive(item.href, pathname));
 
   const navLinks = (variant: 'sidebar' | 'drawer') => (
     <nav aria-label="Admin" className="grid gap-5">
-      {NAV_GROUPS.map((group) => (
+      {groups.map((group) => (
         <div key={group.title} className="grid gap-1">
           <p className="px-3 pb-1 text-[11px] font-bold uppercase tracking-[0.12em] text-subtle/70">{group.title}</p>
           {group.items.map((item) => {
@@ -290,7 +314,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
 
   const accountBlock = (
     <div className="grid gap-2">
-      <p className="truncate text-[12px] text-subtle">{session.user.email}</p>
+      <p className="truncate text-[12px] text-subtle">{session.user.email}{isFinance ? ' · Finans sorumlusu' : ''}</p>
       <div className="flex gap-2">
         <Link
           href="/"
@@ -314,7 +338,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       {/* Mobile / tablet: compact top bar + slide-down menu */}
       <div className="sticky top-0 z-40 lg:hidden">
         <div className="flex h-14 items-center justify-between gap-3 border-b border-line bg-surface-deep/95 px-4 backdrop-blur">
-          <Link href="/admin" className="flex-none" aria-label="Kokpit">
+          <Link href={home} className="flex-none" aria-label={isFinance ? 'Giderler' : 'Kokpit'}>
             <img src="/brand/yoca-logo-primary.svg" alt="Yoca" width={104} height={26} className="h-6 w-auto" />
           </Link>
           <span className="min-w-0 flex-1 truncate text-center text-[13px] font-bold text-soft">{current?.label ?? 'Yönetim'}</span>
@@ -349,7 +373,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
 
       {/* Desktop sidebar */}
       <aside className="hidden w-64 flex-none flex-col border-r border-line bg-surface-deep/90 p-5 lg:flex">
-        <Link href="/admin" className="mb-6 block flex-none">
+        <Link href={home} className="mb-6 block flex-none">
           <img src="/brand/yoca-logo-primary.svg" alt="Yoca" width={120} height={30} className="h-7 w-auto" />
         </Link>
         {navLinks('sidebar')}
