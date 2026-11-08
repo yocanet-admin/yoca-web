@@ -20,14 +20,17 @@ import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, resolveOpenGr
  * the database (RLS: is_admin() / can_finance()) and the admin API routes
  * (requireAdmin) refuse a finance user everywhere else.
  *
- * Menu: "Kokpit" (/admin) stays visible; every group folds open/closed from its
+ * Menu: "Kokpit" (/admin) stays visible above the groups (Genel, Operasyon,
+ * Finans, Site içeriği, Sistem); every group folds open/closed from its
  * title. First visit: only the current page's group is open; later the user's
  * own choices come back (this browser, per user). See lib/admin/navState.ts.
  */
 
 const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: string; icon: string }> }> = [
   {
-    title: 'Kokpit',
+    // "Genel": the cockpit's own pages. Its first item (/admin, "Kokpit") is the
+    // always-visible home link above the groups, not repeated inside the group.
+    title: 'Genel',
     items: [
       { href: '/admin', label: 'Kokpit', icon: '▦' },
       { href: '/admin/submissions', label: 'Leadler', icon: '✉' },

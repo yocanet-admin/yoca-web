@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, resolveOpenGroups, toggleGroup } from '../lib/admin/navState';
 
 const groups = [
-  { title: 'Kokpit', items: [{ href: '/admin/submissions' }, { href: '/admin/sites' }] },
+  { title: 'Genel', items: [{ href: '/admin/submissions' }, { href: '/admin/sites' }] },
   { title: 'Operasyon', items: [{ href: '/admin/ops' }, { href: '/admin/ops/clients' }] },
   { title: 'Finans', items: [{ href: '/admin/finance' }, { href: '/admin/finance/income' }, { href: '/admin/expenses' }] },
 ];
@@ -20,14 +20,14 @@ test('groupOfPath: the group of the current page; home and unknown pages have no
 });
 
 test('first visit: only the current group is open; on the home page all are closed', () => {
-  assert.deepEqual(resolveOpenGroups(titles, null, 'Finans'), { Kokpit: false, Operasyon: false, Finans: true });
-  assert.deepEqual(resolveOpenGroups(titles, null, null), { Kokpit: false, Operasyon: false, Finans: false });
+  assert.deepEqual(resolveOpenGroups(titles, null, 'Finans'), { Genel: false, Operasyon: false, Finans: true });
+  assert.deepEqual(resolveOpenGroups(titles, null, null), { Genel: false, Operasyon: false, Finans: false });
 });
 
 test('stored choices come back; several open at once; the current group is always opened', () => {
-  const stored = { Kokpit: true, Operasyon: true, Finans: false };
+  const stored = { Genel: true, Operasyon: true, Finans: false };
   assert.deepEqual(resolveOpenGroups(titles, stored, null), stored);
-  assert.deepEqual(resolveOpenGroups(titles, stored, 'Finans'), { Kokpit: true, Operasyon: true, Finans: true });
+  assert.deepEqual(resolveOpenGroups(titles, stored, 'Finans'), { Genel: true, Operasyon: true, Finans: true });
 });
 
 test('stored titles the user cannot see are dropped (finance user sees Finans only)', () => {
@@ -35,10 +35,10 @@ test('stored titles the user cannot see are dropped (finance user sees Finans on
 });
 
 test('toggle flips one group; openCurrent opens the page group without touching others', () => {
-  const s = { Kokpit: false, Operasyon: true, Finans: false };
-  assert.deepEqual(toggleGroup(s, 'Kokpit'), { Kokpit: true, Operasyon: true, Finans: false });
-  assert.deepEqual(toggleGroup(s, 'Operasyon'), { Kokpit: false, Operasyon: false, Finans: false });
-  assert.deepEqual(openCurrent(s, 'Finans'), { Kokpit: false, Operasyon: true, Finans: true });
+  const s = { Genel: false, Operasyon: true, Finans: false };
+  assert.deepEqual(toggleGroup(s, 'Genel'), { Genel: true, Operasyon: true, Finans: false });
+  assert.deepEqual(toggleGroup(s, 'Operasyon'), { Genel: false, Operasyon: false, Finans: false });
+  assert.deepEqual(openCurrent(s, 'Finans'), { Genel: false, Operasyon: true, Finans: true });
   assert.equal(openCurrent(s, 'Operasyon'), s, 'already open: same object (no re-render loop)');
   assert.equal(openCurrent(s, null), s);
 });
