@@ -13,7 +13,7 @@ import { cleanDraft, type RawDraft } from '../lib/ai/documents';
 import { mockStructured } from '../lib/ai/mock';
 import { applyDraft, defaultSelection, setBilling, changeCurrency, currencyMentions, hasAmounts, pricesRequested, restrictToScope, sampleRequested, sectionsOf, stripAverageClaims, type ApplyOptions, type DraftSuggestion } from '../lib/documents/aiDraft';
 import { billingErrors, computeDocument, computeLine, computeTotals, quantityText, totalsJson } from '../lib/documents/calc';
-import { DOC_CURRENCIES, OTHER_CURRENCIES, PRIMARY_CURRENCIES, classifyTiming, paymentCheck, conflictText, syncPaymentSentences, paymentPercentsInText, paymentTextConflict, contentDisposition, docFileName, fillPaymentMarkers, planComplete, planSentence, missingFor, newContent, newItem, sanitizeContent, type DocContent, type DocCurrency } from '../lib/documents/model';
+import { DOC_CURRENCIES, OTHER_CURRENCIES, PRIMARY_CURRENCIES, docDates, displayDate, classifyTiming, paymentCheck, conflictText, syncPaymentSentences, paymentPercentsInText, paymentTextConflict, contentDisposition, docFileName, fillPaymentMarkers, planComplete, planSentence, missingFor, newContent, newItem, sanitizeContent, type DocContent, type DocCurrency } from '../lib/documents/model';
 import { SAMPLE_ISSUER, sampleQuote } from './fixtures-documents';
 
 const B = (n: number | string) => BigInt(n);
@@ -745,4 +745,64 @@ test('text-only request (terms) with a 30/70 plan: text follows 30/70, no plan s
   assert.ok(body.includes('%30 Başlangıç ödemesi (Sözleşme imzasında), %70 Teslim ödemesi (Teslimde)'), body);
   const c0 = { ...quote('USD'), payment: plan3070 };
   assert.equal(paymentTextConflict(applyDraft({ title: '', content: c0 }, t, OPTS).content), null);
+});
+
+/* ── document dates in AI requests; validity not pre-ticked when set ── */
+
+test('review: a set validity date is offered but not pre-ticked for a whole draft; "Yalnızca geçerlilik" stays ticked', () => {
+  const s = suggest({ currency: 'USD' });
+  const c = quote('USD');
+  assert.ok(c.validUntil, 'new quotes get a validity date');
+  assert.ok(!defaultSelection({ title: '', content: c }, s).includes('validity'));
+  assert.ok(defaultSelection({ title: '', content: { ...c, validUntil: '' } }, s).includes('validity'));
+  const only = { ...restrictToScope(s, 'validity'), scope: 'validity' };
+  assert.deepEqual(defaultSelection({ title: '', content: c }, only), ['validity']);
+});
+
+test('document dates sanitizer: ISO dates only', () => {
+  assert.deepEqual(docDates({ issueDate: '2025-03-14', validUntil: '2025-04-13' }), { issueDate: '2025-03-14', validUntil: '2025-04-13' });
+  assert.deepEqual(docDates({ issueDate: '14.03.2025', validUntil: '2025-13-40<script>' }), { issueDate: '', validUntil: '' });
+  assert.deepEqual(docDates(null), { issueDate: '', validUntil: '' });
+  assert.equal(displayDate('2025-03-14'), '14.03.2025');
+  assert.equal(displayDate('2025-03-14', 'en'), '14/03/2025');
+});
+
+test('cleanDraft: issue / validity date markers get the document dates (never today), drop from "missing"; unknown dates stay marked', () => {
+  const brief = `${REQUEST} [mock-tarih-eksik]`;
+  const raw = () => mockStructured('doc_draft', userMsg({ currency: 'USD', prices: true, brief })) as RawDraft;
+  const dates = { issueDate: '2025-03-14', validUntil: '2025-04-13' }; // fixed past dates: proves no system date is used
+  const s = cleanDraft('quote', raw(), { currency: 'USD', prices: true, sample: false, scope: 'all', brief, dates });
+  const notes = s.blocks.find((b) => b.key === 'notes')!.body;
+  assert.ok(notes.includes('Teklif düzenleme tarihi: 14.03.2025.') && notes.includes('Teklif 13.04.2025 tarihine kadar geçerlidir.'), notes);
+  assert.ok(notes.includes('[EKSİK: müşterinin vergi numarası]'), 'unrelated marker kept');
+  const today = new Date().toISOString().slice(0, 10).split('-').reverse().join('.');
+  assert.ok(!notes.includes(today), 'not the current date');
+  assert.ok(!s.missing.some((m) => /düzenleme tarihi/i.test(m)) && !(s.checks ?? []).some((m) => /geçerlilik tarihi/i.test(m)));
+  assert.ok(s.missing.includes('Müşterinin vergi numarası'));
+  assert.ok(s.warnings.some((w) => /2 yerde belgedeki tarih yazıldı/.test(w)));
+  // no dates known: markers left as they are
+  const n = cleanDraft('quote', raw(), { currency: 'USD', prices: true, sample: false, scope: 'all', brief });
+  const nn = n.blocks.find((b) => b.key === 'notes')!.body;
+  assert.ok(nn.includes('[EKSİK: teklif düzenleme tarihi]') && nn.includes('[EKSİK: teklifin geçerlilik tarihi]'));
+  assert.ok(n.missing.includes('Teklif düzenleme tarihi'));
+  // only the issue date known: the validity marker stays
+  const o = cleanDraft('quote', raw(), { currency: 'USD', prices: true, sample: false, scope: 'all', brief, dates: { issueDate: '2025-03-14', validUntil: '' } });
+  const on = o.blocks.find((b) => b.key === 'notes')!.body;
+  assert.ok(on.includes('14.03.2025') && on.includes('[EKSİK: teklifin geçerlilik tarihi]'));
+});
+
+test('the request carries the document dates for every scope (and the system prompt forbids marking them missing)', async () => {
+  const { draftUserMessage } = await import('../lib/ai/documents');
+  for (const scope of ['all', 'block:notes', 'payment']) {
+    const msg = draftUserMessage({ kind: 'quote', locale: 'tr', brief: 'x', recipient: '', projectName: '', currency: 'USD', prices: false, sample: false, realClient: false, scope, dates: { issueDate: '2025-03-14', validUntil: '2025-04-13' } });
+    assert.ok(msg.includes('Document issue date: 2025-03-14 (14.03.2025)') && msg.includes('Validity date: 2025-04-13 (13.04.2025)'), scope);
+  }
+  const none = draftUserMessage({ kind: 'quote', locale: 'tr', brief: 'x', recipient: '', projectName: '', currency: 'USD', prices: false, sample: false, realClient: false, scope: 'all' });
+  assert.ok(!/issue date|Validity date/.test(none));
+  const src = fs.readFileSync(path.join(__dirname, '../lib/ai/documents.ts'), 'utf8');
+  assert.ok(/Never mark them as missing or write \[EKSİK\] \/ \[MISSING\] for them/.test(src));
+  const route = fs.readFileSync(path.join(__dirname, '../app/api/admin/documents/ai/route.ts'), 'utf8');
+  assert.ok(/const dd = docDates\(body\.dates\)/.test(route), 'route sanitizes the dates it receives');
+  const editor = fs.readFileSync(path.join(__dirname, '../app/admin/documents/[id]/page.tsx'), 'utf8');
+  assert.ok(/dates: \{ issueDate: c\.issueDate, validUntil: c\.validUntil \}/.test(editor), 'the editor sends them with every request');
 });

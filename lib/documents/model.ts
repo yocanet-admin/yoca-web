@@ -253,6 +253,17 @@ export function newContent(kind: DocKind, opts: { locale?: DocLocale; currency?:
 
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, max) : '');
 const isoDate = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) ? v : '');
+
+/** The document's own dates for an AI request (ISO YYYY-MM-DD only; anything else is dropped). */
+export function docDates(input: unknown): { issueDate: string; validUntil: string } {
+  const v = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  return { issueDate: isoDate(v.issueDate), validUntil: isoDate(v.validUntil) };
+}
+/** 2026-11-08 → "08.11.2026" (tr) / "08/11/2026" (en), as printed on the document. */
+export function displayDate(iso: string, locale: DocLocale = 'tr'): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? (locale === 'tr' ? `${m[3]}.${m[2]}.${m[1]}` : `${m[3]}/${m[2]}/${m[1]}`) : '';
+}
 const id = (v: unknown, prefix: string) => (typeof v === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(v) ? v : localId(prefix));
 
 export const LIMITS = { items: 80, payment: 12, blocks: 24, blockBody: 12_000, itemDescription: 1_500, title: 200 } as const;

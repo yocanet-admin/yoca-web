@@ -110,7 +110,10 @@ function mockQuoteDraft(input: string, brief: string, scope: string) {
   const price = (v: string) => (priced ? v : '');
   const firstSentence = (t: string) => (t.split(/(?<=[.!?])\s+/)[0] ?? t).trim();
   const curNotes = current.blocks?.find((b) => b.key === 'notes')?.body ?? '';
-  const notes = scope === 'block:notes' && curNotes ? firstSentence(curNotes)
+  // "[mock-tarih-eksik]": what the real model did once — the document's dates marked as missing
+  const dateGap = brief.includes('[mock-tarih-eksik]');
+  const notes = dateGap ? 'Teklif düzenleme tarihi: [EKSİK: teklif düzenleme tarihi]. Teklif [EKSİK: teklifin geçerlilik tarihi] tarihine kadar geçerlidir. Müşteri vergi numarası: [EKSİK: müşterinin vergi numarası].'
+    : scope === 'block:notes' && curNotes ? firstSentence(curNotes)
     : 'Fiyatlara KDV dahil değildir; KDV belge ayarlarındaki oranla eklenir. Sosyal medya reklam bütçesi teklife dahil değildir ve müşteri tarafından doğrudan ödenir.';
   const revisions = scope === 'block:revisions'
     ? 'Marka kimliğinde seçilen yön için üç revizyon turu, web sitesi tasarımında sayfa şablonu başına iki revizyon turu dahildir. Sosyal medya içeriklerinde her gönderi için bir revizyon turu dahildir. Ek revizyonlar ayrıca fiyatlandırılır.'
@@ -158,7 +161,7 @@ function mockQuoteDraft(input: string, brief: string, scope: string) {
     proposed: weak ? ['block:revisions', 'deliveryTime', 'validity'] : ['block:revisions', 'block:assumptions', 'payment', 'deliveryTime', 'validity'],
     requestedCurrency: '',
     sampleRecipient: sample ? { company: 'Kurgusal Kafe Ltd. Şti.', name: 'Deniz Örnek' } : { company: '', name: '' },
-    missing: [brief.length > 0 && !recipient ? 'Alıcı firma adı' : '', ...(weak ? ['Web sitesinin sayfa sayısı ve işlevleri', 'Sosyal medya kanalları ve aylık içerik adedi', 'Ödeme aşamaları ve oranları'] : [])].filter(Boolean),
+    missing: [brief.length > 0 && !recipient ? 'Alıcı firma adı' : '', ...(dateGap ? ['Teklif düzenleme tarihi', 'Teklifin geçerlilik tarihi', 'Müşterinin vergi numarası'] : []), ...(weak ? ['Web sitesinin sayfa sayısı ve işlevleri', 'Sosyal medya kanalları ve aylık içerik adedi', 'Ödeme aşamaları ve oranları'] : [])].filter(Boolean),
   };
 }
 
