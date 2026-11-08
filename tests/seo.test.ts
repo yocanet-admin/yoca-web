@@ -23,7 +23,7 @@ import { FIELD_LABEL, LAB_LABEL, NO_FIELD, parsePsi, psiUrl } from '../lib/seoPa
 import { readServiceAccount, signedAssertion, GSC_SCOPE } from '../lib/seoPanel/googleAuth';
 import { suggest, type SuggestDeps } from '../lib/seoPanel/ai';
 import { acquireRun, ALREADY_RUNNING, AUDIT_RUN_TIMEOUT_S, saveResult, type AuditDb } from '../lib/seoPanel/auditStore';
-import { heartbeat, heartbeatUrl, pingBody, seoOutcome } from '../lib/cockpit/heartbeat';
+import { heartbeat, heartbeatUrl, seoOutcome } from '../lib/cockpit/heartbeat';
 import { formatTr, longTr, monthGrid, monthTitle, moveFocus, parseTr, validateTyped, weekday } from '../lib/admin/calendar';
 import { OpenAIError } from '../lib/ai/openai';
 import { mockStructured } from '../lib/ai/mock';
@@ -638,43 +638,54 @@ test('audit save: every write checked; a failed findings insert or run update �
 
 /* ── Healthchecks for /api/cron/seo ──────────────────────────── */
 
-test('SEO heartbeat: success only when saved (count body); skipped → /log with reason; error → fail', () => {
-  assert.deepEqual(seoOutcome({ kind: 'saved', weeks: [{ week: '2026-11-02', status: 'saved', rows: 300 }, { week: '2026-10-26', status: 'saved', rows: 212 }] }), { phase: 'success', body: 'kaydedildi: 512 satır, 2 hafta (2026-11-02, 2026-10-26)' });
-  assert.equal(seoOutcome({ kind: 'saved', weeks: [{ week: '2026-11-02', status: 'not_final' }] }).phase, 'log');
-  for (const reason of ['not_configured', 'migration_pending', 'no_service_role', 'not_final', 'finality_unknown'] as const) {
-    const o = seoOutcome({ kind: 'skipped', reason });
-    assert.equal(o.phase, 'log', reason);
-    assert.match(o.body, /^atlandı: /);
-  }
-  assert.deepEqual(seoOutcome({ kind: 'error', message: 'Search Console verisi alınamadı' }), { phase: 'fail', body: 'hata: Search Console verisi alınamadı' });
+const wk = (week: string, status: 'saved' | 'not_final' | 'skipped', rows?: number) => ({ week, status, ...(rows !== undefined ? { rows } : {}), ...(status === 'skipped' ? { reason: 'finality_unknown' } : {}) });
+
+test('SEO heartbeat: success only when the LATEST completed week was saved', () => {
+  // mixed: older week refreshed, latest skipped → NOT a success (log path, like a skip)
+  const mixed = seoOutcome({ kind: 'ran', weeks: [wk('2026-11-02', 'not_final'), wk('2026-10-26', 'saved', 200)] });
+  assert.equal(mixed.phase, 'log');
+  assert.equal(mixed.latest, 'atlandı (henüz kesinleşmedi)');
+  assert.equal(mixed.previous, 'yenilendi (200 satır)');
+  const mixedUnknown = seoOutcome({ kind: 'ran', weeks: [wk('2026-11-02', 'skipped'), wk('2026-10-26', 'saved', 200)] });
+  assert.equal(mixedUnknown.phase, 'log');
+  assert.equal(mixedUnknown.latest, 'atlandı (kesinleşme tarihi belirlenemedi)');
+  // latest saved, older skipped → success
+  const latestOnly = seoOutcome({ kind: 'ran', weeks: [wk('2026-11-02', 'saved', 300), wk('2026-10-26', 'not_final')] });
+  assert.equal(latestOnly.phase, 'success');
+  assert.equal(latestOnly.latest, 'kaydedildi (300 satır)');
+  // both saved → success
+  const both = seoOutcome({ kind: 'ran', weeks: [wk('2026-11-02', 'saved', 300), wk('2026-10-26', 'saved', 212)] });
+  assert.equal(both.phase, 'success');
+  assert.equal(both.summary, 'son hafta 2026-11-02: kaydedildi (300 satır); önceki hafta 2026-10-26: yenilendi (212 satır)');
+  // nothing saved → log
+  assert.equal(seoOutcome({ kind: 'ran', weeks: [wk('2026-11-02', 'skipped'), wk('2026-10-26', 'skipped')] }).phase, 'log');
+  for (const reason of ['not_configured', 'migration_pending', 'no_service_role'] as const) assert.equal(seoOutcome({ kind: 'skipped', reason }).phase, 'log', reason);
+  // error → fail
+  assert.equal(seoOutcome({ kind: 'error', message: 'Search Console verisi alınamadı' }).phase, 'fail');
   assert.equal(heartbeatUrl('https://hc-ping.com/abc', 'log'), 'https://hc-ping.com/abc/log');
-  assert.equal(pingBody('kaydedildi: 5 satır <script>"x"</script>'), 'kaydedildi: 5 satır script x /script');
-  assert.equal(pingBody('x'.repeat(500))?.length, 120);
 });
 
-test('SEO heartbeat: body only for the SEO job (POST text/plain); other jobs stay content-free; unset env sends nothing', async () => {
+test('SEO heartbeat: content-free like the other jobs (GET, no body); counts only in the app log; unset env sends nothing', async () => {
   const sent: Array<{ url: string; init: RequestInit }> = [];
   const f = (async (url: string, init: RequestInit) => { sent.push({ url, init }); return new Response('OK'); }) as unknown as typeof fetch;
-  const prev = { seo: process.env.HEALTHCHECKS_URL_SEO, ops: process.env.HEALTHCHECKS_URL_OPS };
+  const prev = process.env.HEALTHCHECKS_URL_SEO;
   try {
     delete process.env.HEALTHCHECKS_URL_SEO;
-    assert.equal(await heartbeat('seo', 'success', f, 'kaydedildi: 1 satır'), 'skipped');
+    assert.equal(await heartbeat('seo', 'success', f), 'skipped');
+    assert.equal(sent.length, 0);
     process.env.HEALTHCHECKS_URL_SEO = 'http://127.0.0.1:8000/ping/seo-test';
-    process.env.HEALTHCHECKS_URL_OPS = 'http://127.0.0.1:8000/ping/ops-test';
-    await heartbeat('seo', 'log', f, 'atlandı: kesinleşme tarihi belirlenemedi');
-    await heartbeat('ops', 'success', f, 'ignored body');
-    assert.equal(sent[0].url, 'http://127.0.0.1:8000/ping/seo-test/log');
-    assert.equal(sent[0].init.method, 'POST');
-    assert.equal(sent[0].init.body, 'atlandı: kesinleşme tarihi belirlenemedi');
-    assert.equal(sent[1].init.method, 'GET');
-    assert.equal(sent[1].init.body, undefined);
+    for (const phase of ['start', 'success', 'log', 'fail'] as const) await heartbeat('seo', phase, f);
+    assert.deepEqual(sent.map((x) => x.url), ['http://127.0.0.1:8000/ping/seo-test/start', 'http://127.0.0.1:8000/ping/seo-test', 'http://127.0.0.1:8000/ping/seo-test/log', 'http://127.0.0.1:8000/ping/seo-test/fail']);
+    assert.ok(sent.every((x) => x.init.method === 'GET' && x.init.body === undefined));
   } finally {
-    if (prev.seo === undefined) delete process.env.HEALTHCHECKS_URL_SEO; else process.env.HEALTHCHECKS_URL_SEO = prev.seo;
-    if (prev.ops === undefined) delete process.env.HEALTHCHECKS_URL_OPS; else process.env.HEALTHCHECKS_URL_OPS = prev.ops;
+    if (prev === undefined) delete process.env.HEALTHCHECKS_URL_SEO; else process.env.HEALTHCHECKS_URL_SEO = prev;
   }
   const cron = code('app/api/cron/seo/route.ts');
   assert.match(cron, /const auth = cronAuth\(request\);\n\s+if \(!auth\.ok\) return[^\n]*\n\s+await heartbeat\('seo', 'start'\);/, 'unauthorized calls send no ping');
+  assert.match(cron, /await heartbeat\('seo', out\.phase\);/, 'final ping without a body');
+  assert.match(cron, /console\.log\(`cron seo: \$\{out\.summary\}/);
   assert.doesNotMatch(cron, /sendMail|sendTelegram|notify/);
+  assert.doesNotMatch(code('docs/izleme.md'), /gövde(si)? .*kaydedildi|Tek istisna/);
 });
 
 /* ── Turkish calendar (pure) ──────────────────────────────────── */

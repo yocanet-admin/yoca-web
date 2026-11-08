@@ -12,10 +12,9 @@ import type { DigestChannels } from '@/lib/ops/digest';
  *    _SITES). Unset → nothing is sent; set them only on Production.
  *  - Pings carry NO content: a bare GET to <url>, <url>/start or <url>/fail.
  *    No body, no query string, no finance or customer data — ever.
- *    One exception, the weekly SEO record (HEALTHCHECKS_URL_SEO): its final
- *    ping may carry one short plain-text line with counts or a skip reason
- *    ("kaydedildi: 512 satır", "atlandı: …") — see seoOutcome; a skipped run
- *    goes to <url>/log, so "skipped" is never reported as a success.
+ *    The weekly SEO record (HEALTHCHECKS_URL_SEO) also uses <url>/log (still
+ *    content-free) for a skipped run, so "skipped" is never a success; its
+ *    counts and reasons go only to the application log.
  *  - "success" only when the job really finished; a partial failure is "fail".
  *    A run that found nothing to do and ended cleanly is a success.
  *  - The monitor can never break a job: 3 s timeout, every error swallowed,
@@ -58,22 +57,12 @@ export function heartbeatUrl(base: string | undefined, phase: HeartbeatPhase): s
   return `${url.origin}${path}${phase === 'start' ? '/start' : phase === 'fail' ? '/fail' : phase === 'log' ? '/log' : ''}`;
 }
 
-/** A ping body: one line, letters / digits / basic punctuation only, ≤ 120 characters (counts and reasons, never data). */
-export function pingBody(text: string | undefined): string | null {
-  if (!text) return null;
-  const clean = text.replace(/[^A-Za-z0-9çğıöşüÇĞİÖŞÜ .,:;()\/+-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-  return clean || null;
-}
-
-/** Sends one heartbeat. Never throws; reports what happened for the logs. A body (SEO job only) is sent as text/plain POST. */
-export async function heartbeat(job: HeartbeatJob, phase: HeartbeatPhase, fetchImpl: typeof fetch = fetch, body?: string): Promise<'sent' | 'skipped' | 'error'> {
+/** Sends one heartbeat. Never throws; reports what happened for the logs. */
+export async function heartbeat(job: HeartbeatJob, phase: HeartbeatPhase, fetchImpl: typeof fetch = fetch): Promise<'sent' | 'skipped' | 'error'> {
   const url = heartbeatUrl(process.env[ENV_KEY[job]], phase);
   if (!url) return 'skipped';
-  const text = job === 'seo' ? pingBody(body) : null;
   try {
-    const res = await fetchImpl(url, text
-      ? { method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(HEARTBEAT_TIMEOUT_MS), headers: { 'user-agent': 'yoca-cockpit-cron', 'content-type': 'text/plain; charset=utf-8' }, body: text }
-      : { method: 'GET', cache: 'no-store', signal: AbortSignal.timeout(HEARTBEAT_TIMEOUT_MS), headers: { 'user-agent': 'yoca-cockpit-cron' } });
+    const res = await fetchImpl(url, { method: 'GET', cache: 'no-store', signal: AbortSignal.timeout(HEARTBEAT_TIMEOUT_MS), headers: { 'user-agent': 'yoca-cockpit-cron' } });
     if (!res.ok) console.warn(`[heartbeat] ${job} ${phase}: HTTP ${res.status}`);
     return res.ok ? 'sent' : 'error';
   } catch (error) {
@@ -148,27 +137,26 @@ export function sitesOutcome(run: { dbOk: boolean; published: number | null; sen
 }
 
 /**
- * Weekly SEO record (Thursday 04:10 UTC). success ONLY when at least one week
- * was really saved (body "kaydedildi: N satır …"); skipped runs (Search Console
- * not connected, no v27 tables, weeks not final / finality unknown) go to the
- * log endpoint with the reason — never a success; errors are "fail".
+ * Weekly SEO record (Thursday 04:10 UTC). The run refreshes the latest completed
+ * week (index 0) and the one before it (index 1). success ONLY when the LATEST
+ * week was saved; refreshing just the older week while the latest was skipped
+ * is not a success (it goes to /log like any skip). Errors are "fail".
+ * Pings stay content-free; `summary` is for the application log only.
  */
+export type SeoWeek = { week: string; status: 'saved' | 'not_final' | 'skipped'; rows?: number; reason?: string };
 export type SeoRun =
-  | { kind: 'saved'; weeks: Array<{ week: string; status: string; rows?: number }> }
-  | { kind: 'skipped'; reason: 'not_configured' | 'migration_pending' | 'no_service_role' | 'not_final' | 'finality_unknown'; weeks?: Array<{ week: string; status: string }> }
+  | { kind: 'ran'; weeks: SeoWeek[] }
+  | { kind: 'skipped'; reason: 'not_configured' | 'migration_pending' | 'no_service_role' }
   | { kind: 'error'; message: string };
-const SEO_SKIP_TEXT: Record<Extract<SeoRun, { kind: 'skipped' }>['reason'], string> = {
-  not_configured: 'atlandı: Search Console bağlantısı kurulmadı',
-  migration_pending: 'atlandı: SEO tabloları yok (v27)',
-  no_service_role: 'atlandı: sunucu anahtarı yok',
-  not_final: 'atlandı: haftalar henüz kesinleşmedi',
-  finality_unknown: 'atlandı: kesinleşme tarihi belirlenemedi',
-};
-export function seoOutcome(run: SeoRun): { phase: 'success' | 'log' | 'fail'; body: string } {
-  if (run.kind === 'error') return { phase: 'fail', body: `hata: ${run.message}` };
-  if (run.kind === 'skipped') return { phase: 'log', body: SEO_SKIP_TEXT[run.reason] };
-  const saved = run.weeks.filter((w) => w.status === 'saved');
-  if (!saved.length) return { phase: 'log', body: SEO_SKIP_TEXT.not_final };
-  const rows = saved.reduce((a, w) => a + (w.rows ?? 0), 0);
-  return { phase: 'success', body: `kaydedildi: ${rows} satır, ${saved.length} hafta (${saved.map((w) => w.week).join(', ')})` };
+const weekState = (w: SeoWeek | undefined, saved: string) => (!w ? 'yok' : w.status === 'saved' ? `${saved} (${w.rows ?? 0} satır)` : w.status === 'not_final' ? 'atlandı (henüz kesinleşmedi)' : `atlandı (${w.reason === 'finality_unknown' ? 'kesinleşme tarihi belirlenemedi' : w.reason ?? 'bilinmiyor'})`);
+export function seoOutcome(run: SeoRun): { phase: 'success' | 'log' | 'fail'; latest: string; previous: string; summary: string } {
+  if (run.kind === 'error') return { phase: 'fail', latest: 'hata', previous: 'hata', summary: `hata: ${run.message}` };
+  if (run.kind === 'skipped') {
+    const why = { not_configured: 'Search Console bağlantısı kurulmadı', migration_pending: 'SEO tabloları yok (v27)', no_service_role: 'sunucu anahtarı yok' }[run.reason];
+    return { phase: 'log', latest: `atlandı (${why})`, previous: `atlandı (${why})`, summary: `atlandı: ${why}` };
+  }
+  const [latestWeek, previousWeek] = run.weeks;
+  const latest = weekState(latestWeek, 'kaydedildi');
+  const previous = weekState(previousWeek, 'yenilendi');
+  return { phase: latestWeek?.status === 'saved' ? 'success' : 'log', latest, previous, summary: `son hafta ${latestWeek?.week ?? '-'}: ${latest}; önceki hafta ${previousWeek?.week ?? '-'}: ${previous}` };
 }

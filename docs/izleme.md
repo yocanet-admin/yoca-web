@@ -23,7 +23,7 @@ Yetkili bir çalışma başlarken `/start`, sonunda başarı (`<url>`) veya `/fa
 | Operasyon | Gönderilecek bir şey yok; bugün zaten gönderilmiş; özet kapalı; gönderilmesi gereken her şey gönderildi | Giderler adımı başarısız (kısmi çalışma); özet başarısız veya hiçbir kanala ulaşmadı; bir kanal başarısız ya da sonucu belirsiz; tablo okunamadı; beklenmeyen hata |
 | Site izleme | Temiz kontrol (uyarılı veya uyarısız); son 5 dakikada çalışmış olduğu için atlandı; site uyarıları ayarlarda kapalı | Siteler tablosu okunamadı; planlı Insights yayını başarısız; uyarı iletilemedi; beklenmeyen hata |
 
-Sinyal içeriksizdir: gövde, sorgu parametresi, finans veya müşteri bilgisi yoktur. Tek istisna SEO haftalık kaydıdır: son sinyali tek satırlık bir sayım veya atlama nedeni taşıyabilir (aşağıya bakın). Adreste kullanıcı adı/parola, sorgu veya parça varsa ya da https değilse sinyal hiç gönderilmez.
+Sinyal içeriksizdir: gövde, sorgu parametresi, finans veya müşteri bilgisi yoktur. Adreste kullanıcı adı/parola, sorgu veya parça varsa ya da https değilse sinyal hiç gönderilmez.
 
 İzleme servisi işi bozamaz: her sinyal en çok 3 saniye bekler, hata yutulur, işin kendi yanıtı değişmez. Servis yanıt vermezse iş en çok 6 saniye uzar. Loglara adres yazılmaz.
 
@@ -43,16 +43,19 @@ Bu sürelerden sonra üç kontrolün de "up" olduğu panelden doğrulanır. "new
 
 ## SEO haftalık kaydı (`/api/cron/seo`)
 
-Perşembe 04:10 UTC'de son iki tamamlanmış haftanın Search Console kaydını yeniler. Bildirim, e-posta, Telegram veya rapor göndermez. Sinyaller (`HEALTHCHECKS_URL_SEO`, isteğe bağlı):
+Perşembe 04:10 UTC'de son iki tamamlanmış haftanın (en son biten pazartesi–pazar haftası ve ondan önceki) Search Console kaydını yeniler. Bildirim, e-posta, Telegram veya rapor göndermez. Sinyaller diğer işler gibi **içeriksizdir** (`HEALTHCHECKS_URL_SEO`, isteğe bağlı):
 
-| Durum | Sinyal | Gövde (tek satır, yalnızca sayı / neden) |
-|---|---|---|
-| Başladı | `/start` | — |
-| En az bir hafta gerçekten kaydedildi | başarı (`<url>`) | `kaydedildi: N satır, K hafta (hafta başları)` |
-| Atlandı: Search Console bağlı değil, v27 tabloları yok, sunucu anahtarı yok, haftalar henüz kesinleşmedi veya kesinleşme tarihi belirlenemedi | `/log` (başarı **değil**) | `atlandı: <neden>` |
-| Hata (Search Console okunamadı, kayıt yazılamadı — önceki kayıt korunur) | `/fail` | `hata: <tür>` |
+| Durum | Sinyal |
+|---|---|
+| Başladı | `/start` |
+| **En son tamamlanmış hafta** kaydedildi (önceki hafta da yenilenmiş olabilir) | başarı (`<url>`) |
+| En son hafta kaydedilmedi: henüz kesinleşmedi veya kesinleşme tarihi belirlenemedi — yalnızca önceki hafta yenilenmiş olsa bile | `/log` (başarı **değil**) |
+| Atlandı: Search Console bağlı değil, v27 tabloları yok, sunucu anahtarı yok | `/log` (başarı **değil**) |
+| Hata (Search Console okunamadı, kayıt yazılamadı — önceki kayıt korunur) | `/fail` |
 
-Atlanan çalışma başarı sayılmaz: kontrol başarı sinyali alamadığı için süre dolunca uyarır. Bu yüzden kontrol **yalnızca Search Console bağlantısı kurulduktan sonra** oluşturulur.
+Satır sayıları ve atlama nedenleri yalnızca uygulama loguna yazılır (`cron seo: son hafta …: kaydedildi (N satır); önceki hafta …: … → success|log|fail`); sinyalde gövde yoktur. Rota yanıtında da `latest` / `previous` alanları ayrı ayrı döner.
+
+Başarı yalnızca en son hafta kaydedildiğinde gittiği için, atlanan çalışma süre dolunca uyarı üretir. Bu yüzden kontrol **yalnızca Search Console bağlantısı kurulduktan sonra** oluşturulur.
 
 ### Production'da etkinleştirme (sürüm planı için)
 
@@ -61,4 +64,4 @@ Atlanan çalışma başarı sayılmaz: kontrol başarı sinyali alamadığı iç
 3. Mevcut Healthchecks projesinde yeni kontrol: ad `yoca-seo-haftalik`, zamanlama cron `10 4 * * 4` (UTC), tolerans 3 saat. Kontrolün ping adresini kopyalayın.
 4. Vercel → Settings → Environment Variables: `HEALTHCHECKS_URL_SEO` = ping adresi, yalnızca **Production**, **Sensitive**.
 5. Yeniden dağıtın (redeploy); ortam değişkeni yalnızca yeni dağıtımda okunur.
-6. Kontrol ilk perşembe çalışmasına kadar "new" kalır. Çalışmadan sonra "up" ve son sinyal gövdesinde `kaydedildi: …` görülmelidir; `/log` gövdesinde `atlandı: …` görülüyorsa nedeni giderin (çoğunlukla bağlantı veya kesinleşme). İş elle tetiklenebilir (`CRON_SECRET` ile); bildirim göndermediği için güvenlidir.
+6. Kontrol ilk perşembe çalışmasına kadar "new" kalır. Çalışmadan sonra "up" görülmelidir; son sinyal `/log` ise Vercel loglarındaki `cron seo:` satırı nedeni söyler (çoğunlukla bağlantı veya kesinleşme). İş elle tetiklenebilir (`CRON_SECRET` ile); bildirim göndermediği için güvenlidir.

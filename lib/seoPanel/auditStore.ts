@@ -13,7 +13,9 @@ import type { AuditResult } from '@/lib/seoPanel/audit';
 
 /** Longer than the route's maxDuration (60 s): a run still "running" after this is treated as dead. */
 export const AUDIT_RUN_TIMEOUT_S = 180;
-export const ALREADY_RUNNING = 'Bir tarama zaten çalışıyor; bitmesini bekleyin (en çok 3 dakika sonra süresi dolar).';
+// A stale run is NOT closed by itself: it stays "running" in the database until the
+// next seo_audit_acquire (a new "Taramayı başlat") expires it as failed / Zaman aşımı.
+export const ALREADY_RUNNING = 'Bir tarama zaten çalışıyor; bitmesini bekleyin. 3 dakikadan uzun süren bir tarama, yeni tarama başlatıldığında zaman aşımı olarak kapatılır.';
 
 type Res = { error: { message: string } | null };
 export interface AuditDb {

@@ -6,6 +6,7 @@ import { Badge, small } from '@/components/admin/ops/ui';
 import { fmtDate } from '@/lib/cockpit/client';
 import { FIELD_LABEL, FIELD_SCOPE_LABEL, KEY_PAGES, LAB_LABEL, NO_FIELD } from '@/lib/seoPanel/pagespeed';
 import type { AuditFinding, AuditRun, PsiRow } from '@/components/admin/seo/types';
+import { AUDIT_RUN_TIMEOUT_S } from '@/lib/seoPanel/auditStore';
 
 const SEV: Record<AuditFinding['severity'], { kind: 'critical' | 'warning' | 'neutral' | 'good'; label: string }> = {
   error: { kind: 'critical', label: 'Hata' },
@@ -28,6 +29,8 @@ const path = (u: string) => { try { const x = new URL(u); return x.hostname === 
 export function Audit({ audit, onRun, busy, hosts }: { audit: { run: AuditRun; findings: AuditFinding[] } | null; onRun: () => void; busy: boolean; hosts: string[] }) {
   const [all, setAll] = useState(false);
   const order = { error: 0, warning: 1, info: 2, ok: 3 } as const;
+  // a "running" row older than the timeout: still "running" in the database until the next start expires it
+  const stale = audit?.run.status === 'running' && Date.now() - Date.parse(audit.run.started_at) > AUDIT_RUN_TIMEOUT_S * 1000;
   const shown = (audit?.findings ?? []).filter((f) => all || f.severity === 'error' || f.severity === 'warning').sort((a, b) => order[a.severity] - order[b.severity]);
   return (
     <Card title="Teknik kontrol" action={<button type="button" className="admin-btn !py-1.5 text-[12px]" disabled={busy} onClick={onRun}>{busy ? 'Taranıyor…' : 'Taramayı başlat'}</button>}>
@@ -37,12 +40,13 @@ export function Audit({ audit, onRun, busy, hosts }: { audit: { run: AuditRun; f
       {!audit ? <p className="text-[13px] text-subtle">Henüz tarama yapılmadı.</p> : (
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center gap-2 text-[13px]" data-testid="seo-audit-run">
-            <StatusBadge kind={STATUS[audit.run.status].kind}>{STATUS[audit.run.status].label}</StatusBadge>
+            {stale ? <StatusBadge kind="warning">Yanıt vermedi</StatusBadge> : <StatusBadge kind={STATUS[audit.run.status].kind}>{STATUS[audit.run.status].label}</StatusBadge>}
             {audit.run.source === 'fixture' && <Badge tone="warn">Örnek veri</Badge>}
             <span className="text-soft">{audit.run.pages_checked}/{audit.run.pages_planned} sayfa · {fmtDate(audit.run.finished_at ?? audit.run.started_at)}</span>
             <span className="text-subtle">· {audit.run.summary.error ?? 0} hata · {audit.run.summary.warning ?? 0} uyarı · {audit.run.summary.info ?? 0} bilgi · {audit.run.summary.ok ?? 0} tamam</span>
           </div>
           {audit.run.limit_reason && <p className="text-[12px] text-amber-200">{audit.run.limit_reason}</p>}
+          {stale && <p className="text-[12px] text-amber-200" data-testid="seo-audit-stale">Bu tarama {Math.floor(AUDIT_RUN_TIMEOUT_S / 60)} dakikadan uzun süredir “çalışıyor” görünüyor ve muhtemelen yarıda kaldı. Kendiliğinden kapanmaz: “Taramayı başlat” dediğinizde zaman aşımı olarak kapatılır ve yeni tarama başlar.</p>}
           <label className="flex items-center gap-2 text-[12px] text-muted"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Bilgi ve “tamam” satırlarını da göster</label>
           {/* phones / tablets: one card per finding (severity, check, page, finding), no horizontal scrolling */}
           <ul className="grid gap-2 md:hidden" data-testid="seo-finding-cards">
