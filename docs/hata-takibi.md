@@ -1,30 +1,38 @@
 # Hata takibi (GlitchTip)
 
-Kokpit ve yoca.net'in **sunucu tarafı** hataları GlitchTip'e (Sentry protokolü) gider. Tarayıcı hataları henüz toplanmaz; "hareketi azalt" hydration hatası düzeltilmeden açılmaz (her sayfa açılışında olay üretir).
+Kokpit ve yoca.net'in **sunucu tarafı** hataları GlitchTip'e (Sentry protokolü) gider. Tarayıcı hataları toplanmaz; "hareketi azalt" hydration hatası düzeltilmeden açılmaz (her sayfa açılışında olay üretir).
 
 ## Açma / kapama
 
-- `GLITCHTIP_DSN` yalnızca **Production** ortamına eklenir. Tanımsızsa SDK hiç başlamaz.
-- GlitchTip ücretsiz plan: ayda 1.000 olay, 30 gün saklama. Kota aşılınca olaylar kısılır (yaklaşık %10 düşürme, sınırın iki katında tam engel) ve faturalama kişisine e-posta gider. İsteğe bağlı aşım ücreti (on-demand) varsayılan olarak kapalıdır; açılmaz. Ödeme yöntemi eklenmez.
+- `GLITCHTIP_DSN` tanımsızsa SDK hiç başlamaz (varsayılan: kapalı).
+- Production'a eklenmesi ayrı onayla yapılır; test için production'dan ayrı bir GlitchTip projesi kullanılır.
+- GlitchTip ücretsiz plan (Hobby & Trial): ayda 1.000 olay, 30 gün saklama. Kota aşılınca olaylar kısılır ve faturalama kişisine e-posta gider. İsteğe bağlı aşım ücreti (on-demand) varsayılan olarak kapalıdır; açılmaz. Ödeme yöntemi eklenmez.
 
-## Çıkıştan önce ne kalıyor (`lib/observability/scrub.ts`)
+## Dışarı ne çıkabilir: izin listesi (`lib/observability/scrub.ts` → `toSafeEvent`)
 
-SDK ayarı: `sendDefaultPii: false`, istek gövdesi, çerezler, başlıklar (Authorization dahil), sorgu dizesi ve IP toplanmaz; izleme (tracing) ve istemci raporları kapalı.
+SDK'nın olayından alan kopyalanmaz; yalnızca şu alanlarla **yeni** bir olay kurulur:
 
-`beforeSend` ayrıca:
+| Alan | Örnek | Not |
+|---|---|---|
+| Hata türü | `TypeError` | Tür adı gibi görünmüyorsa `Error` |
+| Güvenli kod | `code 23505`, `code ECONNRESET`, `code PGRST116` | Yalnızca hatanın `code` alanı kod biçimindeyse; aksi halde sabit metin `(mesaj gönderilmez)` |
+| Rota şablonu | `POST /api/admin/fin/collections/[id]` | Parametre değeri yok; yola karışan uuid → `[id]`, sayı → `[n]`, diğer değer → `[param]`; sorgu dizesi gitmez |
+| Yığın konumları | dosya, fonksiyon, modül, satır, sütun, in_app | Kaynak satırı ve değişken yok; makineye özgü yol öneki kırpılır |
+| Sürüm / ortam | commit SHA, `production` | |
+| SDK adı ve sürümü | `sentry.javascript.nextjs 9.47.2` | SDK paket listesini zarfa kendisi ekler (paket adı + sürüm) |
 
-- isteği yalnızca yöntem + URL yoluna indirir (sorgu ve parça gitmez),
-- kullanıcı, sunucu adı ve `extra` alanlarını siler; bağlamdan yalnızca trace/runtime/os/app/device kalır,
-- kalan tüm metinlerde e-posta, IBAN, JWT/Bearer/API anahtarları, gizli sorgu parametreleri, IP, telefon, kart benzeri numaralar ve para tutarlarını maskeler; `password`, `token`, `cookie`, `authorization`, `iban`, `email` gibi adlı alanları `[gizli]` yapar.
+Hiç çıkmaz: ham hata mesajı, istek ve yanıt gövdesi, çerez, başlıklar (Authorization dahil), sorgu parametreleri, kullanıcı ve IP, sunucu adı, `contexts` (işletim sistemi, cihaz, saat dilimi, trace), `extra`, `tags`, `modules`, breadcrumb'lar. İstisnası olmayan olaylar (`captureMessage`, log) hiç gönderilmez.
 
-Kalan: hata türü, yığın çerçeveleri (dosya, fonksiyon, satır), rota yolu, sürüm, ortam.
+SDK ayrıca bu verileri toplamaz: `sendDefaultPii: false`, `includeLocalVariables: false`, `maxBreadcrumbs: 0`, tracing kapalı, istemci raporları kapalı; `RequestData`, `ContextLines`, `Modules`, `Console`, `LocalVariables`, `Context` entegrasyonları kapalı.
 
-**Sınır:** Kod bir değeri hata mesajının içine kendisi koyarsa, yalnızca tanınabilir biçimler maskelenir (Supabase oturum çerezi JWT biçiminde olduğu için maskelenir; rastgele biçimli bir değer maskelenmez). Kural: istek verisi, kişisel veri veya tutar hata mesajına yazılmaz.
+`maskText` ilk sürümden kaldı (yerelde gösterilen metinler için); dışarı giden olayda serbest metin olmadığından olay için gerekmez.
 
 ## Kokpit'i etkilememesi
 
-Olaylar arka planda gönderilir. Yerel denemede GlitchTip kapalıyken, yanıt vermezken (Vercel ortamı benzetimiyle de) ve DSN bozukken sayfa, API ve cron yanıt süreleri değişmedi; bozuk DSN yalnızca bir log satırı üretti.
+Olaylar arka planda gönderilir. Yerel denemede (8 Kasım, sentetik veri) GlitchTip kapalıyken, yanıt vermezken, 500 dönerken ve DSN bozukken — Vercel ortamı benzetimiyle de — hata rotası, panel sayfası ve API yanıt süreleri değişmedi; bozuk DSN yalnızca `Invalid Sentry Dsn` log satırı üretti.
 
 ## Derleme
 
-`next.config.mjs` `withSentryConfig` ile sarılır: kaynak haritası yüklenmez, sürüm oluşturulmaz, derleme telemetrisi kapalı, middleware'e dokunulmaz. Tarayıcı paketi değişmez (paylaşılan First Load JS 87,5 kB, önce ve sonra). Next 14 için `experimental.instrumentationHook` açıktır.
+`next.config.mjs` `withSentryConfig` ile sarılır: kaynak haritası yüklenmez, sürüm oluşturulmaz, derleme telemetrisi kapalı, middleware'e dokunulmaz. Tarayıcı paketi değişmez (paylaşılan First Load JS 87,5 kB). Next 14 için `experimental.instrumentationHook` açıktır.
+
+Kaynak haritası yüklenmediği için yığın konumları derlenmiş dosyalardadır (ör. `.next/server/chunks/7092.js:18`). Kaynak haritası yüklemek ayrı bir karardır (GlitchTip'e kaynak kodu gider).
