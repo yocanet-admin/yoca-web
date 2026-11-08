@@ -21,7 +21,7 @@
  *  - All amounts are computed by lib/documents/calc.ts, never here.
  */
 
-import { addDaysIso, localId, newItem, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PriceBasis, BLOCK_KEYS, DOC_CURRENCIES, blockHeading } from '@/lib/documents/model';
+import { addDaysIso, fillPaymentMarkers, localId, newItem, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PriceBasis, BLOCK_KEYS, DOC_CURRENCIES, blockHeading } from '@/lib/documents/model';
 import { parseMoney } from '@/lib/documents/calc';
 
 export interface SuggestedItem {
@@ -59,6 +59,8 @@ export interface DraftSuggestion {
   /** Section ids holding terms the user did not give (shown as "kontrol edilecek öneri"). */
   proposed: string[];
   missing: string[];
+  /** Scope / commercial points to confirm (page count, platforms, monthly posts …): proposals, not missing facts. */
+  checks?: string[];
   warnings: string[];
   /* set by the server, not by the model */
   currency: DocCurrency;
@@ -172,6 +174,32 @@ export interface ApplyResult {
   content: DocContent;
   applied: string[];
   skipped: Array<{ id: string; why: string }>;
+  /** Things done on top of the selection, said in the panel (e.g. a stale payment marker filled from the plan). */
+  notes: string[];
+}
+
+/**
+ * Sections ticked when the review opens: everything for a one-section request
+ * (the admin asked for it); for a whole draft only sections whose target is
+ * still empty — a filled title, text, item list or plan is offered, never
+ * replaced unless the admin ticks it.
+ */
+export function defaultSelection(doc: { title: string; content: DocContent }, s: DraftSuggestion): string[] {
+  const all = sectionsOf(s);
+  if (s.scope !== 'all') return all;
+  return all.filter((id) => !filledTarget(doc, id));
+}
+export function filledTarget(doc: { title: string; content: DocContent }, id: string): boolean {
+  const c = doc.content;
+  if (id === 'title') return Boolean(doc.title.trim());
+  if (id === 'subject') return Boolean(c.subject.trim());
+  if (id.startsWith('block:')) return c.blocks.some((b) => b.key === id.slice(6) && b.body.trim());
+  if (id === 'items') return c.items.some(realItem);
+  if (id === 'payment') return c.payment.some((p) => p.value.trim() || p.label.trim());
+  if (id === 'deliveryTime') return Boolean(c.deliveryTime.trim());
+  if (id === 'closing') return Boolean(c.closing.trim());
+  if (id === 'recipient') return Boolean(c.recipient.company.trim() || c.recipient.name.trim());
+  return false;
 }
 
 const realItem = (i: LineItem) => Boolean(i.title.trim() || i.description.trim() || i.unitPrice.trim());
@@ -228,6 +256,7 @@ export function applyDraft(doc: { title: string; content: DocContent }, s: Draft
   const want = new Set(opts.select === 'all' ? available : opts.select.filter((x) => available.includes(x)));
   const applied: string[] = [];
   const skipped: Array<{ id: string; why: string }> = [];
+  const notes: string[] = [];
   const next: DocContent = { ...c };
   let title = doc.title;
 
@@ -261,6 +290,12 @@ export function applyDraft(doc: { title: string; content: DocContent }, s: Draft
     next.payment = s.payment.map((p) => ({ id: localId('p'), label: p.label, mode: 'percent' as const, value: p.percent === null ? '' : String(p.percent).replace('.', ','), due: p.due }));
     applied.push('payment');
   }
+  // A complete plan was applied: "[EKSİK: ödeme …]" left in the texts would contradict it — it is replaced by the plan itself.
+  if (want.has('payment')) {
+    let filled = 0;
+    next.blocks = (next.blocks ?? c.blocks).map((b) => { const r = fillPaymentMarkers(b.body, next.payment, c.locale); filled += r.filled; return r.filled ? { ...b, body: r.text } : b; });
+    if (filled) notes.push(`Metindeki ${filled} “[EKSİK: ödeme …]” işareti uygulanan ödeme planıyla dolduruldu.`);
+  }
   if (want.has('deliveryTime')) { next.deliveryTime = s.deliveryTime.trim(); applied.push('deliveryTime'); }
   if (want.has('validity') && s.validityDays && c.issueDate) { next.validUntil = addDaysIso(c.issueDate, s.validityDays); applied.push('validity'); }
   if (want.has('closing')) { next.closing = s.closing.trim(); applied.push('closing'); }
@@ -276,7 +311,7 @@ export function applyDraft(doc: { title: string; content: DocContent }, s: Draft
   next.currency = c.currency;
   next.locale = c.locale;
   if (!applied.includes('recipient')) next.recipient = c.recipient;
-  return { title, content: next, applied, skipped };
+  return { title, content: next, applied, skipped, notes };
 }
 
 /* ── Currency change on a filled document ───────────────────────── */

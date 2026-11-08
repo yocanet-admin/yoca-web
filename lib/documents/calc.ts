@@ -250,6 +250,11 @@ export function quantityText(it: LineItem, locale: 'tr' | 'en' = 'tr'): string {
   const b = it.billing ?? 'once';
   if (b !== 'once' && !it.includedIn) {
     const per = b === 'monthly' ? (locale === 'tr' ? 'ay' : 'month') : locale === 'tr' ? 'yıl' : 'year';
+    // a renewal from year N: its billing period and start, never an assumed total duration
+    if (!it.term && (it.startYear ?? 1) > 1) {
+      const y = it.startYear ?? 2;
+      return locale === 'tr' ? `${b === 'monthly' ? 'Aylık' : 'Yıllık'} yenileme · ${y}. yıldan itibaren` : `${b === 'monthly' ? 'Monthly' : 'Yearly'} renewal · from year ${y}`;
+    }
     if (!it.term) return locale === 'tr' ? 'süre belirtilmedi' : 'duration not stated';
     return `${it.term} ${per}${locale === 'en' && it.term !== '1' ? 's' : ''}`;
   }

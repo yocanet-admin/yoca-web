@@ -321,6 +321,51 @@ export function sanitizeContent(input: unknown, kind: DocKind): DocContent {
 /* ── What is missing (blocking = cannot finalize; warnings = shown) ─────── */
 
 export const MISSING_MARKER = /\[(?:EKSİK|EKSIK|MISSING)[^\]]*\]/gi;
+/** A missing-fact marker about the payment plan ("[EKSİK: Ödeme aşamaları ve oranları]"). */
+export const PAYMENT_MARKER = /\[(?:EKSİK|EKSIK|MISSING)[^\]]*(?:ödeme|odeme|oran|aşama|asama|taksit|vade|payment|instal)[^\]]*\]/gi;
+
+/** Payment steps with percentages that add up to exactly 100 (a complete plan). */
+export function planComplete(steps: PaymentStep[]): boolean {
+  const used = steps.filter((s) => s.value.trim() || s.label.trim());
+  if (!used.length || used.some((s) => s.mode !== 'percent')) return false;
+  const sum = used.reduce((a, s) => a + Math.round(Number(s.value.replace(',', '.')) * 100), 0);
+  return used.every((s) => /^\d{1,3}([.,]\d{1,2})?$/.test(s.value.trim())) && sum === 10000;
+}
+
+/** The structured plan as one sentence, for text that should state it ("%50 Başlangıç ödemesi (Sözleşme imzasında), …"). */
+export function planSentence(steps: PaymentStep[], locale: DocLocale = 'tr'): string {
+  return steps.filter((s) => s.value.trim() || s.label.trim()).map((s) => `%${s.value.trim()} ${s.label.trim() || (locale === 'tr' ? 'ödeme' : 'payment')}${s.due.trim() ? ` (${s.due.trim()})` : ''}`).join(', ');
+}
+
+/** Replace payment-plan markers in a text with the plan sentence (only when the plan is complete). */
+export function fillPaymentMarkers(text: string, steps: PaymentStep[], locale: DocLocale = 'tr'): { text: string; filled: number } {
+  if (!planComplete(steps)) return { text, filled: 0 };
+  let filled = 0;
+  const out = text.replace(PAYMENT_MARKER, () => { filled += 1; return planSentence(steps, locale); });
+  return { text: out, filled };
+}
+
+/* ── File names shown to people (downloads, e-mail attachments) ──── */
+
+const KIND_FILE: Record<DocKind, string> = { quote: 'Teklif', proforma: 'Proforma', letter: 'Yazı', status_report: 'Durum-Raporu', delivery: 'Teslim-Belgesi' };
+const asciiName = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ı/g, 'i').replace(/İ/g, 'I').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
+/**
+ * "Yoca-Teklif-TKL-2026-0003-Taslak.pdf", "Yoca-Teklif-TKL-2026-0003-v1.pdf" (a past render: "…-v1-r3.pdf").
+ * `ascii: true` gives the ASCII fallback ("Yoca-Yazi-…" for "Yoca-Yazı-…"). Storage keys are never renamed.
+ */
+export function docFileName(kind: DocKind, number: string, version: 'draft' | number, opts: { revision?: number; ascii?: boolean } = {}): string {
+  const tail = version === 'draft' ? 'Taslak' : `v${version}${opts.revision ? `-r${opts.revision}` : ''}`;
+  const name = `Yoca-${KIND_FILE[kind] ?? 'Belge'}-${asciiName(number) || 'belge'}-${tail}.pdf`;
+  return opts.ascii ? asciiName(name.slice(0, -4)) + '.pdf' : name;
+}
+
+/** Content-Disposition with an ASCII fallback and the UTF-8 name (RFC 6266 / RFC 5987). */
+export function contentDisposition(type: 'inline' | 'attachment', utf8Name: string): string {
+  const fallback = asciiName(utf8Name.replace(/\.pdf$/i, '')) + (/\.pdf$/i.test(utf8Name) ? '.pdf' : '');
+  const enc = encodeURIComponent(utf8Name).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${type}; filename="${fallback}"; filename*=UTF-8''${enc}`;
+}
 
 export interface Issuer {
   brand: string;
@@ -381,6 +426,11 @@ export function missingFor(kind: DocKind, c: DocContent, issuer: Issuer, extra: 
   if (kind === 'status_report' && !c.period.trim()) warnings.push('Rapor dönemi yazılmadı.');
   if (kind === 'delivery' && !c.blocks.some((b) => b.key === 'delivered' && b.body.trim())) blocking.push('Teslim edilenler listesi boş.');
   if (def.bank && kind === 'proforma' && !c.bankAccountIds.length) warnings.push('Banka hesabı seçilmedi.');
+  // A complete payment plan next to a text that still says the plan is missing: conflicting, never printed silently.
+  if (def.payment && planComplete(c.payment)) {
+    const stale = c.blocks.flatMap((b) => b.body.match(PAYMENT_MARKER) ?? []);
+    if (stale.length) blocking.push(`Ödeme planı dolu ama metinde hâlâ ${stale[0]} yazıyor. Metni planla uyumlu hâle getirin (Eksikler kutusundaki “İşareti ödeme planıyla doldur”).`);
+  }
   const markers = allText(c).match(MISSING_MARKER) ?? [];
   for (const m of Array.from(new Set(markers)).slice(0, 10)) blocking.push(`Metinde doldurulmamış yer var: ${m}`);
   return { blocking, warnings };

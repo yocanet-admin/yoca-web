@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
         };
       }
       const r = await draftDocument(model, { kind, locale, brief, recipient: String(body.recipient ?? '').slice(0, 300), projectName: String(body.projectName ?? '').slice(0, 200), currency, prices, sample, realClient, scope, current });
-      result = { suggestion: cleanDraft(kind, r.data, { currency, prices, sample, scope, brief }) };
+      result = { suggestion: cleanDraft(kind, r.data, { currency, prices, sample, scope, brief, locale }) };
       usage = r.usage; requestId = r.requestId; isMock = Boolean(r.mock);
     } else if (mode === 'letter') {
       const facts = String(body.facts).slice(0, 6000);

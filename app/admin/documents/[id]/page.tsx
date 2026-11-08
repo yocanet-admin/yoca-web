@@ -16,7 +16,7 @@ import { readDocBackup, writeDocBackup, type DocBackup } from '@/lib/documents/b
 import { getAdminClient } from '@/lib/adminClient';
 import {
   BILLING_LABEL, BLOCK_LABEL, CURRENCY_LABEL, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, QUOTE_STATES, STATUS_LABEL,
-  blockHeading, localId, missingFor, newItem, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PaymentStep, type QuoteState,
+  blockHeading, fillPaymentMarkers, localId, missingFor, newItem, planComplete, planSentence, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PaymentStep, type QuoteState,
 } from '@/lib/documents/model';
 import { computeDocument, fmtMoney, fmtPct } from '@/lib/documents/calc';
 import { applyDraft, setBilling, changeCurrency, hasAmounts, pricesRequested, sampleRequested, sectionLabel, type DraftSuggestion } from '@/lib/documents/aiDraft';
@@ -239,7 +239,7 @@ function EditorInner() {
     setDirty(true);
     setSuggestion(null);
     const names = res.applied.map((x) => sectionLabel(x, (k) => BLOCK_LABEL[k]?.tr ?? k));
-    setFlash({ tone: res.skipped.length ? 'warn' : 'ok', text: `Uygulandı (henüz kaydedilmedi): ${names.join(', ') || 'hiçbir bölüm'}.${res.content.items.some((i) => i.aiPrice) ? ' AI fiyat önerileri kontrol edilene kadar belge kesinleştirilemez.' : ''} ${res.skipped.map((x) => x.why).join(' ')}`.trim() });
+    setFlash({ tone: res.skipped.length ? 'warn' : 'ok', text: `Uygulandı (henüz kaydedilmedi): ${names.join(', ') || 'hiçbir bölüm'}.${res.content.items.some((i) => i.aiPrice) ? ' AI fiyat önerileri kontrol edilene kadar belge kesinleştirilemez.' : ''} ${res.notes.join(' ')} ${res.skipped.map((x) => x.why).join(' ')}`.trim() });
   };
 
   /** Currency change: on a document with amounts the admin decides explicitly (no exchange-rate conversion exists). */
@@ -345,14 +345,15 @@ function EditorInner() {
     handleStored(r, true);
   };
   const previewDraft = async () => {
+    const w = openTab(); // opened on the click so it is not blocked; filled when the PDF is ready
     setBusy('prev');
-    const e = await draftPdf(doc.id, draft.title, c, false, doc.number);
+    const e = await draftPdf(doc.id, draft.title, c, false, doc.number, kind, w);
     setBusy(null);
     if (e) setFlash({ tone: 'bad', text: e });
   };
   const downloadDraft = async () => {
     setBusy('pdf');
-    const e = await draftPdf(doc.id, draft.title, c, true, doc.number);
+    const e = await draftPdf(doc.id, draft.title, c, true, doc.number, kind);
     setBusy(null);
     if (e) setFlash({ tone: 'bad', text: e });
   };
@@ -443,6 +444,13 @@ function EditorInner() {
       {editable && (missing.blocking.length > 0 || missing.warnings.length > 0) && (
         <div className="admin-card grid gap-2 p-4 text-[13px]" aria-live="polite">
           {missing.blocking.length > 0 && <><p className="font-bold text-yellow-200">Kesinleştirmeden önce tamamlanmalı</p><ul className="list-disc ps-5 text-yellow-100">{missing.blocking.map((m) => <li key={m}>{m}</li>)}</ul></>}
+          {def.payment && planComplete(c.payment) && c.blocks.some((b) => fillPaymentMarkers(b.body, c.payment, c.locale).filled > 0) && (
+            <button type="button" className={`${small} justify-self-start`} onClick={() => {
+              const blocks = c.blocks.map((b) => { const r = fillPaymentMarkers(b.body, c.payment, c.locale); return r.filled ? { ...b, body: r.text } : b; });
+              set({ blocks });
+              setFlash({ tone: 'ok', text: `Metindeki ödeme işareti planla dolduruldu: ${planSentence(c.payment, c.locale)} (henüz kaydedilmedi).` });
+            }}>İşareti ödeme planıyla doldur</button>
+          )}
           {missing.warnings.length > 0 && <><p className="mt-1 font-bold text-muted">Kontrol edin</p><ul className="list-disc ps-5 text-muted">{missing.warnings.map((m) => <li key={m}>{m}</li>)}</ul></>}
         </div>
       )}
@@ -549,13 +557,13 @@ function EditorInner() {
                               return <>
                                 <label className={label}>Adet / Süre{rec ? ` (${BILLING_LABEL[it.billing ?? 'once'].per.tr})` : ''}
                                   {rec
-                                    ? <input className={`${field} ${!it.term ? '!border-yellow-400/70' : ''}`} inputMode="numeric" value={it.term ?? ''} onChange={(e) => setItem(i, { term: e.target.value.replace(/\D/g, '').slice(0, 3) })} placeholder="belirtilmedi" />
+                                    ? <input className={`${field} ${!it.term && (it.startYear ?? 1) <= 1 ? '!border-yellow-400/70' : ''}`} inputMode="numeric" value={it.term ?? ''} onChange={(e) => setItem(i, { term: e.target.value.replace(/\D/g, '').slice(0, 3) })} placeholder={(it.startYear ?? 1) > 1 ? 'süresiz (her yıl)' : 'belirtilmedi'} />
                                     : <input className={field} inputMode="decimal" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} />}
                                 </label>
                                 <label className={label}>Birim<UnitField className={field} value={it.unit} fixed={rec ? BILLING_LABEL[it.billing ?? 'once'].per.tr : undefined} onChange={(v) => setItem(i, { unit: v })} /></label>
                               </>;
                             })()}
-                            <label className={label}>Birim fiyat ({c.currency}{it.includedIn ? '' : (it.billing ?? 'once') !== 'once' ? ` / ${BILLING_LABEL[it.billing ?? 'once'].per.tr}` : ''})<input className={`${field} ${(!it.unitPrice.trim() && it.title.trim() && !it.includedIn) || it.aiPrice ? '!border-yellow-400/70' : ''}`} inputMode="decimal" value={it.includedIn ? '' : it.unitPrice} disabled={Boolean(it.includedIn)} onChange={(e) => setItem(i, { unitPrice: e.target.value, aiPrice: false })} placeholder={it.includedIn ? 'dahil' : 'eksik'} /></label>
+                            <label className={label}>Birim fiyat ({c.currency}{it.includedIn ? '' : (it.billing ?? 'once') !== 'once' ? ` / ${BILLING_LABEL[it.billing ?? 'once'].per.tr}` : ''}, KDV hariç)<input className={`${field} ${(!it.unitPrice.trim() && it.title.trim() && !it.includedIn) || it.aiPrice ? '!border-yellow-400/70' : ''}`} inputMode="decimal" value={it.includedIn ? '' : it.unitPrice} disabled={Boolean(it.includedIn)} onChange={(e) => setItem(i, { unitPrice: e.target.value, aiPrice: false })} placeholder={it.includedIn ? 'dahil' : 'eksik'} /></label>
                             <label className={label}>İndirim %<input className={field} inputMode="decimal" value={it.discountPct} onChange={(e) => setItem(i, { discountPct: e.target.value })} placeholder="0" /></label>
                             <label className={label}>KDV %<input className={field} inputMode="decimal" value={it.taxRate} onChange={(e) => setItem(i, { taxRate: e.target.value })} /></label>
                           </div>

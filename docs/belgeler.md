@@ -125,6 +125,12 @@ Tutarları uygulama hesaplar; yapay zekâ hesaplamaz. Hesap kuruş cinsinden tam
 - Genel toplam (listedeki tutar, ödeme planı, “Tek seferlik toplam”) yalnızca tek seferlik kalemlerden oluşur. Aylık ve yıllık / gelecek dönem kalemleri ayrı gruplarda, kendi dönem toplamlarıyla gösterilir (“Tekrarlayan ve sonraki dönem ücretleri”); tek seferlik toplama eklenmez. Aylık toplam (aylık kalemlerin toplamı, ay başına) ve yalnızca süre verilmişse “N aylık hizmet toplamı” gösterilir; 2. yıl yenilemesi ilk dönem toplamlarına girmez. Aylık birim fiyat, toplam aylık hizmet bedelidir. Ödeme planı tek seferlik toplam üzerinden hesaplanır (PDF’te ve panelde yazılır).
 - Teklif hazırlamak Operasyon hizmeti, borç veya yenileme kaydı oluşturmaz.
 
+**Ödeme planı ve metin tutarlılığı:** Dolu bir ödeme planının yanında metinde “[EKSİK: ödeme …]” kalırsa belge kesinleştirilemez (ayrı uyarı) ve taslak PDF’in ilk sayfasında “Doldurulmamış yer var (N)” yazar. Yapay zekâ önerisinden ödeme planı uygulandığında metindeki ödeme işareti planın kendisiyle doldurulur (“%50 Başlangıç ödemesi (…), %50 …”); plan uygulanmazsa işaret kalır. Eksikler kutusunda “İşareti ödeme planıyla doldur” düğmesi vardır.
+
+**PDF’te sıra ve etiketler:** Kalem numaraları basılan sırayı izler (tek seferlik + dahil, sonra aylık, sonra yıllık grup); kayıtlı kalem kimlikleri değişmez. 2. yıldan itibaren yenilemede Adet / Süre “Yıllık yenileme · 2. yıldan itibaren” yazar (toplam süre varsayılmaz). Tablo başlığında “Tutarlar KDV hariç”.
+
+**Dosya adları:** “Yoca-Teklif-TKL-2026-0003-Taslak.pdf”, kesinleşmiş “Yoca-Teklif-TKL-2026-0003-v1.pdf”, geçmiş PDF “…-v1-r3.pdf”; türler: Teklif, Proforma, Yazı (ASCII yedeği Yazi), Durum-Raporu, Teslim-Belgesi. İndirmede `Content-Disposition` (ASCII `filename` + `filename*=UTF-8''…`), depolama indirmelerinde imzalı bağlantının indirme adı kullanılır; depolama anahtarları ve geçmiş PDF içerikleri değişmez. Önizleme sekmesinde PDF ve “İndir” düğmesi aynı adla kaydeder.
+
 **ÖRNEK belge:** kurgusal adlar içerebilir; PDF’te “ÖRNEK” ve “ÖRNEK belge · gerçek teklif değildir” yazar; kesinleştirilemez, gönderilemez, müşteri kaydına bağlanamaz.
 
 ## Kesinleştirme ve sürümler

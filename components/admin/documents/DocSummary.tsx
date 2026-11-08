@@ -90,7 +90,7 @@ export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: Do
           <div className="overflow-x-auto">
             <table className="w-full min-w-[620px] text-[13px]">
               <thead className="text-left text-[11px] uppercase tracking-[0.08em] text-subtle">
-                <tr><th className="py-1.5 pe-2">#</th><th className="py-1.5 pe-2">Açıklama</th><th className="py-1.5 pe-2 text-right">Adet / Süre</th><th className="py-1.5 pe-2 text-right">Birim fiyat</th>{showDisc && <th className="py-1.5 pe-2 text-right">İnd.</th>}<th className="py-1.5 pe-2 text-right">KDV</th><th className="py-1.5 text-right">Tutar</th></tr>
+                <tr><th className="py-1.5 pe-2">#</th><th className="py-1.5 pe-2">Açıklama</th><th className="py-1.5 pe-2 text-right">Adet / Süre</th><th className="py-1.5 pe-2 text-right">Birim fiyat (KDV hariç)</th>{showDisc && <th className="py-1.5 pe-2 text-right">İnd.</th>}<th className="py-1.5 pe-2 text-right">KDV</th><th className="py-1.5 text-right">Tutar (KDV hariç)</th></tr>
               </thead>
               <tbody>
                 {lines.map((l) => {

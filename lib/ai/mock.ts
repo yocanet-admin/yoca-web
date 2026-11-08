@@ -115,7 +115,11 @@ function mockQuoteDraft(input: string, brief: string, scope: string) {
   const revisions = scope === 'block:revisions'
     ? 'Marka kimliğinde seçilen yön için üç revizyon turu, web sitesi tasarımında sayfa şablonu başına iki revizyon turu dahildir. Sosyal medya içeriklerinde her gönderi için bir revizyon turu dahildir. Ek revizyonlar ayrıca fiyatlandırılır.'
     : 'Marka kimliği ve web sitesi tasarımı için iki revizyon turu dahildir. Ek revizyonlar ayrıca fiyatlandırılır.';
-  const payment = scope === 'payment'
+  // "[mock-eksik-plan]": what a real model did once — the plan left as a placeholder, scope points listed as "missing".
+  // "[mock-yalniz-plan]": a payment-only answer that does not rewrite the payment-terms text.
+  const weak = brief.includes('[mock-eksik-plan]');
+  const planOnly = brief.includes('[mock-yalniz-plan]');
+  const payment = weak ? [{ label: '[EKSİK: Ödeme aşamaları ve oranları]', percent: null, due: '' }] : scope === 'payment'
     ? [{ label: 'Başlangıç ödemesi', percent: 40, due: 'Sözleşme imzasında' }, { label: 'Marka kimliği onayı', percent: 30, due: 'Marka kimliği onaylandığında' }, { label: 'Web sitesi yayını', percent: 30, due: 'Web sitesi yayına alındığında' }]
     : [{ label: 'Başlangıç ödemesi', percent: 50, due: 'Sözleşme imzasında' }, { label: 'Teslim ödemesi', percent: 50, due: 'Web sitesi yayına alındığında' }];
   return {
@@ -125,10 +129,10 @@ function mockQuoteDraft(input: string, brief: string, scope: string) {
       { key: 'intro', heading: 'Giriş', body: `Bu teklif${recipient ? `, ${recipient} için` : ''} marka kimliği, kurumsal web sitesi ve sosyal medya yönetimi çalışmalarının kapsamını, tek seferlik ve aylık ücretlerini ve koşullarını içerir.` },
       { key: 'scope', heading: 'Kapsam', body: 'Marka kimliği ve web sitesi tek seferlik işlerdir: önce marka kimliği hazırlanır ve onaylanır, web sitesi onaylanan kimlikle tasarlanıp geliştirilir.\n\nSosyal medya yönetimi aylık bir hizmettir: içerik planı, gönderi tasarımı ve yayın takibi her ay tekrarlanır.' },
       { key: 'deliverables', heading: 'Teslimatlar', body: 'Logo dosyaları (SVG, PDF, PNG), renk paleti, tipografi ve kullanım kılavuzu\nYayında çalışan, mobil uyumlu kurumsal web sitesi ve yönetim paneli erişimi\nİlk yıl için domain ve hosting kurulumu\nHer ay içerik planı ve 12 gönderi tasarımı' },
-      { key: 'assumptions', heading: 'Varsayımlar', body: `Metinler ve fotoğraflar müşteri tarafından sağlanır.\n${months ? `Sosyal medya yönetimi ${months} ay için teklif edilmiştir; ücret aylık faturalanır.` : 'Sosyal medya yönetimi için sözleşme süresi belirtilmedi; aylık ücret hizmet sürdükçe her ay faturalanır. Kontrol edilecek öneri: en az 6 ay.'}\nDomain ve hosting ilk yıl web sitesi bedeline dahildir; 2. yıldan itibaren yıllık yenileme ayrıca faturalanır.` },
+      { key: 'assumptions', heading: 'Varsayımlar', body: `Metinler ve fotoğraflar müşteri tarafından sağlanır.\n${months ? `Sosyal medya yönetimi ${months} ay için teklif edilmiştir; ücret aylık faturalanır.` : 'Sosyal medya yönetimi için sözleşme süresi belirtilmedi; aylık ücret hizmet sürdükçe her ay faturalanır. Kontrol edilecek öneri: en az 6 ay.'}\nDomain ve hosting ilk yıl web sitesi bedeline dahildir; 2. yıldan itibaren yıllık yenileme ayrıca faturalanır.${weak ? '' : '\nWeb sitesi en çok 8 sayfa olarak varsayılmıştır.\nSosyal medya: 2 platform, ayda 12 gönderi varsayılmıştır.'}` },
       { key: 'out_of_scope', heading: 'Kapsam dışı', body: 'Sosyal medya reklam bütçesi\nFotoğraf ve video çekimi\nE-ticaret ve ödeme altyapısı' },
       { key: 'revisions', heading: 'Revizyon koşulları', body: revisions },
-      { key: 'terms', heading: 'Ödeme koşulları', body: scope === 'payment' ? 'Tek seferlik işlerin bedeli üç adımda ödenir. Sosyal medya yönetimi her ayın ilk iş günü faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; ilk dönem toplamlarına dahil değildir.' : 'Ödeme planı tek seferlik işler (marka kimliği ve web sitesi) içindir. Sosyal medya yönetimi aylık olarak her ayın başında faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; ilk dönem toplamlarına dahil değildir.' },
+      ...(planOnly ? [] : [{ key: 'terms', heading: 'Ödeme koşulları', body: weak ? 'Tek seferlik çalışmaların ödeme planı: [EKSİK: Ödeme aşamaları ve oranları]. Sosyal medya yönetimi aylık, 2. yıldan itibaren domain ve hosting yenilemesi yıllık faturalanır.' : scope === 'payment' ? 'Tek seferlik işlerin bedeli üç adımda ödenir. Sosyal medya yönetimi her ayın ilk iş günü faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; ilk dönem toplamlarına dahil değildir.' : 'Ödeme planı tek seferlik işler (marka kimliği ve web sitesi) içindir. Sosyal medya yönetimi aylık olarak her ayın başında faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; ilk dönem toplamlarına dahil değildir.' }]),
       { key: 'notes', heading: 'Notlar', body: notes },
     ],
     items: [
@@ -145,10 +149,10 @@ function mockQuoteDraft(input: string, brief: string, scope: string) {
     pricing: priced
       ? { basis: 'Fiyatlar canlı piyasa araştırmasına değil, kapsamdaki işler ve tahmini efor üzerinden hazırlanmış tahminlerdir. Fiyatlar Türkiye ortalamasına göre belirlenmiştir.', assumptions: ['Marka kimliği: iki logo yönü ve iki revizyon turu.', 'Web sitesi: en çok 8 sayfa, içerik müşteriden.', 'Sosyal medya: iki platform, ayda 12 gönderi; reklam bütçesi hariç.', 'Yenileme: güncel sağlayıcı tarifesine göre tahmin.'] }
       : { basis: '', assumptions: [] },
-    proposed: ['block:revisions', 'payment', 'deliveryTime', 'validity'],
+    proposed: weak ? ['block:revisions', 'deliveryTime', 'validity'] : ['block:revisions', 'block:assumptions', 'payment', 'deliveryTime', 'validity'],
     requestedCurrency: '',
     sampleRecipient: sample ? { company: 'Kurgusal Kafe Ltd. Şti.', name: 'Deniz Örnek' } : { company: '', name: '' },
-    missing: [brief.length > 0 && !recipient ? 'Alıcı firma adı' : ''].filter(Boolean),
+    missing: [brief.length > 0 && !recipient ? 'Alıcı firma adı' : '', ...(weak ? ['Web sitesinin sayfa sayısı ve işlevleri', 'Sosyal medya kanalları ve aylık içerik adedi', 'Ödeme aşamaları ve oranları'] : [])].filter(Boolean),
   };
 }
 

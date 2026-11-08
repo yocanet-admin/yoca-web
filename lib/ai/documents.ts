@@ -1,7 +1,7 @@
 import { callOpenAI, type OpenAIResult } from '@/lib/ai/openai';
 import { fence } from '@/lib/ai/sourceText';
 import { NO_AI_SLOP_RULES } from '@/lib/ai/prompts/no-ai-slop';
-import { BILLINGS, BLOCK_LABEL, DOC_CURRENCIES, KIND_DEF, KIND_LABEL, type BlockKey, type DocCurrency, type DocKind, type DocLocale, type PriceBasis } from '@/lib/documents/model';
+import { BILLINGS, BLOCK_LABEL, DOC_CURRENCIES, KIND_DEF, KIND_LABEL, PAYMENT_MARKER, planComplete, type BlockKey, type DocCurrency, type DocKind, type DocLocale, type PriceBasis } from '@/lib/documents/model';
 import { parseMoney } from '@/lib/documents/calc';
 import { currencyMentions, restrictToScope, stripAverageClaims, type DraftSuggestion, type SuggestedItem } from '@/lib/documents/aiDraft';
 
@@ -177,7 +177,8 @@ export function draftDocument(model: string, input: DraftInput): Promise<OpenAIR
           'If the brief says something is included in another item for the first year (e.g. domain and hosting included in the website in year 1), add it as its own line with includedIn = that item\'s ref and no price, and if a renewal follows (e.g. yearly from year 2) add a separate yearly line with startYear 2. ' +
           'If the duration of a monthly service is not given, leave term empty and add an assumption that the duration is not stated (you may suggest one, marked as a suggestion to check).\n' + pricing
         : 'Return no line items.\n') +
-      (input.kind === 'quote' ? 'For a quotation also propose: introduction, scope, deliverables, assumptions, out-of-scope work, revision terms, payment terms (section "terms": how one-time and recurring fees are billed), timeline (deliveryTime), payment plan for the one-time total, validity (validityDays) and a short closing line. Commercial terms the brief does not give (revision rounds, delivery time, payment percentages, validity) may be proposed, but list each such section id in "proposed". Keep scope, items, timeline and payment plan consistent with each other.\n' : '') +
+      (input.kind === 'quote' ? 'For a quotation also propose: introduction, scope, deliverables, assumptions, out-of-scope work, revision terms, payment terms (section "terms": how one-time and recurring fees are billed), timeline (deliveryTime), payment plan for the one-time total, validity (validityDays) and a short closing line. Commercial terms the brief does not give (revision rounds, delivery time, payment percentages, validity) may be proposed, but list each such section id in "proposed". Keep scope, items, timeline and payment plan consistent with each other.\n' +
+        (input.scope === 'all' ? 'FULL DRAFT: complete every section with concrete, editable proposals. Always propose a payment plan for the one-time total (e.g. 50% at contract signature / 50% on delivery) and state the same plan in the "terms" section; never leave the plan or its percentages as [EKSİK]. Scope parameters the brief leaves open (number of website pages, social media platforms, monthly posts, revision rounds, delivery time, validity) are PROPOSALS: write them as explicit assumptions (e.g. "Web sitesi en çok 8 sayfa olarak varsayılmıştır.", "Sosyal medya: 2 platform, ayda 12 gönderi varsayılmıştır."), list the section ids in "proposed", and do not put them in "missing" or in [EKSİK]. Use [EKSİK: …] and "missing" only for real-world facts you must not propose: company, person, tax, bank, address or contact details and dates the client has to confirm. Exception to the fact rules below: for a quotation you may propose payment percentages, revision rounds, durations and scope limits as described here (never amounts in text).\n' : '') : '') +
       (input.kind === 'status_report' ? 'For a status report use: summary, done, in_progress, waiting (what the client must provide), next_steps. Only items the brief states.\n' : '') +
       (input.kind === 'delivery' ? 'For a delivery note list what was delivered and open issues exactly as the brief states; never claim acceptance by the client.\n' : '') +
       (input.kind === 'letter' ? 'For a letter: a subject line and the body (salutation, paragraphs, no closing formula — the template adds it).\n' : '') +
@@ -306,8 +307,13 @@ export interface CleanContext {
   scope: string;
   /** The user's request (for the deterministic currency check). */
   brief: string;
+  /** Document language (wording of a fallback proposal). */
+  locale?: DocLocale;
 }
 
+const MISSING_MARKER_RE = () => /\[(?:EKSİK|EKSIK|MISSING)[^\]]*\]/gi;
+/** "missing" entries that are scope / commercial points (proposals to confirm), not facts only the user knows. */
+const CHECK_POINT = /sayfa|platform|kanal|içerik|gönderi|paylaşım|post|revizyon|ödeme|oran|aşama|süre|takvim|teslim süresi|geçerlilik|kapsam|adet|işlev|page|channel|revision|payment|timeline/i;
 const PROPOSABLE = /^(title|subject|items|payment|deliveryTime|validity|closing|block:[a-z_]+)$/;
 const TAX_RATE = /(?:KDV|VAT)\s*(?:oranı\s*)?%\s?\d+|%\s?\d+\s*(?:KDV|VAT)/i;
 
@@ -326,6 +332,7 @@ export function cleanDraft(kind: DocKind, d: RawDraft, ctx: CleanContext): Draft
   const warnings: string[] = [];
   let averageRemoved = false;
   const noAvg = (t: string) => { const r = stripAverageClaims(t); if (r.removed) averageRemoved = true; return r.text; };
+  const missingRaw = (Array.isArray(d.missing) ? d.missing : []).map((m) => s(m, 200)).filter(Boolean).slice(0, 20);
   const blocks = (Array.isArray(d.blocks) ? d.blocks : []).filter((b) => b && allowed.has(b.key)).map((b) => ({ key: b.key, heading: s(b.heading, 160), body: noAvg(s(b.body, 12_000)) })).filter((b) => b.body);
   const rawItems = def.items ? (Array.isArray(d.items) ? d.items : []).slice(0, 40) : [];
   const refs = new Set<string>();
@@ -362,7 +369,22 @@ export function cleanDraft(kind: DocKind, d: RawDraft, ctx: CleanContext): Draft
     else if (it.unitPrice && !it.priceBasis) it.priceBasis = 'estimate';
   }
   if (droppedPrices) warnings.push('Fiyat istenmediği için önerideki fiyatlar alınmadı.');
-  const payment = def.payment ? (Array.isArray(d.payment) ? d.payment : []).slice(0, 12).map((p) => ({ label: s(p.label, 160), percent: typeof p.percent === 'number' && p.percent > 0 && p.percent <= 100 ? Math.round(p.percent * 100) / 100 : null, due: s(p.due, 160) })).filter((p) => p.label || p.percent !== null) : [];
+  let payment = def.payment ? (Array.isArray(d.payment) ? d.payment : []).slice(0, 12).map((p) => ({ label: s(p.label, 160), percent: typeof p.percent === 'number' && p.percent > 0 && p.percent <= 100 ? Math.round(p.percent * 100) / 100 : null, due: s(p.due, 160) }))
+    // a step that is only a placeholder ("[EKSİK: Ödeme aşamaları ve oranları]", no percent) is not a plan
+    .filter((p) => (p.label || p.percent !== null) && !(p.percent === null && MISSING_MARKER_RE().test(p.label))) : [];
+  // Quotation, whole draft or the payment section, and no usable plan came back: a standard 50 / 50 proposal (marked to check)
+  let planFallback = false;
+  if (def.payment && (kind === 'quote' || kind === 'proforma') && (ctx.scope === 'all' || ctx.scope === 'payment') && !payment.some((p) => p.percent !== null) && (ctx.scope === 'payment' || rawItems.length > 0)) {
+    payment = ctx.locale === 'en'
+      ? [{ label: 'Initial payment', percent: 50, due: 'On contract signature' }, { label: 'Delivery payment', percent: 50, due: 'On delivery of the one-time work' }]
+      : [{ label: 'Başlangıç ödemesi', percent: 50, due: 'Sözleşme imzasında' }, { label: 'Teslim ödemesi', percent: 50, due: 'Tek seferlik işlerin tesliminde' }];
+    planFallback = true;
+  }
+  // A text that still says the plan is missing is filled from the plan only when the plan is APPLIED too
+  // (applyDraft), so a text never describes a plan the document does not have.
+  const steps = payment.map((p, i) => ({ id: `p${i}`, label: p.label, mode: 'percent' as const, value: p.percent === null ? '' : String(p.percent).replace('.', ','), due: p.due }));
+  const payMarkers = blocks.reduce((n, b) => n + (b.body.match(PAYMENT_MARKER) ?? []).length, 0);
+  const filledMarkers = planComplete(steps) ? payMarkers : 0;
   const validity = Number(d.validityDays);
   const pricingRaw = d.pricing && typeof d.pricing === 'object' ? d.pricing : { basis: '', assumptions: [] };
   const pricing = ctx.prices && def.items
@@ -381,7 +403,9 @@ export function cleanDraft(kind: DocKind, d: RawDraft, ctx: CleanContext): Draft
     closing: s(d.closing, 120),
     pricing,
     proposed: Array.from(new Set((Array.isArray(d.proposed) ? d.proposed : []).map((x) => s(x, 40)).filter((x) => PROPOSABLE.test(x)))),
-    missing: (Array.isArray(d.missing) ? d.missing : []).map((m) => s(m, 200)).filter(Boolean).slice(0, 20),
+    // scope / commercial points are proposals to confirm, not facts the user must supply
+    missing: missingRaw.filter((m) => !CHECK_POINT.test(m)),
+    checks: missingRaw.filter((m) => CHECK_POINT.test(m)),
     warnings,
     currency: ctx.currency, prices: ctx.prices && def.items, sample: ctx.sample, scope: ctx.scope,
     currencyConflict: null,
@@ -397,6 +421,9 @@ export function cleanDraft(kind: DocKind, d: RawDraft, ctx: CleanContext): Draft
     if (has && !re.test(b) && !out.proposed.includes(id)) out.proposed.push(id);
   }
 
+  if (planFallback && !out.proposed.includes('payment')) out.proposed.push('payment');
+  if (planFallback) out.warnings.push('Yapay zekâ kullanılabilir bir ödeme planı önermedi; standart öneri eklendi: %50 başlangıçta, %50 teslimde. Kontrol edin.');
+  if (filledMarkers) out.warnings.push(`Önerilen metinde ${filledMarkers} “[EKSİK: ödeme …]” işareti var; ödeme planını da uygularsanız bu işaret planla doldurulur, uygulamazsanız kalır ve belge kesinleştirilemez.`);
   const scoped = restrictToScope(out, ctx.scope);
   if (def.items) {
     const named = new Set<DocCurrency>(currencyMentions(ctx.brief));
@@ -410,6 +437,8 @@ export function cleanDraft(kind: DocKind, d: RawDraft, ctx: CleanContext): Draft
   if (TAX_RATE.test(all)) scoped.warnings.push('Önerilen metinde KDV oranı geçiyor. Vergi oranları belge ayarlarından gelir; metindeki oranı kontrol edin veya silin.');
   if (averageRemoved) scoped.warnings.push('“Piyasa / Türkiye ortalaması” gibi doğrulanamayan bir ifade öneriden çıkarıldı: fiyatlar canlı araştırmaya değil, kapsam ve efor varsayımlarına dayanan tahmindir.');
   if (scoped.payment.some((p) => p.percent === null)) scoped.warnings.push('Ödeme planında oranı belirtilmemiş adım var; oranı siz girin.');
+  const left = Array.from(new Set(scoped.blocks.flatMap((b) => b.body.match(MISSING_MARKER_RE()) ?? [])));
+  if (left.length) scoped.warnings.push(`Öneride doldurulmamış yer kaldı: ${left.slice(0, 5).join(', ')}. Doldurulmadan belge kesinleştirilemez.`);
   return scoped;
 }
 

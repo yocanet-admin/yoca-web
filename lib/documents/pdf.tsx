@@ -45,7 +45,7 @@ import path from 'node:path';
 import React from 'react';
 import type { BankAccount } from '@/lib/documents/settings';
 import { formatIban } from '@/lib/documents/settings';
-import { BLOCK_LABEL, KIND_DEF, KIND_LABEL, bodyParts, type Block, type DocContent, type DocKind, type Issuer } from '@/lib/documents/model';
+import { BLOCK_LABEL, KIND_DEF, KIND_LABEL, MISSING_MARKER, allText, bodyParts, type Block, type DocContent, type DocKind, type Issuer } from '@/lib/documents/model';
 import { computeDocument, fmtMoney, fmtPct, parseMoney, quantityText, type LineResult, type RecurringGroup } from '@/lib/documents/calc';
 
 // @react-pdf/renderer is ESM-only ("import" export condition): it is loaded with
@@ -142,7 +142,9 @@ const L = {
     sampleLine: 'ÖRNEK belge · gerçek teklif değildir · kurgusal bilgiler içerir',
     included: 'Dahil', includedIn: (x: string) => `${x} kalemine dahil`, onceTotal: 'Tek seferlik toplam', once: 'Tek seferlik',
     recurringHead: 'Tekrarlayan ve sonraki dönem ücretleri',
-    recurringNote: 'Bu ücretler tek seferlik toplama ve ödeme planına dahil değildir; kendi dönemlerinde faturalanır.',
+    recurringNote: 'Bu ücretler tek seferlik toplama ve ödeme planına dahil değildir; kendi dönemlerinde faturalanır. Birim fiyatlar KDV hariç, dönem toplamları KDV dahildir.',
+    exVat: 'Tutarlar KDV hariç', renewal: (b: 'monthly' | 'yearly', y: number) => [`${b === 'monthly' ? 'Aylık' : 'Yıllık'} yenileme`, `${y}. yıldan itibaren`],
+    markersLine: (n: number) => `Doldurulmamış yer var (${n}) · kesinleştirmeden önce tamamlanmalı`,
     group: (b: 'monthly' | 'yearly', y: number) => `${b === 'monthly' ? 'Aylık' : 'Yıllık'} · ${y > 1 ? `${y}. yıldan itibaren` : 'başlangıçtan itibaren'}`,
     per: { monthly: 'ay', yearly: 'yıl' },
     groupTotal: (b: 'monthly' | 'yearly', y: number) => (b === 'monthly' ? 'Aylık toplam (KDV dahil)' : y > 1 ? 'Yıllık yenileme (KDV dahil)' : 'Yıllık toplam (KDV dahil)'),
@@ -172,7 +174,9 @@ const L = {
     sampleLine: 'SAMPLE document · not a real quotation · fictional data',
     included: 'Included', includedIn: (x: string) => `Included in ${x}`, onceTotal: 'One-time total', once: 'One-time',
     recurringHead: 'Recurring and later-period fees',
-    recurringNote: 'These fees are not part of the one-time total or the payment plan; they are billed in their own periods.',
+    recurringNote: 'These fees are not part of the one-time total or the payment plan; they are billed in their own periods. Unit prices exclude VAT; period totals include VAT.',
+    exVat: 'Amounts excl. VAT', renewal: (b: 'monthly' | 'yearly', y: number) => [`${b === 'monthly' ? 'Monthly' : 'Yearly'} renewal`, `from year ${y}`],
+    markersLine: (n: number) => `${n} placeholder(s) still to fill · must be completed before finalizing`,
     group: (b: 'monthly' | 'yearly', y: number) => `${b === 'monthly' ? 'Monthly' : 'Yearly'} · ${y > 1 ? `from year ${y}` : 'from the start'}`,
     per: { monthly: 'month', yearly: 'year' },
     groupTotal: (b: 'monthly' | 'yearly', y: number) => (b === 'monthly' ? 'Monthly total (incl. VAT)' : y > 1 ? 'Yearly renewal (incl. VAT)' : 'Yearly total (incl. VAT)'),
@@ -506,10 +510,13 @@ function ItemsTable({ c, t, tail, k = 1, lines: only, per, header = true }: { c:
   const rates = new Set(all.map((l) => (l.taxRateBp === null ? '' : String(l.taxRateBp))));
   const lineTax = rates.size > 1;
   const titleOf = (id: string) => c.items.find((x) => x.id === id)?.title || '—';
+  // customer-visible numbers follow the printed order (one-time + included, then each recurring group); stored ids are untouched
+  const shown = new Map([...doc.totals.lines, ...doc.recurring.flatMap((g) => g.totals.lines)].map((l, i) => [l.id, i + 1]));
   return (
     <R.View>
       {header ? <R.View style={{ flexDirection: 'row' }} fixed>
-        <R.View style={[st.th, { flexGrow: 1, flexBasis: 0, marginRight: GAP }]}><R.Text style={st.thText}>{up(t.service)}</R.Text></R.View>
+        {/* one header line: the amounts in this table are VAT-exclusive (the totals below say where VAT is included) */}
+        <R.View style={[st.th, { flexGrow: 1, flexBasis: 0, marginRight: GAP, flexDirection: 'row', justifyContent: 'space-between' }]}><R.Text style={st.thText}>{up(t.service)}</R.Text><R.Text style={[st.thText, { fontWeight: 600 }]}>{up(t.exVat)}</R.Text></R.View>
         <R.View style={[st.th, { width: COL_QTY, marginRight: GAP }]}><R.Text style={st.thText}>{up(t.qty)}</R.Text></R.View>
         <R.View style={[st.th, { width: COL_AMT }]}><R.Text style={[st.thText, { textAlign: 'right' }]}>{up(t.amount)} / {c.currency}</R.Text></R.View>
       </R.View> : null}
@@ -522,7 +529,7 @@ function ItemsTable({ c, t, tail, k = 1, lines: only, per, header = true }: { c:
         const row = (
           <R.View key={l.id} style={[st.row, { paddingVertical: 12 * k }]} wrap={false}>
             <R.View style={{ flexGrow: 1, flexBasis: 0, flexDirection: 'row', paddingHorizontal: 12, marginRight: GAP }}>
-              <R.Text style={st.code}>{two(l.index + 1)}</R.Text>
+              <R.Text style={st.code}>{two(shown.get(l.id) ?? l.index + 1)}</R.Text>
               <R.View style={{ flexGrow: 1, flexBasis: 0 }}>
                 <R.Text style={st.itemTitle}>{it.title || '—'}</R.Text>
                 {it.description ? <R.Text style={st.itemDesc}>{it.description}</R.Text> : null}
@@ -531,8 +538,14 @@ function ItemsTable({ c, t, tail, k = 1, lines: only, per, header = true }: { c:
               </R.View>
             </R.View>
             <R.View style={{ width: COL_QTY, paddingHorizontal: 12, paddingTop: 2, marginRight: GAP }}>
-              <R.Text style={recurring && !it.term ? [st.qty, { fontSize: 9 }] : st.qty}>{quantityText(it, c.locale)}</R.Text>
-              {recurring ? <R.Text style={st.fig}>{t.billed[(it.billing ?? 'monthly') as 'monthly' | 'yearly']}</R.Text> : null}
+              {(() => {
+                if (!recurring) return <R.Text style={st.qty}>{quantityText(it, c.locale)}</R.Text>;
+                const b = (it.billing ?? 'monthly') as 'monthly' | 'yearly';
+                const y = it.startYear ?? 1;
+                // renewal from year N without a stated total duration: its period and start, not "süre belirtilmedi"
+                if (y > 1 && !it.term) { const [main, sub] = t.renewal(b, y); return <><R.Text style={[st.qty, { fontSize: 9.75 }]}>{main}</R.Text><R.Text style={st.fig}>{sub}</R.Text></>; }
+                return <><R.Text style={!it.term ? [st.qty, { fontSize: 9 }] : st.qty}>{quantityText(it, c.locale)}</R.Text><R.Text style={st.fig}>{t.billed[b]}{y > 1 ? ` · ${t.renewal(b, y)[1]}` : ''}</R.Text></>;
+              })()}
               {showUnit ? <R.Text style={st.fig}>× {fmtMoney(parseMoney(it.unitPrice) ?? BigInt(0), c.currency, c.locale, false)}</R.Text> : null}
               {disc ? <R.Text style={st.fig}>{t.disc} {pctText(it.discountPct, c.locale)}</R.Text> : null}
               {lineTax && l.taxRateBp !== null ? <R.Text style={st.fig}>{t.tax} {pct(l.taxRateBp, c.locale)}</R.Text> : null}
@@ -797,6 +810,9 @@ function recipientDetail(c: DocContent, t: Labels, commercial: boolean): string[
   ].filter(Boolean);
 }
 
+/** "[EKSİK: …]" placeholders left in the text: a draft PDF says so on page 1 (a final one can not have any). */
+const markerCount = (c: DocContent) => new Set(allText(c).match(MISSING_MARKER) ?? []).size;
+
 function statusLine(input: RenderInput, t: Labels): string {
   if (input.sample || input.content.sample) return t.sampleLine;
   return input.mode === 'draft' ? t.draftLine : input.version ? t.versionLine(input.version, input.versionAt ?? '') : '';
@@ -860,6 +876,7 @@ function CommercialDocument({ input, layout }: { input: RenderInput; layout?: La
           {c.projectName ? <R.Text style={st.small}>{t.project}: {c.projectName}</R.Text> : null}
           {c.reference ? <R.Text style={st.small}>{t.reference}: {c.reference}</R.Text> : null}
           {statusLine(input, t) ? <R.Text style={st.small}>{statusLine(input, t)}</R.Text> : null}
+          {markerCount(c) ? <R.Text style={[st.missing, { marginTop: 2 }]}>{t.markersLine(markerCount(c))}</R.Text> : null}
         </InfoCol>
       </R.View>
 
@@ -936,6 +953,7 @@ function LetterDocument({ input, layout }: { input: RenderInput; layout?: Layout
         <InfoCol label={up(t.refDate)}>
           <R.Text style={{ fontSize: 11.25, fontWeight: 700, color: C.ink, lineHeight: 1.4 }}>{input.number} / {fmtShort(c.issueDate, c.locale)}</R.Text>
           {details.map((l, i) => <R.Text key={i} style={[st.small, { marginTop: i ? 0 : 2 }]}>{l}</R.Text>)}
+          {markerCount(c) ? <R.Text style={[st.missing, { marginTop: 2 }]}>{t.markersLine(markerCount(c))}</R.Text> : null}
         </InfoCol>
       </R.View>
 
