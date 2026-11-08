@@ -304,7 +304,8 @@ require('node:http').createServer((req, res) => { let b = ''; req.on('data', (c)
   check('cron: refused without CRON_SECRET; with it upserts the same weeks (no duplicates)', cronBad === '401' && cron.ok && cron.weeks.length === 2 && w3 === sql("select count(distinct (site_id, week_start, dimension, key, filters)) from seo_weekly"), `${cronBad} ${JSON.stringify(cron).slice(0, 200)}`);
   check('cron rerun: still no duplicates, identical row count', (await cronCall()).ok && sql('select count(*) from seo_weekly') === w3);
   const seoPings = pings.filter((p) => p.url.startsWith('/ping/seo'));
-  check('Healthchecks: unauthorized cron sends nothing; authorized → /start then success with "kaydedildi: N satır"', seoPings.length >= 2 && seoPings[0].url === '/ping/seo/start' && seoPings[1].url === '/ping/seo' && seoPings[1].method === 'POST' && /^kaydedildi: \d+ satır, 2 hafta/.test(seoPings[1].body), JSON.stringify(seoPings.slice(0, 3)));
+  check('Healthchecks: unauthorized cron sends nothing; authorized → /start then success (latest week saved); content-free GET', seoPings.length >= 2 && seoPings[0].url === '/ping/seo/start' && seoPings[1].url === '/ping/seo' && seoPings.every((p) => p.method === 'GET' && p.body === ''), JSON.stringify(seoPings.slice(0, 3)));
+  check('cron result reports latest and previous week separately', /^kaydedildi \(\d+ satır\)$/.test(cron.latest) && /^yenilendi \(\d+ satır\)$/.test(cron.previous) && cron.monitor === 'success', JSON.stringify([cron.latest, cron.previous, cron.monitor]));
   check('no e-mail / Telegram captured by the gateway during the SEO run', captured() === capBefore, `${capBefore} → ${captured()}`);
 
   // ── without v27: SEO says "migration bekleniyor", the rest keeps working ──
@@ -315,7 +316,7 @@ require('node:http').createServer((req, res) => { let b = ''; req.on('data', (c)
   const cronPending = (await cronCall());
   check('no v27 tables: cron skips quietly', cronPending.ok && cronPending.skipped === 'migration_pending', JSON.stringify(cronPending));
   const lastPing = pings.filter((p) => p.url.startsWith('/ping/seo')).at(-1);
-  check('Healthchecks: a skipped run goes to /log with the reason, NOT a success', lastPing.url === '/ping/seo/log' && /^atlandı: SEO tabloları yok/.test(lastPing.body), JSON.stringify(lastPing));
+  check('Healthchecks: a skipped run goes to /log (content-free), NOT a success', lastPing.url === '/ping/seo/log' && lastPing.body === '' && lastPing.method === 'GET', JSON.stringify(lastPing));
   await a2.page.screenshot({ path: `${OUT}/seo-migration-bekleniyor.png` });
   await a2.page.goto('http://localhost:3190/admin/traffic');
   await a2.page.getByRole('heading', { name: 'Trafik' }).waitFor();
