@@ -9,6 +9,9 @@
  *    bookmark, typed address) is visible in the menu.
  *
  * Only group titles and booleans are stored (localStorage, one key per user id).
+ * Each change writes only the group that changed (merged into what is stored),
+ * so two open admin tabs never undo each other's choices; tabs follow each
+ * other's changes through the storage event.
  */
 
 export type OpenGroups = Record<string, boolean>;
@@ -51,6 +54,14 @@ export function resolveOpenGroups(titles: string[], stored: OpenGroups | null, c
   for (const title of titles) out[title] = stored ? stored[title] === true : false;
   if (current && titles.includes(current)) out[current] = true;
   return out;
+}
+
+/**
+ * The stored value after changing only `patch`'s groups: whatever another tab
+ * stored for the other groups is kept as it is.
+ */
+export function patchOpenGroups(raw: string | null | undefined, patch: OpenGroups): string {
+  return JSON.stringify({ ...(parseOpenGroups(raw) ?? {}), ...patch });
 }
 
 /** Flips one group; the others keep their state. */
