@@ -162,7 +162,7 @@ function ListInner() {
     let err: string | null = null;
     if (d.status === 'draft' || d.final_version < 1) {
       const full = await loadDoc(d.id);
-      err = full.ok ? await draftPdf(d.id, full.document.title, full.document.content, true, d.number) : full.error ?? 'Belge okunamadı.';
+      err = full.ok ? await draftPdf(d.id, full.document.title, full.document.content, true, d.number, d.kind) : full.error ?? 'Belge okunamadı.';
     } else {
       const r = await storedPdf({ id: d.id }, { keepBank });
       if (r && 'error' in r) err = r.error;

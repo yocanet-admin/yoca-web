@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, field, label, small } from '@/components/admin/ops/ui';
 import { RecurringSummary } from '@/components/admin/documents/Recurring';
+import { PAYMENT_CHECK_SCOPE } from '@/components/admin/documents/PaymentCheckStatus';
 import { UnitField } from '@/components/admin/documents/fields';
-import { applyDraft, sectionLabel, sectionsOf, type DraftSuggestion, type SuggestedItem } from '@/lib/documents/aiDraft';
+import { applyDraft, defaultSelection, filledTarget, sectionLabel, sectionsOf, type DraftSuggestion, type SuggestedItem } from '@/lib/documents/aiDraft';
 import { computeDocument, fmtMoney, fmtPct } from '@/lib/documents/calc';
-import { BLOCK_LABEL, BILLING_LABEL, CURRENCY_LABEL, type BlockKey, type DocContent } from '@/lib/documents/model';
+import { BLOCK_LABEL, BILLING_LABEL, CURRENCY_LABEL, paymentCheck, type BlockKey, type DocContent } from '@/lib/documents/model';
 
 /**
  * Yoca — review of an AI draft suggestion before anything is written.
@@ -34,14 +35,17 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
 }) {
   const c = doc.content;
   const sections = sectionsOf(s);
-  const [sel, setSel] = useState<Record<string, boolean>>(() => Object.fromEntries(sections.map((x) => [x, true])));
+  // a whole draft opens with only the sections whose target is still empty ticked: a filled title / text / list is never replaced unasked
+  const [sel, setSel] = useState<Record<string, boolean>>(() => { const on = new Set(defaultSelection(doc, s)); return Object.fromEntries(sections.map((x) => [x, on.has(x)])); });
   const realItems = c.items.filter((i) => i.title.trim() || i.description.trim() || i.unitPrice.trim()).length;
   const [itemMode, setItemMode] = useState<'append' | 'replace'>(realItems ? 'append' : 'replace');
   const [acceptCurrency, setAcceptCurrency] = useState(false);
   const head = useRef<HTMLHeadingElement>(null);
   useEffect(() => { head.current?.focus(); }, []);
 
-  const isSel = (id: string) => sections.includes(id) && (sel[id] ?? true);
+  // a new plan and its payment-terms text are applied together
+  const linked = (id: string) => id === 'block:terms' && sections.includes('payment') && (sel.payment ?? true);
+  const isSel = (id: string) => sections.includes(id) && ((sel[id] ?? true) || linked(id));
   const chosen = sections.filter(isSel);
   const pricedItems = s.prices && s.items.some((i) => i.unitPrice.trim());
   const needCurrency = Boolean(s.currencyConflict) && isSel('items') && pricedItems && !acceptCurrency;
@@ -58,11 +62,13 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
   const pick = (id: string, children: React.ReactNode = null) => (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <label className="flex items-center gap-2 text-[13px] font-bold text-white">
-        <input type="checkbox" checked={isSel(id)} onChange={(e) => setSel((o) => ({ ...o, [id]: e.target.checked }))} aria-describedby={proposed(id) ? `prop-${id}` : undefined} />
+        <input type="checkbox" checked={isSel(id)} disabled={linked(id)} onChange={(e) => setSel((o) => ({ ...o, [id]: e.target.checked }))} aria-describedby={proposed(id) ? `prop-${id}` : undefined} />
         {sectionLabel(id, blockLabel)}
       </label>
       <div className="flex flex-wrap gap-1.5">
         {proposed(id) && <span id={`prop-${id}`}><Badge tone="warn">Kontrol edilecek öneri</Badge></span>}
+        {filledTarget(doc, id) && <Badge tone="info">Belgede dolu — işaretlerseniz yerine geçer</Badge>}
+        {linked(id) && <Badge tone="info">Ödeme planıyla birlikte uygulanır</Badge>}
         {children}
       </div>
     </div>
@@ -92,6 +98,7 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
       )}
       {s.warnings.map((w) => <p key={w} className="text-[13px] text-yellow-200">{w}</p>)}
       {s.missing.length > 0 && <div className="text-[13px]"><p className="font-semibold text-yellow-100">Sizin tamamlamanız gerekenler</p><ul className="list-disc ps-5 text-yellow-100">{s.missing.map((m) => <li key={m}>{m}</li>)}</ul></div>}
+      {(s.checks ?? []).length > 0 && <div className="text-[13px]"><p className="font-semibold text-muted">Kontrol edilecek varsayımlar (öneridir; metinde varsayım olarak yazın veya düzeltin)</p><ul className="list-disc ps-5 text-muted">{(s.checks ?? []).map((m) => <li key={m}>{m}</li>)}</ul></div>}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="grid min-w-0 content-start gap-3">
@@ -168,7 +175,7 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
                         {recurring ? (
                           <label className={label}>Adet / Süre ({BILLING_LABEL[it.billing].per.tr})
                             <select className={field} value={it.term} onChange={(e) => setItem(i, { term: e.target.value })}>
-                              {Array.from(new Set([...TERM_OPTIONS, it.term])).map((o) => <option key={o} value={o}>{o ? `${o} ${BILLING_LABEL[it.billing].per.tr}` : 'Belirtilmedi'}</option>)}
+                              {Array.from(new Set([...TERM_OPTIONS, it.term])).map((o) => <option key={o} value={o}>{o ? `${o} ${BILLING_LABEL[it.billing].per.tr}` : it.startYear > 1 ? 'Süresiz' : 'Belirtilmedi'}</option>)}
                             </select>
                           </label>
                         ) : <label className={label}>Adet / Süre<input className={field} inputMode="decimal" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} /></label>}
@@ -196,8 +203,8 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
                     </div>
                     <div className="flex flex-wrap gap-1.5 text-[12px]">
                       {it.includedIn ? <Badge tone="info">{`“${s.items.find((x) => x.ref === it.includedIn)?.title ?? ''}” kalemine dahil — ayrı fiyatı yok`}</Badge> : null}
-                      {!it.includedIn ? <span data-testid={`review-qty-${it.ref}`}><Badge tone="muted">{`Adet / Süre: ${recurring ? (it.term ? `${it.term} ${BILLING_LABEL[it.billing].per.tr}` : 'süre belirtilmedi') : `${it.quantity || '1'}${it.unit ? ` ${it.unit}` : ''}`}${recurring ? ` · ${BILLING_LABEL[it.billing].tr.toLocaleLowerCase('tr')} faturalanır` : ''}`}</Badge></span> : null}
-                      {recurring && !it.term ? <Badge tone="warn">Süre belirtilmedi — varsayım; isterseniz süre seçin</Badge> : null}
+                      {!it.includedIn ? <span data-testid={`review-qty-${it.ref}`}><Badge tone="muted">{`Adet / Süre: ${recurring && it.startYear > 1 && !it.term ? `${BILLING_LABEL[it.billing].tr} yenileme · ${it.startYear}. yıldan itibaren` : recurring ? `${it.term ? `${it.term} ${BILLING_LABEL[it.billing].per.tr}` : 'süre belirtilmedi'} · ${BILLING_LABEL[it.billing].tr.toLocaleLowerCase('tr')} faturalanır` : `${it.quantity || '1'}${it.unit ? ` ${it.unit}` : ''}`}`}</Badge></span> : null}
+                      {recurring && !it.term && it.startYear <= 1 ? <Badge tone="warn">Süre belirtilmedi — varsayım; isterseniz süre seçin</Badge> : null}
                       {recurring && it.startYear > 1 ? <Badge tone="muted">İlk dönem toplamlarına dahil değil</Badge> : null}
                       {s.prices && it.unitPrice && !it.includedIn ? <Badge tone="warn">AI fiyat önerisi — kontrol edilmeli</Badge> : null}
                     </div>
@@ -260,6 +267,8 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
           </div>
           <RecurringSummary groups={calc.recurring} currency={c.currency} compact />
           {preview.skipped.map((x) => <p key={x.id} className="text-[12px] text-yellow-200">{x.why}</p>)}
+          {(() => { const pc = paymentCheck(preview.content); return pc.state === 'noplan' ? null : <p className="text-[12px] text-muted" data-testid="review-payment-check">Uygulanırsa ödeme denetimi: <b className="text-white">{pc.state === 'verified' ? 'uyum doğrulandı' : pc.state === 'neutral' ? 'metinde ödeme aşaması yok' : pc.state === 'conflict' ? 'çelişki var' : 'otomatik doğrulanamadı (inceleme ve onay gerekir)'}</b>. {PAYMENT_CHECK_SCOPE}</p>; })()}
+          {preview.notes.map((x) => <p key={x} className={`text-[12px] ${/uyuşmuyor/.test(x) ? 'text-yellow-200' : 'text-subtle'}`} data-testid="review-note">Uygulanırsa: {x}</p>)}
         </aside>
       </div>
 

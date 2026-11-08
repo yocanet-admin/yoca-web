@@ -11,9 +11,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { cleanDraft, type RawDraft } from '../lib/ai/documents';
 import { mockStructured } from '../lib/ai/mock';
-import { applyDraft, setBilling, changeCurrency, currencyMentions, hasAmounts, pricesRequested, restrictToScope, sampleRequested, sectionsOf, stripAverageClaims, type ApplyOptions, type DraftSuggestion } from '../lib/documents/aiDraft';
+import { applyDraft, defaultSelection, setBilling, changeCurrency, currencyMentions, hasAmounts, pricesRequested, restrictToScope, sampleRequested, sectionsOf, stripAverageClaims, type ApplyOptions, type DraftSuggestion } from '../lib/documents/aiDraft';
 import { billingErrors, computeDocument, computeLine, computeTotals, quantityText, totalsJson } from '../lib/documents/calc';
-import { DOC_CURRENCIES, OTHER_CURRENCIES, PRIMARY_CURRENCIES, missingFor, newContent, newItem, sanitizeContent, type DocContent, type DocCurrency } from '../lib/documents/model';
+import { DOC_CURRENCIES, OTHER_CURRENCIES, PRIMARY_CURRENCIES, classifyTiming, paymentCheck, conflictText, syncPaymentSentences, paymentPercentsInText, paymentTextConflict, contentDisposition, docFileName, fillPaymentMarkers, planComplete, planSentence, missingFor, newContent, newItem, sanitizeContent, type DocContent, type DocCurrency } from '../lib/documents/model';
 import { SAMPLE_ISSUER, sampleQuote } from './fixtures-documents';
 
 const B = (n: number | string) => BigInt(n);
@@ -323,7 +323,8 @@ test('"Adet / Süre": quantity + unit for one-time lines; duration for recurring
   assert.equal(quantityText(social), 'süre belirtilmedi');
   assert.equal(quantityText({ ...social, term: '6' }), '6 ay');
   assert.equal(quantityText({ ...social, term: '6' }, 'en'), '6 months');
-  assert.equal(quantityText({ ...social, billing: 'yearly', startYear: 2, term: '' }), 'süre belirtilmedi');
+  assert.equal(quantityText({ ...social, billing: 'yearly', startYear: 2, term: '' }), 'Yıllık yenileme · 2. yıldan itibaren', 'a renewal: period + start, never "süre belirtilmedi"');
+  assert.equal(quantityText({ ...social, billing: 'yearly', startYear: 2, term: '' }, 'en'), 'Yearly renewal · from year 2');
   // fixture written before the field existed: same text as before ("6 bin kelime", "1 paket")
   const old = sampleQuote();
   assert.deepEqual(old.items.map((i) => quantityText(i)), ['1 paket', '1 paket', '1 proje', '6 bin kelime', '1 yıl']);
@@ -414,4 +415,334 @@ test('PDF: "ADET / SÜRE" column reads "1 paket", "1 proje", "6 ay" / "süre bel
   const old = await renderDocumentPdf({ kind: 'quote', number: 'TKL-2026-0102', title: 'Eski', content: sampleQuote(), issuer, bankAccounts: [], mode: 'final', version: 1 });
   const ot = pdfText(old.buffer)!;
   assert.ok(ot.includes('6 bin kelime') && ot.includes('1 paket') && ot.includes('298.080,58') && !/TEKRARLAYAN/.test(ot.replace(/\s+/g, '')), 'old quote: same quantities and total, no recurring block');
+});
+
+/* ── PDF / payment-terms fixes (2026-11, after the live test of TKL-2026-0003) ── */
+
+const WEAK = `${REQUEST} [mock-eksik-plan]`;
+
+test('payment plan helpers: complete plan, sentence, stale "[EKSİK: ödeme …]" filled only from a complete plan', () => {
+  const p = (value: string, label: string, due = '') => ({ id: label, label, mode: 'percent' as const, value, due });
+  assert.equal(planComplete([p('50', 'Başlangıç'), p('50', 'Teslim')]), true);
+  assert.equal(planComplete([p('50', 'Başlangıç'), p('', 'Kalan')]), false);
+  assert.equal(planComplete([]), false);
+  const plan = [p('50', 'Başlangıç ödemesi', 'Sözleşme imzasında'), p('50', 'Teslim ödemesi', 'Teslimde')];
+  assert.equal(planSentence(plan), '%50 Başlangıç ödemesi (Sözleşme imzasında), %50 Teslim ödemesi (Teslimde)');
+  const txt = 'Tek seferlik çalışmaların ödeme planı: [EKSİK: Ödeme aşamaları ve oranları]. Müşteri adı: [EKSİK: müşteri adı].';
+  const r = fillPaymentMarkers(txt, plan);
+  assert.equal(r.filled, 1);
+  assert.ok(r.text.includes('ödeme planı: %50 Başlangıç ödemesi') && r.text.includes('[EKSİK: müşteri adı]'), 'only the payment marker');
+  assert.equal(fillPaymentMarkers(txt, [p('50', 'Başlangıç')]).filled, 0, 'incomplete plan: nothing filled');
+});
+
+test('consistency rule: a complete plan next to a stale payment marker blocks finalizing (and the generic marker rule too)', () => {
+  const c = quote('USD');
+  c.items = [{ ...newItem('20'), title: 'Web', unitPrice: '100' }];
+  c.payment = [{ id: 'a', label: 'Başlangıç', mode: 'percent', value: '50', due: '' }, { id: 'b', label: 'Teslim', mode: 'percent', value: '50', due: '' }];
+  c.blocks = [...c.blocks, { id: 't', key: 'terms', heading: 'Ödeme koşulları', body: 'Ödeme planı: [EKSİK: Ödeme aşamaları ve oranları].' }];
+  const m = missingFor('quote', c, SAMPLE_ISSUER, { title: 'x' });
+  assert.ok(m.blocking.some((x) => /Ödeme planı dolu ama metinde hâlâ \[EKSİK: Ödeme aşamaları ve oranları\]/.test(x)), m.blocking.join(' | '));
+  assert.ok(m.blocking.some((x) => /Metinde doldurulmamış yer var/.test(x)));
+});
+
+test('full draft, weak model answer (plan as a placeholder, scope points as "missing"): 50/50 proposal, checks split, marker kept until the plan is applied', () => {
+  const s = suggest({ currency: 'USD', brief: WEAK });
+  assert.deepEqual(s.payment.map((p) => [p.label, p.percent]), [['Başlangıç ödemesi', 50], ['Teslim ödemesi', 50]]);
+  assert.ok(s.proposed.includes('payment'));
+  assert.ok(s.warnings.some((w) => /standart öneri eklendi: %50 başlangıçta, %50 teslimde/.test(w)));
+  assert.deepEqual(s.missing, ['Alıcı firma adı'], 'a real fact stays "missing"');
+  assert.deepEqual(s.checks, ['Web sitesinin sayfa sayısı ve işlevleri', 'Sosyal medya kanalları ve aylık içerik adedi', 'Ödeme aşamaları ve oranları']);
+  const terms = s.blocks.find((b) => b.key === 'terms')!.body;
+  assert.ok(terms.includes('[EKSİK: Ödeme aşamaları ve oranları]'), 'the suggestion text is not rewritten before the plan is applied');
+  // applied together: the marker becomes the plan
+  const both = applyDraft({ title: '', content: quote('USD') }, s, { ...OPTS, acceptCurrency: true });
+  const t1 = both.content.blocks.find((b) => b.key === 'terms')!.body;
+  assert.ok(!/EKSİK/.test(t1) && t1.includes('%50 Başlangıç ödemesi (Sözleşme imzasında), %50 Teslim ödemesi (Tek seferlik işlerin tesliminde)'), t1);
+  assert.ok(both.notes.some((n) => /işareti uygulanan ödeme planıyla dolduruldu/.test(n)));
+  // text without the plan: the marker stays (and blocks finalizing)
+  const sel = (['title', 'block:terms', 'items'] as string[]);
+  const textOnly = applyDraft({ title: '', content: quote('USD') }, s, { ...OPTS, select: sel });
+  assert.ok(textOnly.content.blocks.find((b) => b.key === 'terms')!.body.includes('[EKSİK: Ödeme aşamaları'));
+  assert.equal(textOnly.content.payment.length, 0);
+  // later "Yalnızca ödeme planı" (the model returns only the plan): the stale marker is filled from it
+  const planOnly = suggest({ currency: 'USD', scope: 'payment', brief: 'Ödeme planını öner [mock-yalniz-plan]' });
+  assert.deepEqual(sectionsOf(planOnly), ['payment']);
+  const fixed = applyDraft({ title: 'Benim başlığım', content: textOnly.content }, planOnly, OPTS);
+  const t2 = fixed.content.blocks.find((b) => b.key === 'terms')!.body;
+  assert.ok(!/EKSİK/.test(t2) && t2.includes('%40 Başlangıç ödemesi (Sözleşme imzasında), %30'), t2);
+  assert.equal(fixed.title, 'Benim başlığım');
+  assert.equal(missingFor('quote', fixed.content, SAMPLE_ISSUER, { title: 'x' }).blocking.filter((x) => /EKSİK/.test(x)).length, 0);
+  // a good full draft states page / platform / post assumptions instead of [EKSİK]
+  const good = suggest({ currency: 'USD' });
+  assert.ok(/en çok 8 sayfa/.test(good.blocks.find((b) => b.key === 'assumptions')!.body) && /2 platform, ayda 12 gönderi/.test(good.blocks.find((b) => b.key === 'assumptions')!.body));
+  assert.ok(good.proposed.includes('block:assumptions'));
+});
+
+test('review default selection: a filled title / text / item list is offered but not ticked; a one-section request is ticked', () => {
+  const s = suggest({ currency: 'USD' });
+  const c = quote('USD');
+  c.blocks = c.blocks.map((b) => (b.key === 'notes' ? { ...b, body: 'Elle not' } : b));
+  const sel = defaultSelection({ title: 'Benim başlığım', content: c }, s);
+  assert.ok(!sel.includes('title') && !sel.includes('block:notes'));
+  assert.ok(sel.includes('items') && sel.includes('block:scope') && sel.includes('payment'));
+  const rev = suggest({ currency: 'USD', scope: 'block:revisions', brief: 'Revizyonları yeniden yaz.' });
+  assert.deepEqual(defaultSelection({ title: 'x', content: { ...c, blocks: c.blocks.map((b) => (b.key === 'revisions' ? { ...b, body: 'eski' } : b)) } }, rev), ['block:revisions']);
+});
+
+test('file names: "Yoca-<Tür>-<No>-Taslak.pdf" / "-v1.pdf" per type, ASCII fallback and RFC 5987 header', () => {
+  assert.equal(docFileName('quote', 'TKL-2026-0003', 'draft'), 'Yoca-Teklif-TKL-2026-0003-Taslak.pdf');
+  assert.equal(docFileName('quote', 'TKL-2026-0003', 1), 'Yoca-Teklif-TKL-2026-0003-v1.pdf');
+  assert.equal(docFileName('quote', 'TKL-2026-0003', 1, { revision: 3 }), 'Yoca-Teklif-TKL-2026-0003-v1-r3.pdf');
+  assert.equal(docFileName('proforma', 'PRF-2026-0001', 2), 'Yoca-Proforma-PRF-2026-0001-v2.pdf');
+  assert.equal(docFileName('letter', 'YZI-2026-0004', 'draft'), 'Yoca-Yazı-YZI-2026-0004-Taslak.pdf');
+  assert.equal(docFileName('letter', 'YZI-2026-0004', 'draft', { ascii: true }), 'Yoca-Yazi-YZI-2026-0004-Taslak.pdf');
+  assert.equal(docFileName('status_report', 'RPR-2026-0001', 1), 'Yoca-Durum-Raporu-RPR-2026-0001-v1.pdf');
+  assert.equal(docFileName('delivery', 'TSL-2026-0001', 1), 'Yoca-Teslim-Belgesi-TSL-2026-0001-v1.pdf');
+  assert.equal(contentDisposition('attachment', 'Yoca-Yazı-YZI-2026-0004-Taslak.pdf'), 'attachment; filename="Yoca-Yazi-YZI-2026-0004-Taslak.pdf"; filename*=UTF-8\'\'Yoca-Yaz%C4%B1-YZI-2026-0004-Taslak.pdf');
+  assert.equal(contentDisposition('inline', 'Yoca-Teklif-TKL-2026-0003-Taslak.pdf'), "inline; filename=\"Yoca-Teklif-TKL-2026-0003-Taslak.pdf\"; filename*=UTF-8''Yoca-Teklif-TKL-2026-0003-Taslak.pdf");
+});
+
+/** The live-test example, synthetic: ÖRNEK USD quote mirroring TKL-2026-0003. */
+export function exampleTkl0003(): DocContent {
+  const c = newContent('quote', { now: NOW, currency: 'USD', validityDays: 30 });
+  c.sample = true;
+  c.recipient = { ...c.recipient, company: 'ÖRNEK Pusula Tasarım A.Ş.', name: 'ÖRNEK Deniz Arman' };
+  c.items = [
+    { ...newItem('20'), id: 'brand', title: 'Marka kimliği', description: 'Logo, renk paleti ve tipografi seçimi ile temel kullanım kılavuzu.', quantity: '1', unit: 'proje', unitPrice: '3200' },
+    { ...newItem('20'), id: 'web', title: 'Web sitesi', description: 'Mobil uyumlu web sitesi tasarımı ve uygulaması. İlk yıl alan adı ve barındırma dahildir.', quantity: '1', unit: 'proje', unitPrice: '4500' },
+    { ...newItem('20'), id: 'host1', title: 'Alan adı ve barındırma: ilk yıl', description: 'Web sitesi kalemine dahildir.', quantity: '1', unit: 'yıl', includedIn: 'web' },
+    { ...newItem('20'), id: 'renew', title: 'Alan adı ve barındırma yenilemesi', description: 'İkinci yıldan itibaren yıllık yenileme.', quantity: '1', unit: 'yıl', billing: 'yearly', startYear: 2, priceBasis: 'estimate', unitPrice: '180' },
+    { ...newItem('20'), id: 'social', title: 'Sosyal medya yönetimi', description: 'Tek platform için aylık içerik planı ve sekiz gönderi tasarımı.', quantity: '1', unit: 'ay', billing: 'monthly', term: '6', unitPrice: '900' },
+  ];
+  c.payment = [{ id: 'p1', label: 'Başlangıç ödemesi', mode: 'percent', value: '50', due: 'Tek seferlik çalışmaların başlangıcında' }, { id: 'p2', label: 'Teslim ödemesi', mode: 'percent', value: '50', due: 'Tek seferlik çalışmaların tesliminde' }];
+  c.blocks = c.blocks.map((b) => (b.key === 'intro' ? { ...b, body: 'Marka kimliği, web sitesi ve sosyal medya yönetimi çalışmalarına ilişkin fiyat teklifimizi incelemenize sunarız.' } : b));
+  c.blocks.push({ id: 'terms', key: 'terms', heading: 'Ödeme koşulları', body: 'Tek seferlik çalışmaların ödeme planı: %50 Başlangıç ödemesi (Tek seferlik çalışmaların başlangıcında), %50 Teslim ödemesi (Tek seferlik çalışmaların tesliminde). Sosyal medya yönetimi aylık, ikinci yıldan itibaren alan adı ve barındırma yenilemesi yıllık faturalandırılır.' });
+  return c;
+}
+
+test('PDF (TKL-2026-0003 example): printed numbers ascend after grouping, renewal reads "Yıllık yenileme · 2. yıldan itibaren", amounts marked KDV hariç', async () => {
+  const { renderDocumentPdf } = await import('../lib/documents/pdf');
+  const r = await renderDocumentPdf({ kind: 'quote', number: 'TKL-2026-0003', title: 'ÖRNEK — Marka Kimliği, Web Sitesi ve Sosyal Medya Fiyat Teklifi', content: exampleTkl0003(), issuer: { ...SAMPLE_ISSUER, legalName: 'Yoca Test Ltd. Şti.' }, bankAccounts: [], mode: 'draft' });
+  const txt = pdfText(r.buffer);
+  if (!txt) return;
+  const order = ['Marka kimliği', 'Web sitesi', 'Alan adı ve barındırma: ilk yıl', 'Sosyal medya yönetimi', 'Alan adı ve barındırma yenilemesi'].map((t) => txt.indexOf(t));
+  assert.ok(order.every((x, i) => x >= 0 && (i === 0 || x > order[i - 1])), `group order ${order}`);
+  const layout = (() => { const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'yoca-q-')), 'x.pdf'); fs.writeFileSync(f, r.buffer); return execFileSync('pdftotext', ['-layout', f, '-'], { encoding: 'utf8' }).replace(/[ \t]+/g, ' '); })();
+  const codes = Array.from(layout.matchAll(/(?:^|\n) ?(0[1-5]) (Marka kimliği|Web sitesi|Alan adı ve barındırma: ilk yıl|Sosyal medya yönetimi|Alan adı ve barındırma yenilemesi)/g)).map((m) => `${m[1]} ${m[2]}`);
+  assert.deepEqual(codes, ['01 Marka kimliği', '02 Web sitesi', '03 Alan adı ve barındırma: ilk yıl', '04 Sosyal medya yönetimi', '05 Alan adı ve barındırma yenilemesi'], layout.slice(0, 1500));
+  assert.ok(txt.includes('Yıllık yenileme 2. yıldan itibaren') || txt.includes('Yıllık yenileme · 2. yıldan itibaren'), 'renewal label');
+  assert.ok(!/süre belirtilmedi/.test(txt), 'no "süre belirtilmedi" for the renewal');
+  assert.ok(txt.replace(/\s+/g, '').includes('TUTARLARKDVHARİÇ'), 'header: amounts excl. VAT');
+  assert.ok(txt.includes('9.240,00') && txt.includes('1.080,00 USD / ay') && txt.includes('6.480,00 USD') && txt.includes('216,00 USD / yıl') && txt.includes('4.620,00 USD'));
+  assert.ok(!/EKSİK|Doldurulmamış yer/.test(txt));
+  // a draft with a leftover placeholder says so on page 1
+  const c2 = exampleTkl0003();
+  c2.blocks = c2.blocks.map((b) => (b.key === 'terms' ? { ...b, body: 'Ödeme planı: [EKSİK: Ödeme aşamaları ve oranları].' } : b));
+  const r2 = await renderDocumentPdf({ kind: 'quote', number: 'TKL-2026-0003', title: 'x', content: c2, issuer: SAMPLE_ISSUER, bankAccounts: [], mode: 'draft' });
+  const t2 = pdfText(r2.buffer)!;
+  assert.ok(t2.indexOf('Doldurulmamış yer var (1)') > -1 && t2.indexOf('Doldurulmamış yer var (1)') < t2.indexOf('HİZMET'), 'warning on page 1, before the table');
+});
+
+/* ── 50/50 only for a whole draft without a plan; payment text vs plan conflicts ── */
+
+const step = (id: string, value: string, label: string, due = '') => ({ id, label, mode: 'percent' as const, value, due });
+const plan3070 = [step('a', '30', 'Başlangıç ödemesi', 'Sözleşme imzasında'), step('b', '70', 'Teslim ödemesi', 'Teslimde')];
+function suggestWith(o: { brief: string; scope?: string; existing?: typeof plan3070 }) {
+  const lines = [`Selected currency: USD`, `Prices requested: yes`, `Sample: no`, `Scope: ${o.scope ?? 'all'}`, o.existing ? `Existing payment plan: ${planSentence(o.existing)}` : '', `Brief:\n<BRIEF>\n${o.brief}\n</BRIEF>`].filter(Boolean).join('\n');
+  return cleanDraft('quote', mockStructured('doc_draft', lines) as RawDraft, { currency: 'USD', prices: true, sample: false, scope: o.scope ?? 'all', brief: o.brief, existingPlan: o.existing ?? [] });
+}
+
+test('payment percentages in text: payment sentences only, never KDV / VAT, %100 memnuniyet or amounts', () => {
+  assert.deepEqual(paymentPercentsInText('%50 Başlangıç ödemesi (Sözleşme imzasında), %50 Teslim ödemesi (Teslimde)'), [50, 50]);
+  assert.deepEqual(paymentPercentsInText('Ödemenin yüzde 30\'u peşin, %70\'i teslimde alınır.'), [30, 70]);
+  assert.deepEqual(paymentPercentsInText('Fiyatlara %20 KDV eklenir. Ödeme teslimde yapılır.'), []);
+  assert.deepEqual(paymentPercentsInText('Ödeme tutarına KDV %20 eklenir.'), []);
+  assert.deepEqual(paymentPercentsInText('%100 memnuniyet hedefliyoruz.'), []);
+  assert.deepEqual(paymentPercentsInText('Başlangıç ödemesi 4.620,00 USD, teslimde kalan tutar ödenir.'), []);
+  assert.deepEqual(paymentPercentsInText('Sosyal medya yönetimi aylık faturalanır; revizyonlar %10 hızlanır.'), [], 'a clause without payment words is not read');
+});
+
+test('conflict rule: foreign percent or a different full split conflicts; the auto-filled plan sentence and partial mentions match', () => {
+  const doc = (body: string, payment = plan3070) => ({ blocks: [{ id: 't', key: 'terms' as const, heading: '', body }], payment });
+  assert.equal(paymentTextConflict(doc(planSentence(plan3070))), null, 'auto-filled text matches');
+  assert.equal(paymentTextConflict(doc('Sözleşme imzasında %30 ödenir.')), null, 'partial mention of the plan’s own percent');
+  assert.deepEqual(paymentTextConflict(doc('%50 başlangıçta, %50 teslimde ödenir.')), { text: [50, 50], plan: [30, 70] });
+  assert.equal(paymentTextConflict(doc('%50 başlangıçta ödenir.', [step('a', '50', 'x'), step('b', '', 'y')])), null, 'no complete plan → nothing to compare');
+  assert.equal(paymentTextConflict(doc('Fiyatlara %20 KDV eklenir. Ödeme %30 imzada, %70 teslimde.')), null);
+  // the editor blocks finalizing
+  const c = quote('USD');
+  c.items = [{ ...newItem('20'), title: 'Web', unitPrice: '100' }];
+  c.payment = plan3070;
+  c.blocks = [...c.blocks, { id: 'tt', key: 'terms', heading: 'Ödeme koşulları', body: '%50 başlangıçta, %50 teslimde ödenir.' }];
+  assert.ok(missingFor('quote', c, SAMPLE_ISSUER, { title: 'x' }).blocking.some((x) => x === 'Ödeme metni ile plan uyuşmuyor: metinde %50 / %50, planda %30 / %70. Metni veya planı düzeltin.'));
+});
+
+test('50/50 fallback only for a whole draft without a plan; an existing 30/70 plan is kept and described in the text', () => {
+  const weak = `${REQUEST} [mock-eksik-plan]`;
+  assert.deepEqual(suggestWith({ brief: weak }).payment.map((p) => p.percent), [50, 50], 'whole draft, no plan → 50/50 proposal');
+  const regen = suggestWith({ brief: `Ödeme planını öner [mock-eksik-plan]`, scope: 'payment' });
+  assert.deepEqual(regen.payment, [], 'plan-only regeneration: no fallback');
+  assert.ok(!regen.warnings.some((w) => /standart öneri/.test(w)));
+  // the document has 30/70
+  const keep = suggestWith({ brief: REQUEST, existing: plan3070 });
+  assert.deepEqual(keep.payment, [], 'no plan from the draft');
+  assert.ok(!keep.warnings.some((w) => /standart öneri/.test(w)));
+  const terms = keep.blocks.find((b) => b.key === 'terms')!.body;
+  assert.ok(terms.includes('%30 Başlangıç ödemesi (Sözleşme imzasında), %70 Teslim ödemesi (Teslimde)'), terms);
+  const c0 = { ...quote('USD'), payment: plan3070 };
+  const applied = applyDraft({ title: '', content: c0 }, keep, { ...OPTS, acceptCurrency: true });
+  assert.deepEqual(applied.content.payment, plan3070, 'user plan untouched');
+  assert.equal(paymentTextConflict(applied.content), null);
+  // a model that sends a plan anyway: dropped, with a note
+  const raw = mockStructured('doc_draft', `Selected currency: USD\nPrices requested: yes\nSample: no\nScope: all\nBrief:\n<BRIEF>\n${REQUEST}\n</BRIEF>`) as RawDraft;
+  const dropped = cleanDraft('quote', raw, { currency: 'USD', prices: true, sample: false, scope: 'all', brief: REQUEST, existingPlan: plan3070 });
+  assert.deepEqual(dropped.payment, []);
+  assert.ok(dropped.warnings.some((w) => /Belgede ödeme planı var; öneride plan değiştirilmedi/.test(w)));
+  // that 50/50 terms text applied next to the 30/70 plan → conflict note (review + apply) and blocked finalizing
+  const clashing = { ...dropped, blocks: dropped.blocks.map((b) => (b.key === 'terms' ? { ...b, body: 'Ödeme %50 başlangıçta, %50 teslimde alınır.' } : b)) };
+  const clash = applyDraft({ title: '', content: c0 }, clashing, { ...OPTS, acceptCurrency: true, select: ['block:terms'] });
+  assert.ok(clash.notes.some((n) => /Ödeme metni ile plan uyuşmuyor \(metinde %50 \/ %50, planda %30 \/ %70\)/.test(n)), clash.notes.join(' | '));
+  // weak terms ([EKSİK: ödeme …]) applied alone next to the existing plan: filled from that plan
+  const weakKeep = suggestWith({ brief: weak, existing: plan3070 });
+  const filled = applyDraft({ title: '', content: c0 }, weakKeep, { ...OPTS, select: ['block:terms'] });
+  const t = filled.content.blocks.find((b) => b.key === 'terms')!.body;
+  assert.ok(!/EKSİK/.test(t) && t.includes('%30 Başlangıç ödemesi'), t);
+  assert.ok(filled.notes.some((n) => /belgedeki ödeme planıyla dolduruldu/.test(n)));
+});
+
+test('PDF: a payment text that contradicts the plan says so on page 1', async () => {
+  const { renderDocumentPdf } = await import('../lib/documents/pdf');
+  const c = exampleTkl0003();
+  c.payment = plan3070;
+  const r = await renderDocumentPdf({ kind: 'quote', number: 'TKL-2026-0003', title: 'x', content: c, issuer: SAMPLE_ISSUER, bankAccounts: [], mode: 'draft' });
+  const t = pdfText(r.buffer);
+  if (!t) return;
+  assert.ok(t.indexOf('Ödeme metni ile plan uyuşmuyor') > -1 && t.indexOf('Ödeme metni ile plan uyuşmuyor') < t.indexOf('HİZMET'));
+});
+
+/* ── stages and payment times, explicit plan regeneration, text-only requests ── */
+
+test('timing tokens (strict): signature ≠ kickoff, true synonyms only, ambiguous words and bare day counts unrecognized', () => {
+  assert.deepEqual(classifyTiming('Sözleşme imzasında'), { cat: 'signature', days: null });
+  assert.deepEqual(classifyTiming('imzalandığında'), { cat: 'signature', days: null });
+  assert.deepEqual(classifyTiming('başlangıçta'), { cat: 'kickoff', days: null });
+  assert.deepEqual(classifyTiming('teslim edildiğinde'), { cat: 'delivery', days: null });
+  assert.deepEqual(classifyTiming('teslimatta'), { cat: 'delivery', days: null });
+  assert.deepEqual(classifyTiming('yayına alındığında'), { cat: 'launch', days: null });
+  assert.deepEqual(classifyTiming('Yayından 30 gün sonra'), { cat: 'launch', days: 30 });
+  assert.deepEqual(classifyTiming('faturadan 2 hafta sonra'), { cat: 'invoice', days: 14 });
+  assert.equal(classifyTiming('peşin'), null);
+  assert.equal(classifyTiming('avans olarak'), null);
+  assert.equal(classifyTiming('30 gün sonra'), null, 'a day count without an anchor');
+  assert.equal(classifyTiming('Başlangıç ödemesi'), null, 'a stage name is not a timing');
+  assert.equal(classifyTiming('müşterinin uygun gördüğü zaman'), null);
+});
+
+test('three results: conflict / unverified / verified, plus neutral; never conflated', () => {
+  const p = (v: string, label: string, due: string) => ({ id: label, label, mode: 'percent' as const, value: v, due });
+  const plan = [p('50', 'Başlangıç ödemesi', 'Sözleşme imzasında'), p('50', 'Kalan ödeme', 'Yayından 30 gün sonra')];
+  const doc = (body: string, payment = plan, ack = '') => ({ blocks: [{ id: 't', key: 'terms' as const, heading: '', body }], payment, paymentCheckAck: ack });
+  const st = (body: string) => paymentCheck(doc(body)).state;
+  assert.equal(st('Ödeme %50 başlangıçta, %50 yayından 30 gün sonra alınır.'), 'conflict', 'kickoff vs signature: both recognized, different');
+  assert.equal(conflictText(paymentCheck(doc('Ödeme %50 başlangıçta, %50 yayından 30 gün sonra alınır.')).conflict!), '1. aşama metinde “başlangıçta”, planda “Sözleşme imzasında”');
+  assert.equal(st('Ödeme %50 imzada, %50 teslimde alınır.'), 'conflict', 'different category');
+  assert.equal(st('Ödeme %50 imzada, %50 yayından 45 gün sonra alınır.'), 'conflict', 'same anchor, different days');
+  assert.equal(st('Ödeme %50 imzalandığında, %50 yayından 30 gün sonra alınır.'), 'verified', 'true synonyms');
+  assert.equal(st(planSentence(plan)), 'verified', 'auto-filled plan sentence');
+  assert.equal(st('Ödeme %50 peşin, %50 yayından 30 gün sonra alınır.'), 'unverified', 'peşin is ambiguous');
+  assert.equal(st('Ödeme %50 imzada, %50 30 gün sonra alınır.'), 'unverified', 'no anchor on the text side');
+  assert.equal(st('Ödeme %50 ve %50 olarak iki aşamada alınır.'), 'unverified', 'timing not readable');
+  assert.equal(st('Kalan tutar yayından 30 gün sonra ödenir.'), 'unverified', 'a one-time payment sentence without a percentage');
+  assert.equal(st('Fiyatlara %20 KDV eklenir. %100 memnuniyet. Sosyal medya aylık faturalanır.'), 'neutral', 'no payment stages in the text');
+  assert.equal(st('Başlangıç ödemesi 4.620,00 USD.'), 'unverified', 'an amount instead of a percentage: never a conflict, left to review');
+  assert.equal(st('%50 başlangıçta, %50 teslimde, %50 fazladan.'), 'conflict', 'percent set differs');
+  assert.equal(paymentCheck({ blocks: [], payment: [p('50', 'x', ''), p('', 'y', '')] }).state, 'noplan');
+  // the plan side unreadable → unverified, not verified
+  assert.equal(paymentCheck(doc('Ödeme %50 imzada, %50 yayından 30 gün sonra.', [p('50', 'İlk', 'Sözleşme imzasında'), p('50', 'İkinci', 'Uygun bir zamanda')])).state, 'unverified');
+});
+
+test('approval fingerprint: valid only for the same texts + plan; finalize rule (conflict blocks; unverified blocks until approved)', async () => {
+  const p = (v: string, label: string, due: string) => ({ id: label, label, mode: 'percent' as const, value: v, due });
+  const c = quote('USD');
+  c.items = [{ ...newItem('20'), title: 'Web', unitPrice: '100' }];
+  c.payment = [p('30', 'Başlangıç ödemesi', 'Sözleşme imzasında'), p('70', 'Teslim ödemesi', 'Teslimde')];
+  c.blocks = [...c.blocks, { id: 'tt', key: 'terms', heading: 'Ödeme koşulları', body: 'Ödeme %30 peşin, %70 teslimde alınır.' }];
+  const block = (x: DocContent) => missingFor('quote', x, SAMPLE_ISSUER, { title: 'x' }).blocking.filter((m) => /ödeme koşulu otomatik doğrulanamadı|plan uyuşmuyor/i.test(m));
+  assert.equal(paymentCheck(c).state, 'unverified');
+  assert.equal(block(c).length, 1, 'unverified blocks until approved');
+  const fp = paymentCheck(c).fingerprint;
+  const approved = { ...c, paymentCheckAck: fp };
+  assert.equal(paymentCheck(approved).approved, true);
+  assert.equal(block(approved).length, 0, 'approved + unchanged → allowed');
+  // the approval survives a save round-trip (stored in the document content)
+  assert.equal(sanitizeContent(JSON.parse(JSON.stringify(approved)), 'quote').paymentCheckAck, fp);
+  const textChanged = { ...approved, blocks: approved.blocks.map((b) => (b.key === 'terms' ? { ...b, body: b.body + ' ' } : b)) };
+  assert.equal(paymentCheck(textChanged).approved, true, 'trailing whitespace only: same fingerprint (bodies are trimmed)');
+  const textChanged2 = { ...approved, blocks: approved.blocks.map((b) => (b.key === 'terms' ? { ...b, body: 'Ödeme %30 peşin, %70 teslimden sonra alınır.' } : b)) };
+  assert.equal(paymentCheck(textChanged2).approved, false, 'text changed → approval gone');
+  assert.equal(block(textChanged2).length, 1);
+  const planChanged = { ...approved, payment: approved.payment.map((x, i) => (i === 1 ? { ...x, due: 'Teslim edildiğinde' } : x)) };
+  assert.equal(paymentCheck(planChanged).approved, false, 'plan changed → approval gone');
+  assert.equal(block(planChanged).length, 1);
+  // a conflict is never approvable
+  const clash = { ...c, blocks: c.blocks.map((b) => (b.key === 'terms' ? { ...b, body: 'Ödeme %30 imzada, %70 yayında alınır.' } : b)) };
+  const clashAck = { ...clash, paymentCheckAck: paymentCheck(clash).fingerprint };
+  assert.equal(paymentCheck(clashAck).state, 'conflict');
+  assert.equal(block(clashAck).length, 1, 'conflict blocks even with an "approval"');
+  // the server finalize runs the same rule (assess → missingFor)
+  const { assess } = await import('../lib/documents/server');
+  assert.ok(assess('quote', c, SAMPLE_ISSUER, 'x').missing.blocking.some((m) => /otomatik doğrulanamadı/.test(m)));
+  assert.ok(!assess('quote', approved, SAMPLE_ISSUER, 'x').missing.blocking.some((m) => /otomatik doğrulanamadı|uyuşmuyor/.test(m)));
+  assert.ok(assess('quote', textChanged2, SAMPLE_ISSUER, 'x').missing.blocking.some((m) => /otomatik doğrulanamadı/.test(m)));
+  assert.ok(assess('quote', clashAck, SAMPLE_ISSUER, 'x').missing.blocking.some((m) => /uyuşmuyor/.test(m)));
+});
+
+test('cleanDraft: payment commitments in another section are flagged (warning + "kontrol edilecek öneri"), not rewritten', () => {
+  const raw = mockStructured('doc_draft', userMsg({ currency: 'USD', prices: true })) as RawDraft;
+  raw.blocks = raw.blocks.map((b) => (b.key === 'scope' ? { ...b, body: `${b.body}\nİşe başlamak için %50 ödeme sözleşme imzasında alınır.` } : b));
+  const s = cleanDraft('quote', raw, { currency: 'USD', prices: true, sample: false, scope: 'all', brief: REQUEST });
+  assert.ok(s.warnings.some((w) => /“Kapsam” bölümünde ödeme yüzdesi \/ aşaması var/.test(w)));
+  assert.ok(s.proposed.includes('block:scope'));
+  assert.ok(s.blocks.find((b) => b.key === 'scope')!.body.includes('%50 ödeme sözleşme imzasında'), 'not rewritten');
+  assert.ok(!suggest({ currency: 'USD' }).warnings.some((w) => /bölümünde ödeme yüzdesi/.test(w)), 'clean mock: no warning');
+});
+
+test('payment sentence sync: rewritten from a complete plan; text without payment percentages unchanged', () => {
+  const p = (v: string, label: string, due: string) => ({ id: label, label, mode: 'percent' as const, value: v, due });
+  const plan = [p('40', 'Başlangıç ödemesi', 'Sözleşme imzasında'), p('60', 'Teslim ödemesi', 'Teslimde')];
+  const r = syncPaymentSentences('Ödeme %30 başlangıçta, %70 teslimde alınır. Sosyal medya aylık faturalanır.', plan);
+  assert.equal(r.text, 'Ödeme planı: %40 Başlangıç ödemesi (Sözleşme imzasında), %60 Teslim ödemesi (Teslimde). Sosyal medya aylık faturalanır.');
+  assert.equal(r.changed, true);
+  assert.equal(syncPaymentSentences('Sosyal medya aylık faturalanır.', plan).changed, false);
+});
+
+test('explicit plan regeneration with a 30/70 plan: a new plan is proposed (not dropped), applied only with its terms text, consistent', () => {
+  const regen = suggestWith({ brief: 'Ödeme planını yeniden oluştur.', scope: 'payment', existing: plan3070 });
+  assert.deepEqual(regen.payment.map((p) => p.percent), [40, 30, 30], 'scope payment keeps the model plan');
+  assert.ok(sectionsOf(regen).includes('block:terms'));
+  const c0 = { ...quote('USD'), payment: plan3070, blocks: [...quote('USD').blocks, { id: 'tt', key: 'terms' as const, heading: 'Ödeme koşulları', body: planSentence(plan3070) }] };
+  // nothing until Uygula: the suggestion object is separate from the document
+  assert.deepEqual(c0.payment, plan3070);
+  const r = applyDraft({ title: '', content: c0 }, regen, { ...OPTS, select: ['payment'] });
+  assert.deepEqual(r.applied.sort(), ['block:terms', 'payment'], 'terms text applied together with the plan');
+  assert.ok(r.notes.some((n) => /ödeme planıyla birlikte uygulandı/.test(n)));
+  assert.equal(paymentTextConflict(r.content), null, 'plan and text consistent (stages + times)');
+  // the model sent only a plan (no terms text): the existing payment sentence is rewritten from it
+  const planOnly = suggestWith({ brief: 'Ödeme planını yeniden oluştur [mock-yalniz-plan]', scope: 'payment', existing: plan3070 });
+  assert.ok(!sectionsOf(planOnly).includes('block:terms'));
+  const r2 = applyDraft({ title: '', content: c0 }, planOnly, { ...OPTS, select: ['payment'] });
+  const t2 = r2.content.blocks.find((b) => b.key === 'terms')!.body;
+  assert.ok(t2.startsWith('Ödeme planı: %40 Başlangıç ödemesi (Sözleşme imzasında), %30'), t2);
+  assert.ok(r2.notes.some((n) => /ödeme cümlesi yeni plana göre yeniden yazıldı/.test(n)));
+  assert.equal(paymentTextConflict(r2.content), null);
+});
+
+test('text-only request (terms) with a 30/70 plan: text follows 30/70, no plan suggestion', () => {
+  const t = suggestWith({ brief: 'Ödeme koşullarını yaz.', scope: 'block:terms', existing: plan3070 });
+  assert.deepEqual(sectionsOf(t), ['block:terms']);
+  assert.deepEqual(t.payment, []);
+  const body = t.blocks[0].body;
+  assert.ok(body.includes('%30 Başlangıç ödemesi (Sözleşme imzasında), %70 Teslim ödemesi (Teslimde)'), body);
+  const c0 = { ...quote('USD'), payment: plan3070 };
+  assert.equal(paymentTextConflict(applyDraft({ title: '', content: c0 }, t, OPTS).content), null);
 });

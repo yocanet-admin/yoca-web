@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
-import { sanitizeContent, type DocKind } from '@/lib/documents/model';
-import { currentRenderOf, dbError, DOC_BUCKET, loadContext, safeFileName, type DocContext, type VersionSnapshot } from '@/lib/documents/server';
+import { docFileName, sanitizeContent, type DocKind } from '@/lib/documents/model';
+import { currentRenderOf, dbError, DOC_BUCKET, loadContext, type DocContext, type VersionSnapshot } from '@/lib/documents/server';
 import { bankChanges } from '@/lib/documents/settings';
 import { brandedEmailText, documentEmailHtml, emailThemeOf, parseAddresses, statusFromEvent, testRecipientProblem } from '@/lib/documents/mail';
 import { CAPTURE_MODE, lookupDelivery, mailReady, sendDocumentMail, type SendOutcome } from '@/lib/documents/emailSend';
@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
 
   const rendered = await currentRenderOf(client, doc.id, version, ctx, getSupabaseServiceRole());
   if (!rendered.ok) return fail(rendered.status, `${rendered.error} Hiçbir şey gönderilmedi.`);
-  const pdfName = `${safeFileName(doc.number)}-v${version}.pdf`;
+  const pdfName = docFileName(doc.kind, doc.number, version, { ascii: true });
   const replyTo = (ctx.issuer.email ?? '').trim();
 
   const begin = await client.rpc('doc_email_begin', {

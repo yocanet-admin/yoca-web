@@ -21,7 +21,7 @@
  *  - All amounts are computed by lib/documents/calc.ts, never here.
  */
 
-import { addDaysIso, localId, newItem, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PriceBasis, BLOCK_KEYS, DOC_CURRENCIES, blockHeading } from '@/lib/documents/model';
+import { addDaysIso, conflictText, fillPaymentMarkers, localId, newItem, paymentTextConflict, planComplete, syncPaymentSentences, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PriceBasis, BLOCK_KEYS, DOC_CURRENCIES, blockHeading } from '@/lib/documents/model';
 import { parseMoney } from '@/lib/documents/calc';
 
 export interface SuggestedItem {
@@ -59,6 +59,8 @@ export interface DraftSuggestion {
   /** Section ids holding terms the user did not give (shown as "kontrol edilecek öneri"). */
   proposed: string[];
   missing: string[];
+  /** Scope / commercial points to confirm (page count, platforms, monthly posts …): proposals, not missing facts. */
+  checks?: string[];
   warnings: string[];
   /* set by the server, not by the model */
   currency: DocCurrency;
@@ -172,6 +174,32 @@ export interface ApplyResult {
   content: DocContent;
   applied: string[];
   skipped: Array<{ id: string; why: string }>;
+  /** Things done on top of the selection, said in the panel (e.g. a stale payment marker filled from the plan). */
+  notes: string[];
+}
+
+/**
+ * Sections ticked when the review opens: everything for a one-section request
+ * (the admin asked for it); for a whole draft only sections whose target is
+ * still empty — a filled title, text, item list or plan is offered, never
+ * replaced unless the admin ticks it.
+ */
+export function defaultSelection(doc: { title: string; content: DocContent }, s: DraftSuggestion): string[] {
+  const all = sectionsOf(s);
+  if (s.scope !== 'all') return all;
+  return all.filter((id) => !filledTarget(doc, id));
+}
+export function filledTarget(doc: { title: string; content: DocContent }, id: string): boolean {
+  const c = doc.content;
+  if (id === 'title') return Boolean(doc.title.trim());
+  if (id === 'subject') return Boolean(c.subject.trim());
+  if (id.startsWith('block:')) return c.blocks.some((b) => b.key === id.slice(6) && b.body.trim());
+  if (id === 'items') return c.items.some(realItem);
+  if (id === 'payment') return c.payment.some((p) => p.value.trim() || p.label.trim());
+  if (id === 'deliveryTime') return Boolean(c.deliveryTime.trim());
+  if (id === 'closing') return Boolean(c.closing.trim());
+  if (id === 'recipient') return Boolean(c.recipient.company.trim() || c.recipient.name.trim());
+  return false;
 }
 
 const realItem = (i: LineItem) => Boolean(i.title.trim() || i.description.trim() || i.unitPrice.trim());
@@ -226,8 +254,13 @@ export function applyDraft(doc: { title: string; content: DocContent }, s: Draft
   const c = doc.content;
   const available = sectionsOf(s);
   const want = new Set(opts.select === 'all' ? available : opts.select.filter((x) => available.includes(x)));
+  // a new plan and the payment-terms text of the same suggestion go together (never one without the other)
+  const autoTerms = want.has('payment') && available.includes('block:terms') && !want.has('block:terms');
+  if (want.has('payment') && available.includes('block:terms')) want.add('block:terms');
   const applied: string[] = [];
   const skipped: Array<{ id: string; why: string }> = [];
+  const notes: string[] = [];
+  if (autoTerms) notes.push('Önerinin “Ödeme koşulları” metni ödeme planıyla birlikte uygulandı (ikisi birlikte değişir).');
   const next: DocContent = { ...c };
   let title = doc.title;
 
@@ -261,6 +294,25 @@ export function applyDraft(doc: { title: string; content: DocContent }, s: Draft
     next.payment = s.payment.map((p) => ({ id: localId('p'), label: p.label, mode: 'percent' as const, value: p.percent === null ? '' : String(p.percent).replace('.', ','), due: p.due }));
     applied.push('payment');
   }
+  // "[EKSİK: ödeme …]" next to a complete plan would contradict it: it is replaced by the plan itself —
+  // in every text when the plan itself was applied, otherwise only in the texts applied now (the document's existing plan).
+  // a new plan without its own terms text: the payment sentence(s) of the existing text are rewritten from the plan
+  if (want.has('payment') && !want.has('block:terms') && planComplete(next.payment)) {
+    let synced = false;
+    next.blocks = (next.blocks ?? c.blocks).map((b) => { if (b.key !== 'terms') return b; const r = syncPaymentSentences(b.body, next.payment, c.locale); synced ||= r.changed; return r.changed ? { ...b, body: r.text } : b; });
+    if (synced) notes.push('“Ödeme koşulları” metnindeki ödeme cümlesi yeni plana göre yeniden yazıldı.');
+  }
+  if (planComplete(next.payment)) {
+    const appliedKeys = new Set(blockIds.map((x) => x.slice(6)));
+    let filled = 0;
+    next.blocks = (next.blocks ?? c.blocks).map((b) => {
+      if (!want.has('payment') && !appliedKeys.has(b.key)) return b;
+      const r = fillPaymentMarkers(b.body, next.payment, c.locale); filled += r.filled; return r.filled ? { ...b, body: r.text } : b;
+    });
+    if (filled) notes.push(`Metindeki ${filled} “[EKSİK: ödeme …]” işareti ${want.has('payment') ? 'uygulanan' : 'belgedeki'} ödeme planıyla dolduruldu.`);
+  }
+  const conflict = paymentTextConflict({ blocks: next.blocks ?? c.blocks, payment: next.payment ?? c.payment });
+  if (conflict && (want.has('payment') || blockIds.length)) notes.push(`Ödeme metni ile plan uyuşmuyor (${conflictText(conflict)}); kesinleştirmeden önce metni veya planı düzeltin.`);
   if (want.has('deliveryTime')) { next.deliveryTime = s.deliveryTime.trim(); applied.push('deliveryTime'); }
   if (want.has('validity') && s.validityDays && c.issueDate) { next.validUntil = addDaysIso(c.issueDate, s.validityDays); applied.push('validity'); }
   if (want.has('closing')) { next.closing = s.closing.trim(); applied.push('closing'); }
@@ -276,7 +328,7 @@ export function applyDraft(doc: { title: string; content: DocContent }, s: Draft
   next.currency = c.currency;
   next.locale = c.locale;
   if (!applied.includes('recipient')) next.recipient = c.recipient;
-  return { title, content: next, applied, skipped };
+  return { title, content: next, applied, skipped, notes };
 }
 
 /* ── Currency change on a filled document ───────────────────────── */

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
-import { sanitizeContent } from '@/lib/documents/model';
-import { contentOf, currentRenderOf, dbError, DOC_BUCKET, loadContext, safeFileName, selectedBanks, type DocRow, type VersionSnapshot } from '@/lib/documents/server';
+import { contentDisposition, docFileName, sanitizeContent, type DocKind } from '@/lib/documents/model';
+import { contentOf, currentRenderOf, dbError, DOC_BUCKET, loadContext, selectedBanks, type DocRow, type VersionSnapshot } from '@/lib/documents/server';
 import { bankChanges } from '@/lib/documents/settings';
 import { renderDocumentPdf } from '@/lib/documents/pdf';
 
@@ -45,18 +45,19 @@ export async function GET(request: NextRequest) {
     if (r.error) { const e = dbError(r.error); return fail(e.status, e.error); }
     if (!r.data) return fail(404, 'Bu PDF bulunamadı.');
     const row = r.data as { pdf_path: string; version: number; company_revision: number; document_id: string };
-    const num = ((await client.from('doc_documents').select('number').eq('id', row.document_id).maybeSingle()).data as { number: string } | null)?.number ?? 'belge';
-    const signed = await client.storage.from(DOC_BUCKET).createSignedUrl(row.pdf_path, 300, { download: `${safeFileName(num)}-v${row.version}-sirket-r${row.company_revision}.pdf` });
+    const d0 = (await client.from('doc_documents').select('number, kind').eq('id', row.document_id).maybeSingle()).data as { number: string; kind: DocKind } | null;
+    // a past PDF exactly as produced; only the name it is saved under is "Yoca-…" (the storage key stays)
+    const signed = await client.storage.from(DOC_BUCKET).createSignedUrl(row.pdf_path, 300, { download: docFileName(d0?.kind ?? 'quote', d0?.number ?? 'belge', row.version, { revision: row.company_revision, ascii: true }) });
     if (signed.error || !signed.data?.signedUrl) return fail(502, 'İndirme bağlantısı oluşturulamadı.');
     return NextResponse.json({ ok: true, url: signed.data.signedUrl, expiresIn: 300, history: true });
   }
 
   const id = sp.get('id') ?? '';
   if (!UUID.test(id)) return fail(400, 'bad request');
-  const d = await client.from('doc_documents').select('id, number, final_version').eq('id', id).maybeSingle();
+  const d = await client.from('doc_documents').select('id, number, kind, final_version').eq('id', id).maybeSingle();
   if (d.error) { const e = dbError(d.error); return fail(e.status, e.error); }
   if (!d.data) return fail(404, 'Belge bulunamadı.');
-  const doc = d.data as { id: string; number: string; final_version: number };
+  const doc = d.data as { id: string; number: string; kind: DocKind; final_version: number };
   const version = sp.get('version') ? Number(sp.get('version')) : doc.final_version;
   if (!Number.isInteger(version) || version < 1 || version > doc.final_version) return fail(404, 'Kesinleşmiş sürüm yok; taslak PDF’i önizlemeden indirin.');
   const ctx = await loadContext(client);
@@ -68,10 +69,17 @@ export async function GET(request: NextRequest) {
   }
   const out = await currentRenderOf(client, id, version, ctx, getSupabaseServiceRole());
   if (!out.ok) return fail(out.status, out.error);
-  // inline=1: for "Önizle" (opens in a tab); otherwise a download with a readable file name.
-  const signed = await client.storage.from(DOC_BUCKET).createSignedUrl(out.path, 300, sp.get('inline') === '1' ? undefined : { download: `${safeFileName(doc.number)}-v${version}.pdf` });
+  // Saved as "Yoca-Teklif-TKL-2026-0003-v1.pdf" (signed URL download option; the storage key is not renamed).
+  // inline=1 ("Önizle"): an inline link for the tab plus the download link for its "İndir" button.
+  const fileName = docFileName(doc.kind, doc.number, version, { ascii: true });
+  const signed = await client.storage.from(DOC_BUCKET).createSignedUrl(out.path, 300, { download: fileName });
   if (signed.error || !signed.data?.signedUrl) return fail(502, 'İndirme bağlantısı oluşturulamadı.');
-  return NextResponse.json({ ok: true, url: signed.data.signedUrl, expiresIn: 300, companyRevision: ctx.revision, reused: out.reused });
+  if (sp.get('inline') === '1') {
+    const inline = await client.storage.from(DOC_BUCKET).createSignedUrl(out.path, 300);
+    if (inline.error || !inline.data?.signedUrl) return fail(502, 'İndirme bağlantısı oluşturulamadı.');
+    return NextResponse.json({ ok: true, url: inline.data.signedUrl, downloadUrl: signed.data.signedUrl, fileName, expiresIn: 300, companyRevision: ctx.revision, reused: out.reused });
+  }
+  return NextResponse.json({ ok: true, url: signed.data.signedUrl, fileName, expiresIn: 300, companyRevision: ctx.revision, reused: out.reused });
 }
 
 export async function POST(request: NextRequest) {
@@ -95,7 +103,7 @@ export async function POST(request: NextRequest) {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="${safeFileName(row.number)}-taslak.pdf"`,
+        'Content-Disposition': contentDisposition('inline', docFileName(row.kind, row.number, 'draft')),
         'Cache-Control': 'no-store',
         'X-Pdf-Pages': String(pdf.pages),
         'X-Company-Revision': String(ctx.revision),

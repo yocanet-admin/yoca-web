@@ -364,7 +364,11 @@ async function storageRoute(req, res, url) {
     }
     const token = crypto.createHmac('sha256', SECRET).update(`${bucket}/${name}`).digest('hex');
     if (url.searchParams.get('token') !== token || !fs.existsSync(fileOf(bucket, name))) return send(res, 400, { message: 'invalid signature' });
-    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Access-Control-Allow-Origin': '*' });
+    // Like Supabase Storage: "?download=<name>" → attachment with that file name; otherwise inline.
+    const dl = url.searchParams.get('download');
+    const head = { 'Content-Type': /\.pdf$/i.test(name) ? 'application/pdf' : 'application/octet-stream', 'Access-Control-Allow-Origin': '*' };
+    if (dl !== null) head['Content-Disposition'] = `attachment; filename="${(dl || path.basename(name)).replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(dl || path.basename(name))}`;
+    res.writeHead(200, head);
     return res.end(fs.readFileSync(fileOf(bucket, name)));
   }
   if ((m = /^object\/list\/([^/]+)$/.exec(rest)) && req.method === 'POST') {

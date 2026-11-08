@@ -125,8 +125,10 @@ export async function POST(request: NextRequest) {
           payment: c.payment.map((p) => ({ label: p.label, mode: p.mode, value: p.value, due: p.due })),
         };
       }
-      const r = await draftDocument(model, { kind, locale, brief, recipient: String(body.recipient ?? '').slice(0, 300), projectName: String(body.projectName ?? '').slice(0, 200), currency, prices, sample, realClient, scope, current });
-      result = { suggestion: cleanDraft(kind, r.data, { currency, prices, sample, scope, brief }) };
+      // the plan already in the document (sanitized: label / mode / value / due only)
+      const existingPlan = KIND_DEF[kind].payment && Array.isArray(body.currentPayment) ? sanitizeContent({ payment: body.currentPayment }, kind).payment.filter((p) => p.value.trim()) : [];
+      const r = await draftDocument(model, { kind, locale, brief, recipient: String(body.recipient ?? '').slice(0, 300), projectName: String(body.projectName ?? '').slice(0, 200), currency, prices, sample, realClient, scope, current, existingPlan });
+      result = { suggestion: cleanDraft(kind, r.data, { currency, prices, sample, scope, brief, locale, existingPlan }) };
       usage = r.usage; requestId = r.requestId; isMock = Boolean(r.mock);
     } else if (mode === 'letter') {
       const facts = String(body.facts).slice(0, 6000);
