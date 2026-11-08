@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, resolveOpenGroups, toggleGroup } from '../lib/admin/navState';
+import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, patchOpenGroups, resolveOpenGroups, toggleGroup } from '../lib/admin/navState';
 
 const groups = [
   { title: 'Genel', items: [{ href: '/admin/submissions' }, { href: '/admin/sites' }] },
@@ -55,4 +55,13 @@ test('parseOpenGroups: only booleans survive; broken values count as nothing sto
 test('storage key is per user', () => {
   assert.notEqual(navStorageKey('a'), navStorageKey('b'));
   assert.match(navStorageKey('u1'), /^yoca-admin-nav:v1:u1$/);
+});
+
+test('patchOpenGroups: only the changed group is written; the other tab choices survive', () => {
+  // tab A opened "Site içeriği"; tab B then navigates to an Operasyon page
+  const afterA = patchOpenGroups('{"Genel":true,"Operasyon":false,"Site içeriği":false}', { 'Site içeriği': true });
+  const afterB = patchOpenGroups(afterA, { Operasyon: true });
+  assert.deepEqual(JSON.parse(afterB), { Genel: true, Operasyon: true, 'Site içeriği': true });
+  assert.deepEqual(JSON.parse(patchOpenGroups(null, { Finans: true })), { Finans: true });
+  assert.deepEqual(JSON.parse(patchOpenGroups('broken', { Finans: false })), { Finans: false });
 });

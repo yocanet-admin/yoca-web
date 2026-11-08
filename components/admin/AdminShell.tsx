@@ -8,7 +8,7 @@ import type { Session } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/adminClient';
 import AdminPrivacyNotice from '@/components/admin/AdminPrivacyNotice';
 import { clearDocBackups } from '@/lib/documents/backup';
-import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, resolveOpenGroups, toggleGroup, type OpenGroups } from '@/lib/admin/navState';
+import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, patchOpenGroups, resolveOpenGroups, toggleGroup, type OpenGroups } from '@/lib/admin/navState';
 
 /**
  * Yoca — admin shell (Client Component).
@@ -168,6 +168,14 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const currentGroup = groupOfPath(groups, pathname, isActive);
   const navKey = userId && access?.userId === userId ? navStorageKey(userId) : null;
   const [nav, setNav] = useState<{ key: string | null; open: OpenGroups }>({ key: null, open: {} });
+  // Writes only the groups that changed, so another admin tab's choices stay as they are.
+  const savePatch = (key: string, patch: OpenGroups) => {
+    try {
+      window.localStorage.setItem(key, patchOpenGroups(window.localStorage.getItem(key), patch));
+    } catch {
+      /* storage blocked: the menu still works for this visit */
+    }
+  };
   useEffect(() => {
     if (!navKey) return;
     let stored: OpenGroups | null = null;
@@ -180,19 +188,29 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     // currentGroup is applied by the navigation effect below afterwards
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navKey, titlesKey]);
+  // After a navigation the current page's group is opened (and remembered as open).
   useEffect(() => {
-    setNav((prev) => (prev.key ? { ...prev, open: openCurrent(prev.open, currentGroup) } : prev));
-  }, [pathname, currentGroup]);
+    if (!navKey || !currentGroup) return;
+    savePatch(navKey, { [currentGroup]: true });
+    setNav((prev) => (prev.key === navKey ? { ...prev, open: openCurrent(prev.open, currentGroup) } : prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, currentGroup, navKey]);
+  // Another tab of the same user changed a group: follow it (this page's group stays open).
   useEffect(() => {
-    if (!nav.key || nav.key !== navKey) return;
-    try {
-      window.localStorage.setItem(nav.key, JSON.stringify(nav.open));
-    } catch {
-      /* storage blocked: the menu still works for this visit */
-    }
-  }, [nav, navKey]);
+    if (!navKey) return;
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== navKey) return;
+      setNav((prev) => (prev.key === navKey ? { key: navKey, open: resolveOpenGroups(titlesKey.split('|'), parseOpenGroups(event.newValue), currentGroup) } : prev));
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [navKey, titlesKey, currentGroup]);
   const openGroups = nav.key === navKey ? nav.open : resolveOpenGroups(groupTitles, null, currentGroup);
-  const toggle = (title: string) => setNav((prev) => ({ key: prev.key, open: toggleGroup(prev.key === navKey ? prev.open : openGroups, title) }));
+  const toggle = (title: string) => {
+    const next = !openGroups[title];
+    if (navKey) savePatch(navKey, { [title]: next });
+    setNav((prev) => ({ key: prev.key, open: { ...toggleGroup(prev.key === navKey ? prev.open : openGroups, title), [title]: next } }));
+  };
 
   // The mobile menu closes on navigation and with Escape.
   useEffect(() => setMenuOpen(false), [pathname]);
