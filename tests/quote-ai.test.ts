@@ -297,7 +297,7 @@ test('PDF: one-time total apart from monthly / year-2 groups, "Dahil" for the in
     const ns = txt.replace(/\s+/g, ''); // letter-spaced kickers come out as "T E K …"
     assert.ok(ns.includes(`TEKSEFERLİKTOPLAM/${cur}`), `${cur}: one-time total label`);
     assert.ok(ns.includes(`TUTAR/${cur}`), `${cur}: amount column currency`);
-    assert.ok(ns.includes('TEKRARLAYANVESONRAKİDÖNEMÜCRETLERİ') && /bugünkü \(tek seferlik\) toplama ve ödeme planına dahil değildir/.test(txt), cur);
+    assert.ok(ns.includes('TEKRARLAYANVESONRAKİDÖNEMÜCRETLERİ') && /tek seferlik toplama ve ödeme planına dahil değildir/.test(txt) && !/bugünkü/i.test(txt), cur);
     assert.ok(txt.includes('Aylık · başlangıçtan itibaren') && txt.includes('Yıllık · 2. yıldan itibaren'), cur);
     assert.ok(txt.includes('Süre belirtilmedi'), `${cur}: monthly duration not stated`);
     assert.ok(/Dahil/.test(txt) && ns.includes('KURUMSALWEBSİTESİKALEMİNEDAHİL'), `${cur}: included line`);
@@ -410,7 +410,7 @@ test('PDF: "ADET / SÜRE" column reads "1 paket", "1 proje", "6 ay" / "süre bel
   const ns = txt.replace(/\s+/g, '');
   assert.ok(ns.includes('ADET/SÜRE') && !/MİKTAR/.test(ns), 'column label');
   assert.ok(txt.includes('1 paket') && txt.includes('1 proje') && txt.includes('6 ay') && txt.includes('aylık faturalanır') && txt.includes('yıllık faturalanır'));
-  assert.ok(txt.includes('6 ay için toplam') && txt.includes('7.128,00 USD'), '6-month total, informational');
+  assert.ok(txt.includes('6 aylık hizmet toplamı (KDV dahil): 7.128,00 USD') && txt.includes('Aylık toplam (KDV dahil): 1.188,00 USD / ay') && txt.includes('Aylık birim fiyat, toplam aylık hizmet bedelidir.') && txt.includes('Ödeme planı tek seferlik toplam üzerinden: 8.280,00 USD') && txt.includes('Yıllık yenileme (KDV dahil): 240,00 USD / yıl') && txt.includes('İlk dönem toplamlarına dahil değildir') && !/bugünkü/i.test(txt), 'separate totals, plan basis, renewal apart');
   const old = await renderDocumentPdf({ kind: 'quote', number: 'TKL-2026-0102', title: 'Eski', content: sampleQuote(), issuer, bankAccounts: [], mode: 'final', version: 1 });
   const ot = pdfText(old.buffer)!;
   assert.ok(ot.includes('6 bin kelime') && ot.includes('1 paket') && ot.includes('298.080,58') && !/TEKRARLAYAN/.test(ot.replace(/\s+/g, '')), 'old quote: same quantities and total, no recurring block');

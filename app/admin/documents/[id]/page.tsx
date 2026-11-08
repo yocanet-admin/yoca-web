@@ -559,7 +559,7 @@ function EditorInner() {
                             <label className={label}>İndirim %<input className={field} inputMode="decimal" value={it.discountPct} onChange={(e) => setItem(i, { discountPct: e.target.value })} placeholder="0" /></label>
                             <label className={label}>KDV %<input className={field} inputMode="decimal" value={it.taxRate} onChange={(e) => setItem(i, { taxRate: e.target.value })} /></label>
                           </div>
-                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                          <div className="grid gap-2 sm:grid-cols-5">
                             <label className={label}>Faturalama
                               <select className={field} value={it.includedIn ? 'included' : it.billing ?? 'once'} onChange={(e) => {
                                 const v = e.target.value;
@@ -567,26 +567,26 @@ function EditorInner() {
                                 set({ items: c.items.map((x, j) => (j === i ? setBilling(x, v as Billing | 'included', target?.id ?? '') : x)) });
                               }}>
                                 <option value="once">{BILLING_LABEL.once.tr}</option><option value="monthly">{BILLING_LABEL.monthly.tr}</option><option value="yearly">{BILLING_LABEL.yearly.tr}</option>
-                                <option value="included">Dahil (başka kalemde)</option>
+                                <option value="included">Dahil</option>
                               </select>
                             </label>
                             {it.includedIn !== undefined && it.includedIn !== '' ? (
-                              <label className={`${label} sm:col-span-2`}>Dahil olduğu kalem
+                              <label className={`${label} sm:col-span-4`}>Dahil olduğu kalem
                                 <select className={field} value={it.includedIn} onChange={(e) => setItem(i, { includedIn: e.target.value })}>
                                   {!c.items.some((x) => x.id === it.includedIn) && <option value={it.includedIn}>(bulunamadı — seçin)</option>}
                                   {c.items.filter((x) => x.id !== it.id && !x.includedIn).map((x, j) => <option key={x.id} value={x.id}>{x.title || `${j + 1}. kalem`}</option>)}
                                 </select>
                               </label>
                             ) : (it.billing ?? 'once') !== 'once' ? <>
-                              <label className={label}>Başlangıç
+                              <label className={label}>Başlangıç yılı
                                 <select className={field} value={String(it.startYear ?? 1)} onChange={(e) => setItem(i, { startYear: Number(e.target.value) })}>
-                                  <option value="1">Başlangıçtan itibaren</option><option value="2">2. yıldan itibaren</option><option value="3">3. yıldan itibaren</option>
+                                  <option value="1">1. yıldan</option><option value="2">2. yıldan</option><option value="3">3. yıldan</option>
                                 </select>
                               </label>
                               {(it.startYear ?? 1) > 1 && (
                                 <label className={label}>Fiyatın niteliği
                                   <select className={field} value={it.priceBasis ?? ''} onChange={(e) => setItem(i, { priceBasis: e.target.value === 'fixed' ? 'fixed' : e.target.value === 'estimate' ? 'estimate' : '' })}>
-                                    <option value="">Seçin</option><option value="estimate">Güncel tarifeye göre tahmini</option><option value="fixed">Sabit fiyat (taahhüt)</option>
+                                    <option value="">Seçin</option><option value="estimate">Tahmini (güncel tarife)</option><option value="fixed">Sabit (taahhüt)</option>
                                   </select>
                                 </label>
                               )}
@@ -600,6 +600,7 @@ function EditorInner() {
                           )}
                           <p className="text-[12px] text-muted">
                             {line?.included ? <span className="text-subtle">Dahil — ayrı fiyatı yok, toplama eklenmez.</span> : line?.error ? <span className="text-red-300">{line.error}</span> : line?.missingPrice ? <span className="text-yellow-200">Fiyat eksik — toplam hesaplanmaz.</span> : line?.net !== null && line?.net !== undefined ? <>Tutar: <b className="text-white">{money(line.net)}</b>{(it.billing ?? 'once') !== 'once' ? ` / ${BILLING_LABEL[it.billing ?? 'once'].per.tr}` : ''}{line.discount ? ` (indirim ${money(line.discount)})` : ''}</> : null}
+                            {!it.includedIn && it.billing === 'monthly' ? <span className="block text-subtle">Aylık birim fiyat, toplam aylık hizmet bedelidir (süreyle çarpılmaz).</span> : null}
                           </p>
                         </div>
                         <div className="flex flex-col gap-1">
@@ -616,7 +617,7 @@ function EditorInner() {
                   <div className="flex justify-between gap-10"><span className="text-muted">Ara toplam</span><span className="tabular-nums">{money(calc.totals.subtotal)}</span></div>
                   {calc.totals.discount > BigInt(0) && <div className="flex justify-between gap-10"><span className="text-muted">İndirim</span><span className="tabular-nums">−{money(calc.totals.discount)}</span></div>}
                   {calc.totals.taxes.map((t) => <div key={String(t.rateBp)} className="flex justify-between gap-10"><span className="text-muted">KDV %{fmtPct(t.rateBp)} <span className="text-subtle">(matrah {money(t.base)})</span></span><span className="tabular-nums">{money(t.tax)}</span></div>)}
-                  <div className="flex justify-between gap-10 border-t border-line pt-1 font-extrabold"><span>{calc.recurring.length ? 'Tek seferlik toplam (bugün)' : 'Genel toplam'}</span><span className="tabular-nums" data-testid="once-total">{calc.totals.grand !== null ? money(calc.totals.grand) : <span className="text-yellow-200">hesaplanamadı</span>}</span></div>
+                  <div className="flex justify-between gap-10 border-t border-line pt-1 font-extrabold"><span>{calc.recurring.length ? 'Tek seferlik toplam' : 'Genel toplam'}</span><span className="tabular-nums" data-testid="once-total">{calc.totals.grand !== null ? money(calc.totals.grand) : <span className="text-yellow-200">hesaplanamadı</span>}</span></div>
                 </div>
                 <RecurringSummary groups={calc.recurring} currency={c.currency} />
               </Group>
@@ -626,7 +627,7 @@ function EditorInner() {
             {def.payment && (
               <Group id="payment" title="Ödeme planı" open={isOpen('payment')} onToggle={toggle} tone={calc.payment.problem ? 'warn' : undefined}
                 summary={c.payment.length ? `${c.payment.length} adım · ${calc.payment.problem ? 'toplamla uyuşmuyor' : 'toplamla uyumlu'}` : 'adım yok'}>
-                <p className="text-[12px] text-subtle">Yüzdeler toplamı %100 olduğunda son adım kuruş farkını alır. Plan yalnızca tek seferlik toplam içindir; aylık / yıllık ücretler kendi dönemlerinde faturalanır. Teklif / proforma tahsilat kaydı değildir; Operasyon hizmeti, borç veya yenileme kaydı oluşturmaz.</p>
+                <p className="text-[12px] text-subtle">Yüzdeler toplamı %100 olduğunda son adım kuruş farkını alır. {calc.recurring.length ? <b className="text-white">Ödeme planı tek seferlik toplam üzerinden{calc.totals.grand !== null ? ` (${money(calc.totals.grand)})` : ''}; aylık / yıllık ücretler bu plana girmez, kendi dönemlerinde faturalanır.</b> : 'Plan tek seferlik toplam üzerinden hesaplanır.'} Teklif / proforma tahsilat kaydı değildir; Operasyon hizmeti, borç veya yenileme kaydı oluşturmaz.</p>
                 {c.payment.map((p, i) => {
                   const row = calc.payment.rows.find((r) => r.id === p.id);
                   return (
@@ -754,7 +755,7 @@ function EditorInner() {
                 {def.items && <p className="text-[12px] text-muted">Para birimi: <b className="text-white">{CURRENCY_LABEL[c.currency]}</b> — öneri bu para biriminde hazırlanır; yapay zekâ değiştirmez.</p>}
                 <label className={label}>Ne hazırlansın?
                   <select className={field} value={aiScope} onChange={(e) => setAiScope(e.target.value)}>
-                    <option value="all">Tüm teklif (başlık, kalemler, bölümler, ödeme, takvim…)</option>
+                    <option value="all">Tüm teklif</option>
                     <option value="title">Yalnızca başlık</option>
                     {[...def.blocks, ...(def.items ? (['terms'] as BlockKey[]) : [])].map((k) => <option key={k} value={`block:${k}`}>Yalnızca {BLOCK_LABEL[k].tr.toLocaleLowerCase('tr')}</option>)}
                     {def.items && <option value="items">Yalnızca kalemler{pricesAsked ? ' ve fiyatlar' : ''}</option>}

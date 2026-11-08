@@ -157,11 +157,11 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
                           }
                         }}>
                           <option value="once">{BILLING_LABEL.once.tr}</option><option value="monthly">{BILLING_LABEL.monthly.tr}</option><option value="yearly">{BILLING_LABEL.yearly.tr}</option>
-                          {others.length > 0 && <option value="included">Dahil (başka kalemde)</option>}
+                          {others.length > 0 && <option value="included">Dahil</option>}
                         </select>
                       </label>
                       {it.includedIn ? (
-                        <label className={`${label} col-span-1 sm:col-span-3`}>Dahil olduğu kalem
+                        <label className={`${label} col-span-2 sm:col-span-3`}>Dahil olduğu kalem
                           <select className={field} value={it.includedIn} onChange={(e) => setItem(i, { includedIn: e.target.value })}>{others.map((o) => <option key={o.ref} value={o.ref}>{o.title}</option>)}</select>
                         </label>
                       ) : <>
@@ -180,16 +180,16 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
                         ) : <p className="self-end text-[12px] text-subtle">Fiyat istenmedi; siz girersiniz.</p>}
                       </>}
                       {recurring && (
-                        <label className={label}>Başlangıç
+                        <label className={label}>Başlangıç yılı
                           <select className={field} value={String(it.startYear || 1)} onChange={(e) => setItem(i, { startYear: Number(e.target.value), priceBasis: Number(e.target.value) > 1 ? it.priceBasis || 'estimate' : '' })}>
-                            <option value="1">Başlangıçtan itibaren</option><option value="2">2. yıldan itibaren</option><option value="3">3. yıldan itibaren</option>
+                            <option value="1">1. yıldan</option><option value="2">2. yıldan</option><option value="3">3. yıldan</option>
                           </select>
                         </label>
                       )}
                       {recurring && it.startYear > 1 && (
                         <label className={`${label} col-span-2`}>Gelecek dönem fiyatının niteliği
                           <select className={field} value={it.priceBasis} onChange={(e) => setItem(i, { priceBasis: e.target.value as SuggestedItem['priceBasis'] })}>
-                            <option value="">Seçin</option><option value="estimate">Güncel tarifeye göre tahmini (değişebilir)</option><option value="fixed">Sabit fiyat (taahhüt)</option>
+                            <option value="">Seçin</option><option value="estimate">Tahmini (güncel tarife)</option><option value="fixed">Sabit (taahhüt)</option>
                           </select>
                         </label>
                       )}
@@ -198,9 +198,10 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
                       {it.includedIn ? <Badge tone="info">{`“${s.items.find((x) => x.ref === it.includedIn)?.title ?? ''}” kalemine dahil — ayrı fiyatı yok`}</Badge> : null}
                       {!it.includedIn ? <span data-testid={`review-qty-${it.ref}`}><Badge tone="muted">{`Adet / Süre: ${recurring ? (it.term ? `${it.term} ${BILLING_LABEL[it.billing].per.tr}` : 'süre belirtilmedi') : `${it.quantity || '1'}${it.unit ? ` ${it.unit}` : ''}`}${recurring ? ` · ${BILLING_LABEL[it.billing].tr.toLocaleLowerCase('tr')} faturalanır` : ''}`}</Badge></span> : null}
                       {recurring && !it.term ? <Badge tone="warn">Süre belirtilmedi — varsayım; isterseniz süre seçin</Badge> : null}
-                      {recurring && it.startYear > 1 ? <Badge tone="muted">Bugünkü toplama dahil değil</Badge> : null}
+                      {recurring && it.startYear > 1 ? <Badge tone="muted">İlk dönem toplamlarına dahil değil</Badge> : null}
                       {s.prices && it.unitPrice && !it.includedIn ? <Badge tone="warn">AI fiyat önerisi — kontrol edilmeli</Badge> : null}
                     </div>
+                    {!it.includedIn && it.billing === 'monthly' ? <p className="text-[12px] text-subtle">Aylık birim fiyat, toplam aylık hizmet bedelidir (süreyle çarpılmaz).</p> : null}
                     {s.prices && it.priceNote && !it.includedIn ? <p className="text-[12px] text-subtle">Tahmin: {it.priceNote}</p> : null}
                   </div>
                 );
@@ -218,7 +219,7 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
           {sections.includes('payment') && (
             <div className="grid gap-2 border border-line p-3">
               {pick('payment')}
-              <p className="text-[12px] text-subtle">Ödeme planı yalnızca tek seferlik toplam içindir; aylık / yıllık ücretler kendi dönemlerinde faturalanır.</p>
+              <p className="text-[12px] text-subtle">Ödeme planı tek seferlik toplam üzerinden; aylık / yıllık ücretler bu plana girmez, kendi dönemlerinde faturalanır.</p>
               {s.payment.map((p, i) => (
                 <div key={i} className="grid grid-cols-[1fr_80px] gap-2 sm:grid-cols-[1.4fr_90px_1.2fr]">
                   <input aria-label={`${i + 1}. ödeme adımı`} className={field} value={p.label} onChange={(e) => onChange({ ...s, payment: s.payment.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} />
@@ -253,6 +254,7 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
             <div className="flex justify-between gap-6"><span className="text-muted">Tek seferlik ara toplam</span><span className="tabular-nums">{money(calc.totals.subtotal)}</span></div>
             {calc.totals.taxes.map((t) => <div key={String(t.rateBp)} className="flex justify-between gap-6"><span className="text-muted">KDV %{fmtPct(t.rateBp)}</span><span className="tabular-nums">{money(t.tax)}</span></div>)}
             <div className="flex justify-between gap-6 border-t border-line pt-1 font-extrabold"><span>Tek seferlik toplam</span><span className="tabular-nums" data-testid="review-once-total">{calc.totals.grand !== null ? money(calc.totals.grand) : <span className="text-yellow-200">hesaplanamadı</span>}</span></div>
+            {calc.payment.rows.length > 0 && <p className="text-[12px] text-subtle">Ödeme planı tek seferlik toplam üzerinden:</p>}
             {calc.payment.rows.length > 0 && <ul className="grid gap-0.5 border-t border-line pt-1 text-[12px] text-muted">{calc.payment.rows.map((r) => <li key={r.id} className="flex justify-between gap-4"><span>{r.pctBp !== null ? `%${fmtPct(r.pctBp)} · ` : ''}{r.label}</span><span className="tabular-nums">{r.amount !== null ? money(r.amount) : '—'}</span></li>)}</ul>}
             {calc.payment.problem && <p className="text-[12px] text-yellow-200">{calc.payment.problem}</p>}
           </div>

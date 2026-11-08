@@ -142,10 +142,13 @@ const L = {
     sampleLine: 'ÖRNEK belge · gerçek teklif değildir · kurgusal bilgiler içerir',
     included: 'Dahil', includedIn: (x: string) => `${x} kalemine dahil`, onceTotal: 'Tek seferlik toplam', once: 'Tek seferlik',
     recurringHead: 'Tekrarlayan ve sonraki dönem ücretleri',
-    recurringNote: 'Bu ücretler bugünkü (tek seferlik) toplama ve ödeme planına dahil değildir; kendi dönemlerinde faturalanır.',
+    recurringNote: 'Bu ücretler tek seferlik toplama ve ödeme planına dahil değildir; kendi dönemlerinde faturalanır.',
     group: (b: 'monthly' | 'yearly', y: number) => `${b === 'monthly' ? 'Aylık' : 'Yıllık'} · ${y > 1 ? `${y}. yıldan itibaren` : 'başlangıçtan itibaren'}`,
-    per: { monthly: 'ay', yearly: 'yıl' }, groupTotal: (per: string) => `Dönem toplamı, KDV dahil / ${per}`,
-    termTotal: (n: number, per: string) => `${n} ${per} için toplam (bilgi amaçlı)`, billed: { monthly: 'aylık faturalanır', yearly: 'yıllık faturalanır' }, noTerm: (per: string) => `Süre belirtilmedi: hizmet sürdükçe her ${per} faturalanır.`,
+    per: { monthly: 'ay', yearly: 'yıl' },
+    groupTotal: (b: 'monthly' | 'yearly', y: number) => (b === 'monthly' ? 'Aylık toplam (KDV dahil)' : y > 1 ? 'Yıllık yenileme (KDV dahil)' : 'Yıllık toplam (KDV dahil)'),
+    termTotal: (n: number, b: 'monthly' | 'yearly') => `${n} ${b === 'monthly' ? 'aylık' : 'yıllık'} hizmet toplamı (KDV dahil)`,
+    monthlyNote: 'Aylık birim fiyat, toplam aylık hizmet bedelidir.', renewalNote: (y: number) => `İlk dönem toplamlarına dahil değildir; ${y}. yıldan itibaren her yıl ayrıca faturalanır.`,
+    planBasis: 'Ödeme planı tek seferlik toplam üzerinden', billed: { monthly: 'aylık faturalanır', yearly: 'yıllık faturalanır' }, noTerm: (per: string) => `Süre belirtilmedi: hizmet sürdükçe her ${per} faturalanır.`,
     basis: { fixed: 'Sabit fiyat (taahhüt)', estimate: 'Güncel tarifeye göre tahmini; yenileme tarihinde güncellenebilir', '': '' },
     continued: (h: string) => `${h} — devam`,
     head: {
@@ -169,10 +172,13 @@ const L = {
     sampleLine: 'SAMPLE document · not a real quotation · fictional data',
     included: 'Included', includedIn: (x: string) => `Included in ${x}`, onceTotal: 'One-time total', once: 'One-time',
     recurringHead: 'Recurring and later-period fees',
-    recurringNote: 'These fees are not part of today\'s (one-time) total or the payment plan; they are billed in their own periods.',
+    recurringNote: 'These fees are not part of the one-time total or the payment plan; they are billed in their own periods.',
     group: (b: 'monthly' | 'yearly', y: number) => `${b === 'monthly' ? 'Monthly' : 'Yearly'} · ${y > 1 ? `from year ${y}` : 'from the start'}`,
-    per: { monthly: 'month', yearly: 'year' }, groupTotal: (per: string) => `Period total incl. VAT / ${per}`,
-    termTotal: (n: number, per: string) => `Total for ${n} ${per}${n > 1 ? 's' : ''} (for information)`, billed: { monthly: 'billed monthly', yearly: 'billed yearly' }, noTerm: (per: string) => `Duration not stated: billed every ${per} while the service runs.`,
+    per: { monthly: 'month', yearly: 'year' },
+    groupTotal: (b: 'monthly' | 'yearly', y: number) => (b === 'monthly' ? 'Monthly total (incl. VAT)' : y > 1 ? 'Yearly renewal (incl. VAT)' : 'Yearly total (incl. VAT)'),
+    termTotal: (n: number, b: 'monthly' | 'yearly') => `${n}-${b === 'monthly' ? 'month' : 'year'} service total (incl. VAT)`,
+    monthlyNote: 'The monthly unit price is the total monthly service fee.', renewalNote: (y: number) => `Not part of the first-period totals; billed separately every year from year ${y}.`,
+    planBasis: 'Payment plan based on the one-time total', billed: { monthly: 'billed monthly', yearly: 'billed yearly' }, noTerm: (per: string) => `Duration not stated: billed every ${per} while the service runs.`,
     basis: { fixed: 'Fixed price (commitment)', estimate: 'Estimate per current tariff; may change at renewal', '': '' },
     continued: (h: string) => `${h} — continued`,
     head: {
@@ -593,12 +599,16 @@ function RecurringGroups({ c, t, k = 1 }: { c: DocContent; t: Labels; k?: number
   const { recurring } = computeDocument(c);
   if (!recurring.length) return null;
   const money = (m: bigint) => fmtMoney(m, c.currency, c.locale, false);
-  const line = (g: RecurringGroup) => {
+  // one line each: the period total, then (only when computable) the stated contract-period total, then the note
+  const lines = (g: RecurringGroup): string[] => {
     const per = t.per[g.billing];
-    if (g.totals.grand === null) return t.missingTotal(g.totals.missingPrices.length + g.totals.errors.length);
-    const base = `${t.groupTotal(per)}: ${money(g.totals.grand)} ${c.currency}`;
-    if (g.term !== null && g.termTotal !== null) return `${base} · ${t.termTotal(g.term, per)}: ${money(g.termTotal)} ${c.currency}`;
-    return g.billing === 'monthly' && g.startYear === 1 ? `${base} · ${t.noTerm(per)}` : base;
+    if (g.totals.grand === null) return [t.missingTotal(g.totals.missingPrices.length + g.totals.errors.length)];
+    const out = [`${t.groupTotal(g.billing, g.startYear)}: ${money(g.totals.grand)} ${c.currency} / ${per}`];
+    if (g.term !== null && g.termTotal !== null) out.push(`${t.termTotal(g.term, g.billing)}: ${money(g.termTotal)} ${c.currency}`);
+    else if (g.billing === 'monthly' && g.startYear === 1) out.push(t.noTerm(per));
+    if (g.startYear > 1) out.push(t.renewalNote(g.startYear));
+    if (g.billing === 'monthly') out.push(t.monthlyNote);
+    return out;
   };
   return (
     <R.View style={{ marginTop: 26 * k }}>
@@ -610,7 +620,7 @@ function RecurringGroups({ c, t, k = 1 }: { c: DocContent; t: Labels; k?: number
         <R.View key={g.key} style={{ marginTop: 6 * k }}>
           <R.Text style={[st.strong, { fontSize: 10, marginBottom: 4 }]} minPresenceAhead={40}>{t.group(g.billing, g.startYear)}</R.Text>
           <ItemsTable c={c} t={t} k={k} lines={g.totals.lines} per={t.per[g.billing]} header={false}
-            tail={<R.Text style={[st.small, { textAlign: 'right', marginTop: 6, paddingHorizontal: 12 }]}>{line(g)}</R.Text>} />
+            tail={<R.View style={{ marginTop: 6, paddingHorizontal: 12 }}>{lines(g).map((x, i) => <R.Text key={i} style={[st.small, { textAlign: 'right' }, i === 0 ? { color: C.ink, fontWeight: 600 } : {}]}>{x}</R.Text>)}</R.View>} />
         </R.View>
       ))}
     </R.View>
@@ -618,10 +628,13 @@ function RecurringGroups({ c, t, k = 1 }: { c: DocContent; t: Labels; k?: number
 }
 
 function PaymentRows({ c }: { c: DocContent }) {
-  const { payment } = computeDocument(c);
+  const { payment, totals, recurring } = computeDocument(c);
   const money = (m: bigint) => `${fmtMoney(m, c.currency, c.locale, false)} ${c.currency}`;
+  const t = L[c.locale];
   return (
     <>
+      {/* with recurring fees present, say which amount the plan splits (never the monthly / yearly fees) */}
+      {recurring.length && totals.grand !== null ? <R.Text style={[st.small, { fontSize: 8.6, marginBottom: 3 }]}>{t.planBasis}: {money(totals.grand)}</R.Text> : null}
       {payment.rows.map((r, i) => (
         <R.View key={r.id} style={{ flexDirection: 'row', paddingVertical: 4, borderTopWidth: i ? 0.75 : 0, borderTopColor: C.line }}>
           <R.View style={{ flexGrow: 1, flexBasis: 0, paddingRight: 10 }}>

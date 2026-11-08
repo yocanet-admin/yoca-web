@@ -136,7 +136,7 @@ export interface LineItem {
   billing?: Billing;
   /** Recurring lines: number of periods (months / years) this quote assumes. '' = not stated (shown as such, never guessed). */
   term?: string;
-  /** Recurring lines: the year billing starts. 1 = from the start; 2 = from year 2 (a future renewal, never in today's total). */
+  /** Recurring lines: the year billing starts. 1 = from the start; 2 = from year 2 (a future renewal, never in the first-period totals). */
   startYear?: number;
   /** id of another line this one is included in (e.g. first-year domain + hosting in the website). It has no price of its own. */
   includedIn?: string;

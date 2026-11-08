@@ -101,7 +101,7 @@ function draftSchema(kind: DocKind) {
               quantity: str('"Adet / Süre" of a one-time line, decimal (e.g. "1" proje, "12" saat). Always "1" for monthly / yearly lines (their duration goes in term).'), unit: str('e.g. "proje", "paket", "saat", "adet"; "ay" for monthly and "yıl" for yearly lines'),
               billing: { type: 'string', enum: [...BILLINGS], description: 'once = one-time; monthly = billed every month (unit price per month); yearly = billed every year (unit price per year)' },
               term: str('Recurring lines only: the offered duration in months/years ONLY if the brief states it (e.g. "6"), else empty. Never assume 1.'),
-              startYear: { type: 'integer', description: '1 = billed from the start; 2 = a renewal billed from year 2 (never part of today\'s total)' },
+              startYear: { type: 'integer', description: '1 = billed from the start; 2 = a renewal billed from year 2 (never part of the first-period totals)' },
               includedIn: str('ref of the line this one is included in (e.g. first-year domain and hosting included in the website), else empty. An included line has no price.'),
               unitPrice: str('ONLY when prices were requested: estimated unit price, plain decimal number in the document currency, VAT excluded, e.g. "85000". Else empty.'),
               priceBasis: { type: 'string', enum: ['', 'fixed', 'estimate'], description: 'Lines from year 2 on: "estimate" (per current tariff, may change) unless the brief states a fixed price; else empty' },

@@ -22,7 +22,7 @@ import type { DocContent, LineItem, PaymentStep } from '@/lib/documents/model';
 /*
  * One-time vs recurring (2026-11): every line has a billing (one-time,
  * monthly, yearly) and recurring lines a start year. Only one-time lines make
- * up "today's" total and the payment plan; each recurring kind (e.g. monthly
+ * up the one-time total and the payment plan; each recurring kind (e.g. monthly
  * from the start, yearly from year 2) is its own group with its own totals and
  * is never added to the one-time total. A line included in another line
  * (first-year domain + hosting in the website) has no amount and is not
@@ -324,7 +324,7 @@ export function billingErrors(items: LineItem[]): string[] {
 
 /** Everything the panel and the PDF need about the money of one document. */
 export function computeDocument(c: DocContent) {
-  // "totals" = one-time lines only: today's payable total and the base of the payment plan.
+  // "totals" = one-time lines only: the one-time total and the base of the payment plan.
   const totals = computeTotals(c.items, (it) => lineGroup(it) === 'once');
   const fmt = (m: bigint) => fmtMoney(m, c.currency, c.locale);
   let payment = computePayment(c.payment, totals.grand, fmt);

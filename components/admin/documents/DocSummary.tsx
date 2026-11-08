@@ -122,6 +122,7 @@ export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: Do
 
       {def.payment && (payment.rows.length > 0 || (def.deliveryTime && c.deliveryTime)) && (
         <Card title="Ödeme planı">
+          {payment.rows.length > 0 && recurring.length > 0 && totals.grand !== null ? <p className="text-[12px] text-subtle">Ödeme planı tek seferlik toplam üzerinden ({money(totals.grand)}); aylık / yıllık ücretler bu plana girmez.</p> : null}
           {payment.rows.length > 0 ? (
             <ul className="grid gap-1 text-[13px]">
               {payment.rows.map((p) => (
