@@ -6,7 +6,7 @@ import { mockEnabled } from '@/lib/ai/mock';
 import { checkModel, getAiSettings, resolveModel } from '@/lib/ai/settings';
 import { finishRun, startRun } from '@/lib/ai/runs';
 import { cleanDraft, cleanLetter, draftDocument, draftScopes, letterText, moneyMentions, rewriteText, translateDocument, type RewriteOp } from '@/lib/ai/documents';
-import { DOC_CURRENCIES, DOC_KINDS, KIND_DEF, sanitizeContent, type DocCurrency, type DocKind, type DocLocale } from '@/lib/documents/model';
+import { DOC_CURRENCIES, DOC_KINDS, KIND_DEF, docDates, sanitizeContent, type DocCurrency, type DocKind, type DocLocale } from '@/lib/documents/model';
 import { pricesRequested } from '@/lib/documents/aiDraft';
 
 /**
@@ -127,8 +127,11 @@ export async function POST(request: NextRequest) {
       }
       // the plan already in the document (sanitized: label / mode / value / due only)
       const existingPlan = KIND_DEF[kind].payment && Array.isArray(body.currentPayment) ? sanitizeContent({ payment: body.currentPayment }, kind).payment.filter((p) => p.value.trim()) : [];
-      const r = await draftDocument(model, { kind, locale, brief, recipient: String(body.recipient ?? '').slice(0, 300), projectName: String(body.projectName ?? '').slice(0, 200), currency, prices, sample, realClient, scope, current, existingPlan });
-      result = { suggestion: cleanDraft(kind, r.data, { currency, prices, sample, scope, brief, locale, existingPlan }) };
+      // the document's own dates, every scope (ISO only); the validity date only for types that have one
+      const dd = docDates(body.dates);
+      const dates = { issueDate: dd.issueDate, validUntil: KIND_DEF[kind].validity ? dd.validUntil : '' };
+      const r = await draftDocument(model, { kind, locale, brief, recipient: String(body.recipient ?? '').slice(0, 300), projectName: String(body.projectName ?? '').slice(0, 200), currency, prices, sample, realClient, scope, current, existingPlan, dates });
+      result = { suggestion: cleanDraft(kind, r.data, { currency, prices, sample, scope, brief, locale, existingPlan, dates }) };
       usage = r.usage; requestId = r.requestId; isMock = Boolean(r.mock);
     } else if (mode === 'letter') {
       const facts = String(body.facts).slice(0, 6000);

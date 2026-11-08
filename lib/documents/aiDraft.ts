@@ -198,6 +198,7 @@ export function filledTarget(doc: { title: string; content: DocContent }, id: st
   if (id === 'payment') return c.payment.some((p) => p.value.trim() || p.label.trim());
   if (id === 'deliveryTime') return Boolean(c.deliveryTime.trim());
   if (id === 'closing') return Boolean(c.closing.trim());
+  if (id === 'validity') return Boolean(c.validUntil);
   if (id === 'recipient') return Boolean(c.recipient.company.trim() || c.recipient.name.trim());
   return false;
 }

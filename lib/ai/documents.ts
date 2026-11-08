@@ -1,7 +1,7 @@
 import { callOpenAI, type OpenAIResult } from '@/lib/ai/openai';
 import { fence } from '@/lib/ai/sourceText';
 import { NO_AI_SLOP_RULES } from '@/lib/ai/prompts/no-ai-slop';
-import { BILLINGS, BLOCK_LABEL, DOC_CURRENCIES, KIND_DEF, KIND_LABEL, PAYMENT_MARKER, planComplete, type BlockKey, type DocCurrency, type DocKind, type DocLocale, type PaymentStep, type PriceBasis, paymentStepsInText, planSentence } from '@/lib/documents/model';
+import { BILLINGS, BLOCK_LABEL, DOC_CURRENCIES, KIND_DEF, KIND_LABEL, PAYMENT_MARKER, planComplete, type BlockKey, type DocCurrency, type DocKind, type DocLocale, type PaymentStep, type PriceBasis, displayDate, paymentStepsInText, planSentence } from '@/lib/documents/model';
 import { parseMoney } from '@/lib/documents/calc';
 import { currencyMentions, restrictToScope, stripAverageClaims, type DraftSuggestion, type SuggestedItem } from '@/lib/documents/aiDraft';
 
@@ -156,10 +156,30 @@ export interface DraftInput {
   current?: unknown;
   /** Payment plan already in the document (whole draft: keep it, describe it in "terms"). */
   existingPlan?: PaymentStep[] | null;
+  /** The document's own dates (ISO), set by the application: never "missing". */
+  dates?: { issueDate: string; validUntil: string };
 }
 
 const SCOPE_TEXT = (scope: string) =>
   scope === 'all' ? '' : `Rewrite ONLY this part of the document: ${scope}. Return every other field empty (empty strings, empty arrays, null). Keep it consistent with the current document data in <CURRENT>.\n`;
+
+/** The user message of a draft request (exported for tests: the document's dates and plan travel with every scope). */
+export function draftUserMessage(input: DraftInput): string {
+  const def = KIND_DEF[input.kind];
+  return [
+    input.recipient ? `Recipient: ${input.recipient}${input.realClient ? ' (real client record)' : ''}` : 'Recipient: (not given)',
+    input.projectName ? `Project: ${input.projectName}` : '',
+    def.items ? `Selected currency: ${input.currency}` : '',
+    def.items ? `Prices requested: ${input.prices ? 'yes' : 'no'}` : '',
+    `Sample: ${input.sample ? 'yes' : 'no'}`,
+    `Scope: ${input.scope}`,
+    input.existingPlan?.some((p) => p.value.trim()) ? `Existing payment plan: ${planSentence(input.existingPlan)}` : '',
+    input.dates?.issueDate ? `Document issue date: ${input.dates.issueDate} (${displayDate(input.dates.issueDate, input.locale)})` : '',
+    input.dates?.validUntil ? `Validity date: ${input.dates.validUntil} (${displayDate(input.dates.validUntil, input.locale)})` : '',
+    input.current ? `Current document:\n${fence('CURRENT', JSON.stringify(input.current).slice(0, 12000))}` : '',
+    `Brief:\n${fence('BRIEF', input.brief.slice(0, 6000))}`,
+  ].filter(Boolean).join('\n');
+}
 
 export function draftDocument(model: string, input: DraftInput): Promise<OpenAIResult<RawDraft>> {
   const def = KIND_DEF[input.kind];
@@ -190,22 +210,13 @@ export function draftDocument(model: string, input: DraftInput): Promise<OpenAIR
       (input.kind === 'delivery' ? 'For a delivery note list what was delivered and open issues exactly as the brief states; never claim acceptance by the client.\n' : '') +
       (input.kind === 'letter' ? 'For a letter: a subject line and the body (salutation, paragraphs, no closing formula — the template adds it).\n' : '') +
       'Never state VAT / KDV rates or tax amounts: the application applies the admin\'s tax settings.\n' +
+      (input.dates?.issueDate || input.dates?.validUntil ? 'The document\'s issue date and validity date are set by the application (see "Document issue date" / "Validity date"). Never mark them as missing or write [EKSİK] / [MISSING] for them, and do not write dates in the text unless the text really needs one.\n' : '') +
       (def.payment ? 'Payment stages, percentages and payment times belong ONLY in the payment plan and in the "terms" section ("Notlar" only for payment notes that are not part of the plan). Do not state payment commitments (percentages, stages, due times) in any other section.\n' : '') +
       (input.sample
         ? 'SAMPLE draft: the user asked for a sample with fictional data. Put a fictional company and contact name in sampleRecipient and mark both with "ÖRNEK". Do not invent bank details, IBAN, tax office, tax number, address, phone or e-mail even for the sample; leave them out.\n'
         : `Leave sampleRecipient empty. ${input.realClient ? 'The recipient is a real client: use its name exactly as given; never change, shorten or invent its brand, company, contact or company details.' : 'Do not invent a recipient.'}\n`) +
       `\n${FACT_RULES}\n\n${NO_AI_SLOP_RULES}`,
-    user: [
-      input.recipient ? `Recipient: ${input.recipient}${input.realClient ? ' (real client record)' : ''}` : 'Recipient: (not given)',
-      input.projectName ? `Project: ${input.projectName}` : '',
-      def.items ? `Selected currency: ${input.currency}` : '',
-      def.items ? `Prices requested: ${input.prices ? 'yes' : 'no'}` : '',
-      `Sample: ${input.sample ? 'yes' : 'no'}`,
-      `Scope: ${input.scope}`,
-      input.existingPlan?.some((p) => p.value.trim()) ? `Existing payment plan: ${planSentence(input.existingPlan)}` : '',
-      input.current ? `Current document:\n${fence('CURRENT', JSON.stringify(input.current).slice(0, 12000))}` : '',
-      `Brief:\n${fence('BRIEF', input.brief.slice(0, 6000))}`,
-    ].filter(Boolean).join('\n'),
+    user: draftUserMessage(input),
     schema: draftSchema(input.kind),
     maxOutputTokens: 7000,
     timeoutMs: 90_000,
@@ -320,8 +331,13 @@ export interface CleanContext {
   locale?: DocLocale;
   /** The payment plan already in the document (a whole draft keeps it; no fallback proposal then). */
   existingPlan?: PaymentStep[] | null;
+  /** The document's own dates (ISO); a marker asking for them is replaced by them, never by today's date. */
+  dates?: { issueDate: string; validUntil: string };
 }
 
+/** Markers / "missing" entries asking for the document's issue date or its validity date. */
+const ISSUE_DATE = /düzenleme tarih|teklif tarih|belge tarih|teklifin tarih|issue date|date of issue|quotation date|document date/i;
+const VALID_DATE = /geçerlilik|son geçerli|valid until|validity/i;
 const MISSING_MARKER_RE = () => /\[(?:EKSİK|EKSIK|MISSING)[^\]]*\]/gi;
 /** "missing" entries that are scope / commercial points (proposals to confirm), not facts only the user knows. */
 const CHECK_POINT = /sayfa|platform|kanal|içerik|gönderi|paylaşım|post|revizyon|ödeme|oran|aşama|süre|takvim|teslim süresi|geçerlilik|kapsam|adet|işlev|page|channel|revision|payment|timeline/i;
@@ -343,8 +359,14 @@ export function cleanDraft(kind: DocKind, d: RawDraft, ctx: CleanContext): Draft
   const warnings: string[] = [];
   let averageRemoved = false;
   const noAvg = (t: string) => { const r = stripAverageClaims(t); if (r.removed) averageRemoved = true; return r.text; };
-  const missingRaw = (Array.isArray(d.missing) ? d.missing : []).map((m) => s(m, 200)).filter(Boolean).slice(0, 20);
-  const blocks = (Array.isArray(d.blocks) ? d.blocks : []).filter((b) => b && allowed.has(b.key)).map((b) => ({ key: b.key, heading: s(b.heading, 160), body: noAvg(s(b.body, 12_000)) })).filter((b) => b.body);
+  // The document's own dates are known: a marker asking for them gets the document's date (never today's), and they are not "missing".
+  const known: Array<[RegExp, string]> = [];
+  if (ctx.dates?.issueDate) known.push([ISSUE_DATE, displayDate(ctx.dates.issueDate, ctx.locale ?? 'tr')]);
+  if (ctx.dates?.validUntil) known.push([VALID_DATE, displayDate(ctx.dates.validUntil, ctx.locale ?? 'tr')]);
+  let datesFilled = 0;
+  const fillDates = (text: string) => text.replace(MISSING_MARKER_RE(), (mk) => { const hit = known.find(([re]) => re.test(mk)); if (!hit) return mk; datesFilled += 1; return hit[1]; });
+  const missingRaw = (Array.isArray(d.missing) ? d.missing : []).map((m) => s(m, 200)).filter(Boolean).filter((m) => !known.some(([re]) => re.test(m))).slice(0, 20);
+  const blocks = (Array.isArray(d.blocks) ? d.blocks : []).filter((b) => b && allowed.has(b.key)).map((b) => ({ key: b.key, heading: s(b.heading, 160), body: fillDates(noAvg(s(b.body, 12_000))) })).filter((b) => b.body);
   const rawItems = def.items ? (Array.isArray(d.items) ? d.items : []).slice(0, 40) : [];
   const refs = new Set<string>();
   let droppedPrices = 0;
@@ -445,6 +467,7 @@ export function cleanDraft(kind: DocKind, d: RawDraft, ctx: CleanContext): Draft
       out.warnings.push(`“${BLOCK_LABEL[b.key as BlockKey]?.tr ?? b.key}” bölümünde ödeme yüzdesi / aşaması var. Ödeme koşulları yalnız plan ve “Ödeme koşulları” bölümünde olmalı; bu bölüm planla otomatik karşılaştırılmaz — kontrol edin.`);
     }
   }
+  if (datesFilled) out.warnings.push(`Öneride belgenin tarihi “[EKSİK]” olarak işaretlenmişti; ${datesFilled} yerde belgedeki tarih yazıldı.`);
   if (planFallback && !out.proposed.includes('payment')) out.proposed.push('payment');
   if (planFallback) out.warnings.push('Yapay zekâ kullanılabilir bir ödeme planı önermedi; standart öneri eklendi: %50 başlangıçta, %50 teslimde. Kontrol edin.');
   if (filledMarkers) out.warnings.push(`Önerilen metinde ${filledMarkers} “[EKSİK: ödeme …]” işareti var; ödeme planını da uygularsanız bu işaret planla doldurulur, uygulamazsanız kalır ve belge kesinleştirilemez.`);
