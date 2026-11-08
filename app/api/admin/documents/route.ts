@@ -2,11 +2,17 @@ import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
-import { addDaysIso, blockHeading, KIND_DEF, localId, newContent, sanitizeContent, todayIso, DOC_KINDS, QUOTE_STATES, type DocContent, type DocKind } from '@/lib/documents/model';
+import { addDaysIso, blockHeading, KIND_DEF, localId, newContent, sanitizeContent, todayIso, DOC_CURRENCIES, DOC_KINDS, QUOTE_STATES, type DocContent, type DocCurrency, type DocKind, type LineItem } from '@/lib/documents/model';
 import { bankChanges, docSettingsProblems, sanitizeDocSettings } from '@/lib/documents/settings';
 import { mailReady, senderAddress } from '@/lib/documents/emailSend';
 import { assess, buildSnapshot, contentOf, dbError, DOC_BUCKET, istanbulStamp, loadContext, recipientFromClient, selectedBanks, TEMPLATE_VERSION, type DocRow, type VersionRow, type VersionSnapshot } from '@/lib/documents/server';
 import { renderDocumentPdf } from '@/lib/documents/pdf';
+
+/** Fresh line ids for a copy; "included in" links follow their line. */
+function copyItems(items: LineItem[]): LineItem[] {
+  const ids = new Map(items.map((i) => [i.id, localId('i')]));
+  return items.map((i) => ({ ...i, id: ids.get(i.id) as string, includedIn: i.includedIn ? ids.get(i.includedIn) ?? '' : '' }));
+}
 
 /**
  * Yoca — Teklifler ve Belgeler API (admin only; every query runs as the
@@ -158,7 +164,9 @@ export async function POST(request: NextRequest) {
     const s = ctx.settings;
     const content = newContent(kind, {
       locale: body.locale === 'en' ? 'en' : body.locale === 'tr' ? 'tr' : s.defaultLocale,
-      currency: s.defaultCurrency, validityDays: s.validityDays, defaultTaxRate: s.defaultTaxRate,
+      // the currency chosen in "Yeni belge" (one currency per document); the settings default only when none was sent
+      currency: (DOC_CURRENCIES as readonly string[]).includes(body.currency as string) ? (body.currency as DocCurrency) : s.defaultCurrency,
+      validityDays: s.validityDays, defaultTaxRate: s.defaultTaxRate,
       signatory: { name: s.signatoryName, title: s.signatoryTitle },
     });
     let clientId: string | null = null;
@@ -217,7 +225,7 @@ export async function POST(request: NextRequest) {
       const base = newContent('proforma', { locale: q.locale, currency: q.currency, validityDays: ctx.settings.validityDays, defaultTaxRate: ctx.settings.defaultTaxRate });
       content = {
         ...base,
-        recipient: q.recipient, currency: q.currency, items: q.items.map((i) => ({ ...i, id: localId('i') })), payment: q.payment.map((p) => ({ ...p, id: localId('p') })),
+        recipient: q.recipient, currency: q.currency, items: copyItems(q.items), payment: q.payment.map((p) => ({ ...p, id: localId('p') })),
         deliveryTime: q.deliveryTime, bankAccountIds: q.bankAccountIds, projectName: q.projectName, projectId: q.projectId, reference: q.reference,
         signatory: q.signatory,
         blocks: [{ id: localId('b'), key: 'notes', heading: blockHeading('notes', q.locale), body: q.locale === 'tr'
@@ -230,7 +238,7 @@ export async function POST(request: NextRequest) {
       const today = todayIso();
       content.issueDate = today;
       if (KIND_DEF[row.kind].validity) content.validUntil = addDaysIso(today, ctx.settings.validityDays);
-      content.items = content.items.map((i) => ({ ...i, id: localId('i') }));
+      content.items = copyItems(content.items);
       content.blocks = content.blocks.map((b) => ({ ...b, id: localId('b') }));
       title = row.title ? `${row.title} (kopya)` : '';
     }
@@ -255,6 +263,8 @@ export async function POST(request: NextRequest) {
       if (!isUuid(body.clientId)) return json({ ok: false, error: 'Geçersiz müşteri.' }, 400);
       clientId = body.clientId;
     }
+    // An ÖRNEK (synthetic) document never points at a real client record.
+    if (content.sample && clientId) return json({ ok: false, error: 'Örnek (ÖRNEK işaretli) belge müşteri kaydına bağlanamaz. Önce müşteri bağlantısını kaldırın veya örnek işaretini kaldırın.' }, 409);
     const { total, missing } = assess(row.kind, content, ctx.issuer, title);
     const upd = await client.from('doc_documents')
       .update({ content, title, client_id: clientId, locale: content.locale, currency: content.currency, total })

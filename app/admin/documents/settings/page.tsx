@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Flash, PageHead, field, label, small } from '@/components/admin/ops/ui';
 import { docAction, loadList } from '@/lib/documents/client';
-import { DOC_CURRENCIES, localId, type Issuer } from '@/lib/documents/model';
+import { localId, type Issuer } from '@/lib/documents/model';
+import { CurrencyOptions } from '@/components/admin/documents/fields';
 import { docSettingsProblems, formatIban, ibanValid, type BankAccount, type DocSettings } from '@/lib/documents/settings';
 
 /**
@@ -66,7 +67,7 @@ export default function DocumentSettingsPage() {
       <section className="admin-card grid gap-4 p-4">
         <h2 className="text-[15px] font-extrabold">Varsayılanlar</h2>
         <div className="grid gap-3 sm:grid-cols-4">
-          <label className={label}>Para birimi<select className={field} value={value.defaultCurrency} onChange={(e) => set({ defaultCurrency: e.target.value as DocSettings['defaultCurrency'] })}>{DOC_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
+          <label className={label}>Para birimi<select className={field} value={value.defaultCurrency} onChange={(e) => set({ defaultCurrency: e.target.value as DocSettings['defaultCurrency'] })}><CurrencyOptions codes /></select></label>
           <label className={label}>Dil<select className={field} value={value.defaultLocale} onChange={(e) => set({ defaultLocale: e.target.value === 'en' ? 'en' : 'tr' })}><option value="tr">Türkçe</option><option value="en">English</option></select></label>
           <label className={label}>Teklif geçerliliği (gün)<input className={field} inputMode="numeric" value={String(value.validityDays)} onChange={(e) => set({ validityDays: Number(e.target.value.replace(/\D/g, '')) || 0 })} /></label>
           <label className={label}>Yeni kalemlerde KDV %<input className={field} inputMode="decimal" value={value.defaultTaxRate} onChange={(e) => set({ defaultTaxRate: e.target.value })} /></label>
@@ -88,7 +89,7 @@ export default function DocumentSettingsPage() {
             <label className={label}>Banka<input className={field} value={a.bank} onChange={(e) => setBank(i, { bank: e.target.value })} /></label>
             <label className={label}>Hesap sahibi<input className={field} value={a.holder} onChange={(e) => setBank(i, { holder: e.target.value })} /></label>
             <label className={`${label} sm:col-span-2`}>IBAN<input className={`${field} font-mono`} value={a.iban} onChange={(e) => setBank(i, { iban: e.target.value })} />{a.iban && <span className={`text-[12px] font-normal ${ibanValid(a.iban) ? 'text-yoca-green' : 'text-red-300'}`}>{ibanValid(a.iban) ? `Geçerli · ${formatIban(a.iban)}` : 'Kontrol hanesi tutmuyor'}</span>}</label>
-            <label className={label}>Para birimi<select className={field} value={a.currency} onChange={(e) => setBank(i, { currency: e.target.value })}><option value="">—</option>{DOC_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
+            <label className={label}>Para birimi<select className={field} value={a.currency} onChange={(e) => setBank(i, { currency: e.target.value })}><option value="">—</option><CurrencyOptions codes /></select></label>
             <label className={label}>SWIFT (isteğe bağlı)<input className={field} value={a.swift} onChange={(e) => setBank(i, { swift: e.target.value })} /></label>
             <label className={label}>Şube (isteğe bağlı)<input className={field} value={a.branch} onChange={(e) => setBank(i, { branch: e.target.value })} /></label>
             <div className="flex items-end"><button type="button" className={small} onClick={() => set({ bankAccounts: value.bankAccounts.filter((_, j) => j !== i) })}>Hesabı kaldır</button></div>

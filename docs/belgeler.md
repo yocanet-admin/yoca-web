@@ -115,7 +115,17 @@ Tutarları uygulama hesaplar; yapay zekâ hesaplamaz. Hesap kuruş cinsinden tam
 
 **Eksik fiyat:** Fiyatı boş kalem 0 sayılmaz. Genel toplam hesaplanmaz ve belge kesinleştirilemez.
 
-**Para birimi:** TRY, USD, EUR, GBP, AZN. Bir belgede tek para birimi kullanılır.
+**Para birimi:** TRY, USD, EUR (“Euro (EUR)”) seçicilerde önce; GBP ve AZN “Diğer para birimleri” altında seçilebilir kalır. Bir belgede tek para birimi kullanılır; “Yeni belge” penceresinde seçilir (seçilmezse Belge ayarlarındaki varsayılan). Döviz kuru altyapısı yoktur: tutar girilmiş bir belgede para birimi değiştirilirken yönetici açıkça seçer — “Tutarları aynen koru” (aynı sayılar, çevrim yapılmaz) veya “Fiyatları temizle”; “Kurla çevir” kullanılamaz olarak gösterilir.
+
+**Tek seferlik / tekrarlayan kalemler** (belge içeriğinde saklanır; migration yok)
+- **Adet / Süre** (eski “Miktar”; veri alanı yine `quantity` + `unit`, eski belgeler aynen basılır): tek seferlik kalemde adet ve birim birlikte okunur (“1 proje”, “1 paket”, “12 saat”). Aylık / yıllık kalemde Adet / Süre teklif edilen süredir (`term`: “6 ay”); birim dönemdir (ay / yıl), birim fiyat dönem başına tutardır ve süreyle çarpılmaz (miktar 1). Süre yazılmadıysa “süre belirtilmedi” yazar; 1 ay varsayılmaz. Faturalama sıklığı (“aylık faturalanır”) süreden ayrı gösterilir.
+- Her kalemin faturalaması vardır: tek seferlik (varsayılan; eski belgelerin tümü), aylık, yıllık. Tekrarlayan kalemde süre (ay/yıl; boşsa “süre belirtilmedi” yazar, tahmin edilmez) ve başlangıç yılı (1 = başlangıçtan, 2 = 2. yıldan itibaren yenileme) seçilir.
+- “Başka kaleme dahil” kalemin kendi fiyatı yoktur (ör. ilk yıl domain + hosting web sitesine dahil); PDF’te “Dahil” ve “… kalemine dahil” yazar, “fiyat eksik” sayılmaz.
+- 2. yıldan itibaren geçerli fiyat için “sabit fiyat (taahhüt)” veya “güncel tarifeye göre tahmini” seçilmeden belge kesinleştirilemez.
+- Genel toplam (listedeki tutar, ödeme planı, “Tek seferlik toplam”) yalnızca tek seferlik kalemlerden oluşur. Aylık ve yıllık / gelecek dönem kalemleri ayrı gruplarda, kendi dönem toplamlarıyla gösterilir (“Tekrarlayan ve sonraki dönem ücretleri”); tek seferlik toplama eklenmez. Aylık toplam (aylık kalemlerin toplamı, ay başına) ve yalnızca süre verilmişse “N aylık hizmet toplamı” gösterilir; 2. yıl yenilemesi ilk dönem toplamlarına girmez. Aylık birim fiyat, toplam aylık hizmet bedelidir. Ödeme planı tek seferlik toplam üzerinden hesaplanır (PDF’te ve panelde yazılır).
+- Teklif hazırlamak Operasyon hizmeti, borç veya yenileme kaydı oluşturmaz.
+
+**ÖRNEK belge:** kurgusal adlar içerebilir; PDF’te “ÖRNEK” ve “ÖRNEK belge · gerçek teklif değildir” yazar; kesinleştirilemez, gönderilemez, müşteri kaydına bağlanamaz.
 
 ## Kesinleştirme ve sürümler
 
@@ -144,7 +154,12 @@ Tutarları uygulama hesaplar; yapay zekâ hesaplamaz. Hesap kuruş cinsinden tam
 Mevcut sunucu altyapısı kullanılır: OpenAI anahtarı, model ayarı, aylık bütçe ve `ai_runs` kaydı. Tarayıcıya anahtar gitmez.
 
 Yapay zekânın yaptıkları:
-- **Taslak:** kapsam, teslimatlar, varsayımlar, kapsam dışı işler ve ödeme koşulları önerir. Kalemler fiyatsız gelir.
+- **Taslak (tüm teklif):** başlık, giriş, kalemler (faturalama, dahil ilişkisi, yenileme), kapsam, teslimatlar, varsayımlar, kapsam dışı, revizyon ve ödeme koşulları, ödeme planı (yalnızca tek seferlik toplam için), takvim, geçerlilik ve kapanış önerir. Kullanıcının vermediği ticari koşullar (revizyon sayısı, süre, ödeme yüzdeleri, geçerlilik) “Kontrol edilecek öneri” olarak işaretlenir.
+- **Fiyat önerisi:** yalnızca kullanıcı açıkça isterse (“Fiyatları da öner” veya “AI fiyat önerisi” seçeneği). Belgenin para biriminde, KDV hariç tahmini birim fiyatlar gelir; “AI fiyat önerisi — kontrol edilmeli” işaretlidir ve kontrol edilene kadar belge kesinleştirilemez. Kontrolü belgeyi düzenleyen yetkili kullanıcı yapar (“Fiyatı kontrol ettim”); fiyatı elle değiştirmek de kontrol sayılır (fiyat artık kullanıcının fiyatıdır). Yapay zekâ bir kalemin fiyatını yeniden yazarsa (kalemleri yeniden öner / yeniden uygula) o kalem yeniden “kontrol edilmeli” olur. “Piyasa / Türkiye ortalaması” iddiası öneriden çıkarılır; tahminin dayanağı ve varsayımları gösterilir. KDV oranı her zaman Belge ayarlarından gelir.
+- **Bölüm bazında yeniden yazma:** “Ne hazırlansın?” ile tek bölüm (ör. yalnızca revizyon koşulları, notlar, ödeme planı) istenir; sunucu yalnızca o bölümü döndürür, diğer alanlar ve elle yapılan değişiklikler değişmez.
+- **İnceleme ekranı:** her alan düzenlenebilir; seçilen bölümler veya hepsi uygulanır; boş öneri dolu alanı silmez; “Vazgeç” hiçbir şey yazmaz. Toplamlar uygulamanın hesaplama kurallarıyla gösterilir.
+- **Para birimi:** istek belgenin para birimini taşır (yoksa istek reddedilir; TRY’ye düşülmez). Talep başka bir para birimi geçiriyorsa “Para birimi çakışması” gösterilir ve fiyatlar onay verilmeden uygulanmaz.
+- **Gerçek / örnek:** müşteri kaydına bağlı belgede öneri alıcıya, firma veya iletişim bilgilerine dokunmaz; örnek taslak yalnızca müşteriye bağlı olmayan belgede, “ÖRNEK” işaretli kurgusal adlarla gelir ve CRM’e yazılmaz. Banka, IBAN, vergi, adres ve iletişim bilgisi uydurulmaz.
 - **Seçili metin:** kısaltır, resmîleştirir veya sadeleştirir.
 - **Çeviri:** TR ↔ EN.
 

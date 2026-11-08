@@ -15,10 +15,14 @@ import type { BankChange } from '@/lib/documents/settings';
 import { readDocBackup, writeDocBackup, type DocBackup } from '@/lib/documents/backup';
 import { getAdminClient } from '@/lib/adminClient';
 import {
-  BLOCK_LABEL, DOC_CURRENCIES, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, QUOTE_STATES, STATUS_LABEL,
-  blockHeading, localId, missingFor, newItem, type Block, type BlockKey, type DocContent, type LineItem, type PaymentStep, type QuoteState,
+  BILLING_LABEL, BLOCK_LABEL, CURRENCY_LABEL, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, QUOTE_STATES, STATUS_LABEL,
+  blockHeading, localId, missingFor, newItem, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PaymentStep, type QuoteState,
 } from '@/lib/documents/model';
 import { computeDocument, fmtMoney, fmtPct } from '@/lib/documents/calc';
+import { applyDraft, setBilling, changeCurrency, hasAmounts, pricesRequested, sampleRequested, sectionLabel, type DraftSuggestion } from '@/lib/documents/aiDraft';
+import { AiDraftReview, type ReviewApply } from '@/components/admin/documents/AiDraftReview';
+import { RecurringSummary } from '@/components/admin/documents/Recurring';
+import { CurrencyOptions, UnitField } from '@/components/admin/documents/fields';
 
 /**
  * Yoca — Teklifler ve Belgeler: editor.
@@ -35,15 +39,13 @@ import { computeDocument, fmtMoney, fmtPct } from '@/lib/documents/calc';
  *    payment plan, sections) instead of disabled fields; "Revize et" opens the
  *    editor again. PDF, preview and the version history stay one click away.
  * Each finalization is a new version and earlier PDFs stay.
+ *  - AI draft (quote / proforma): the request carries the document currency,
+ *    whether prices were asked for, sample mode and an optional single
+ *    section; the answer opens in a full review (AiDraftReview) where every
+ *    field is editable and only the selected sections are applied.
  */
 
 type Draft = { title: string; clientId: string | null; content: DocContent };
-type DraftSuggestion = {
-  title: string; subject: string; deliveryTime: string; missing: string[]; warnings: string[];
-  blocks: Array<{ key: string; heading: string; body: string }>;
-  items: Array<{ title: string; description: string; quantity: string; unit: string }>;
-  payment: Array<{ label: string; percent: number | null; due: string }>;
-};
 type LetterSuggestion = { title: string; salutation: string; body: string; closing: string; missing: string[]; warnings: string[] };
 type Rewrite = { blockId: string; start: number; end: number; original: string; text: string; changes: string[]; warnings: string[] };
 type Translation = { to: 'tr' | 'en'; title: string; subject: string; deliveryTime: string; blocks: Array<{ id: string; heading: string; body: string }>; items: Array<{ id: string; title: string; description: string; unit: string }>; payment: Array<{ id: string; label: string; due: string }> };
@@ -74,6 +76,10 @@ function EditorInner() {
   const [finalizeKey, setFinalizeKey] = useState<string | null>(null);
   const [brief, setBrief] = useState('');
   const [suggestion, setSuggestion] = useState<DraftSuggestion | null>(null);
+  const [aiScope, setAiScope] = useState('all');
+  const [aiPrices, setAiPrices] = useState(false);
+  const [aiSample, setAiSample] = useState(false);
+  const [curAsk, setCurAsk] = useState<DocCurrency | null>(null);
   const [facts, setFacts] = useState('');
   const [aiSubject, setAiSubject] = useState<string | null>(null);
   const [letterSug, setLetterSug] = useState<LetterSuggestion | null>(null);
@@ -148,7 +154,7 @@ function EditorInner() {
   const goneBanks = useMemo(() => (c && data?.ok && def.bank ? c.bankAccountIds.filter((x) => !data.settings.bankAccounts.some((a) => a.id === x)) : []), [c, data, def.bank]);
   const missing = useMemo(() => {
     if (!c || !data?.ok || !calc) return { blocking: [] as string[], warnings: [] as string[] };
-    const m = missingFor(kind, c, data.issuer, { title: draft?.title ?? '', missingPrices: def.items ? [...calc.totals.missingPrices, ...calc.totals.errors] : [], paymentProblem: def.payment ? calc.payment.problem : null });
+    const m = missingFor(kind, c, data.issuer, { title: draft?.title ?? '', missingPrices: def.items ? [...calc.issues.missingPrices, ...calc.issues.errors] : [], paymentProblem: def.payment ? calc.payment.problem : null });
     if (goneBanks.length) m.blocking.push(`Seçili ${goneBanks.length} banka hesabı Belge ayarlarında artık yok; banka bilgilerini yeniden seçin.`);
     return m;
   }, [c, data, calc, kind, def, draft?.title, goneBanks]);
@@ -212,41 +218,35 @@ function EditorInner() {
     set({ recipient: { ...c.recipient, ...recipientFrom(cl) } });
   };
 
+  const pricesAsked = def.items && (aiPrices || pricesRequested(brief));
+  const sampleAsked = aiSample || (!draft.clientId && sampleRequested(brief));
   const aiDraft = async () => {
     setBusy('ai'); setSuggestion(null);
-    const r = await aiAction<{ suggestion: DraftSuggestion }>({ mode: 'draft', kind, locale: c.locale, brief, recipient: c.recipient.company || c.recipient.name, projectName: c.projectName, requestKey: newKey() });
+    const r = await aiAction<{ suggestion: DraftSuggestion }>({
+      mode: 'draft', kind, locale: c.locale, brief, recipient: c.recipient.company || c.recipient.name, projectName: c.projectName, requestKey: newKey(),
+      id: doc.id, clientId: draft.clientId ?? null, currency: c.currency, prices: pricesAsked, sample: sampleAsked && !draft.clientId, scope: aiScope,
+      ...(aiScope !== 'all' ? { current: c, title: draft.title } : {}),
+    });
     setBusy(null);
     if (!r.ok || !r.suggestion) return setFlash({ tone: 'bad', text: r.error ?? 'Yapay zekâ önerisi alınamadı. Belgeniz değişmedi.' });
     setSuggestion(r.suggestion);
   };
 
-  const applySuggestion = (what: 'title' | 'blocks' | 'items' | 'payment' | 'delivery' | 'subject' | 'all', blockKey?: string) => {
+  const applyReview = (a: ReviewApply) => {
     if (!suggestion) return;
-    const next: Partial<DocContent> = {};
-    const nd: Partial<Draft> = {};
-    if ((what === 'title' || what === 'all') && suggestion.title) nd.title = suggestion.title;
-    if ((what === 'subject' || what === 'all') && suggestion.subject) next.subject = suggestion.subject;
-    if ((what === 'delivery' || what === 'all') && suggestion.deliveryTime) next.deliveryTime = suggestion.deliveryTime;
-    if (what === 'blocks' || what === 'all') {
-      const blocks = [...c.blocks];
-      for (const sb of suggestion.blocks.filter((b) => !blockKey || b.key === blockKey)) {
-        const i = blocks.findIndex((b) => b.key === sb.key);
-        if (i >= 0) blocks[i] = { ...blocks[i], heading: blocks[i].heading || sb.heading, body: sb.body };
-        else blocks.push({ id: localId('b'), key: sb.key as BlockKey, heading: sb.heading || blockHeading(sb.key as BlockKey, c.locale), body: sb.body });
-      }
-      next.blocks = blocks;
-    }
-    if ((what === 'items' || what === 'all') && suggestion.items.length) {
-      const keep = c.items.filter((i) => i.title.trim() || i.description.trim() || i.unitPrice.trim());
-      // Prices are never taken from the AI: every suggested line arrives without a price.
-      next.items = [...keep, ...suggestion.items.map((i) => ({ ...newItem(data.settings.defaultTaxRate), title: i.title, description: i.description, quantity: i.quantity || '1', unit: i.unit }))];
-    }
-    if ((what === 'payment' || what === 'all') && suggestion.payment.length) {
-      next.payment = suggestion.payment.map((p) => ({ id: localId('p'), label: p.label, mode: 'percent' as const, value: p.percent === null ? '' : String(p.percent).replace('.', ','), due: p.due }));
-    }
-    setDraft({ ...draft, ...nd, content: { ...c, ...next } });
+    const res = applyDraft({ title: draft.title, content: c }, suggestion, { ...a, defaultTaxRate: data.settings.defaultTaxRate, hasClient: Boolean(draft.clientId) });
+    setDraft({ ...draft, title: res.title, content: res.content });
     setDirty(true);
-    setFlash({ tone: 'ok', text: 'Öneri uygulandı (henüz kaydedilmedi). Eksik bilgileri ve fiyatları siz tamamlayın.' });
+    setSuggestion(null);
+    const names = res.applied.map((x) => sectionLabel(x, (k) => BLOCK_LABEL[k]?.tr ?? k));
+    setFlash({ tone: res.skipped.length ? 'warn' : 'ok', text: `Uygulandı (henüz kaydedilmedi): ${names.join(', ') || 'hiçbir bölüm'}.${res.content.items.some((i) => i.aiPrice) ? ' AI fiyat önerileri kontrol edilene kadar belge kesinleştirilemez.' : ''} ${res.skipped.map((x) => x.why).join(' ')}`.trim() });
+  };
+
+  /** Currency change: on a document with amounts the admin decides explicitly (no exchange-rate conversion exists). */
+  const pickCurrency = (to: DocCurrency) => {
+    if (to === c.currency) return;
+    if (hasAmounts(c)) { setCurAsk(to); return; }
+    set({ currency: to });
   };
 
   // Antetli yazı / Bilgilendirme: the AI writes only from the subject and the facts typed here.
@@ -384,6 +384,7 @@ function EditorInner() {
             {doc.final_version ? <Badge tone="info">Son sürüm v{doc.final_version}{doc.status === 'draft' ? ' · revizyon açık' : ''}</Badge> : null}
             {doc.quote_state ? <Badge tone={doc.quote_state === 'accepted' ? 'ok' : doc.quote_state === 'rejected' ? 'bad' : 'info'}>{QUOTE_STATE_LABEL[doc.quote_state]}</Badge> : null}
             {dirty ? <Badge tone="warn">Kaydedilmemiş değişiklik</Badge> : null}
+            {c.sample ? <Badge tone="warn">ÖRNEK — sentetik belge</Badge> : null}
           </div>
         </div>
         {editable ? (
@@ -446,7 +447,12 @@ function EditorInner() {
         </div>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+      {editable && suggestion && kind !== 'letter' && (
+        <AiDraftReview suggestion={suggestion} onChange={setSuggestion} doc={{ title: draft.title, content: c }} defaultTaxRate={data.settings.defaultTaxRate} hasClient={Boolean(draft.clientId)}
+          onApply={applyReview} onCancel={() => { setSuggestion(null); setFlash({ tone: 'ok', text: 'Öneri kapatıldı; belgede hiçbir şey değişmedi.' }); }} />
+      )}
+
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         {ro ? (
           <div className="min-w-0">
             <DocSummary kind={kind} content={finalV?.content ?? c} banks={finalV ? finalV.bankAccounts : data.settings.bankAccounts.filter((a) => c.bankAccountIds.includes(a.id))} sourceNumber={finalV?.sourceNumber ?? data.source?.number ?? null} />
@@ -465,7 +471,7 @@ function EditorInner() {
                 <label className={label}>Dil<select className={field} value={c.locale} onChange={(e) => set({ locale: e.target.value === 'en' ? 'en' : 'tr' })}><option value="tr">Türkçe</option><option value="en">English</option></select></label>
                 <label className={label}>Düzenleme tarihi<input type="date" className={field} value={c.issueDate} onChange={(e) => set({ issueDate: e.target.value })} /></label>
                 {def.validity && <label className={label}>Geçerlilik tarihi<input type="date" className={field} value={c.validUntil} onChange={(e) => set({ validUntil: e.target.value })} /></label>}
-                {def.items && <label className={label}>Para birimi<select className={field} value={c.currency} onChange={(e) => set({ currency: e.target.value as DocContent['currency'] })}>{DOC_CURRENCIES.map((x) => <option key={x} value={x}>{x}</option>)}</select></label>}
+                {def.items && <label className={label}>Para birimi<select className={field} value={c.currency} onChange={(e) => pickCurrency(e.target.value as DocCurrency)}><CurrencyOptions /></select></label>}
                 {def.period && <label className={label}>Rapor dönemi<input className={field} value={c.period} onChange={(e) => set({ period: e.target.value })} placeholder="Ör. 20 Ekim – 3 Kasım 2026" /></label>}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -482,6 +488,15 @@ function EditorInner() {
                 {def.subject && <label className={label}>Konu<input className={field} value={c.subject} onChange={(e) => set({ subject: e.target.value })} /></label>}
                 {def.deliveryTime && <label className={label}>Teslim süresi / takvim<input className={field} value={c.deliveryTime} onChange={(e) => set({ deliveryTime: e.target.value })} placeholder="Ör. Sözleşmeden sonra 6 hafta" /></label>}
               </div>
+              {(c.sample || !draft.clientId) && (
+                <label className="flex items-start gap-2 text-[13px] text-muted">
+                  <input type="checkbox" className="mt-1" checked={Boolean(c.sample)} disabled={Boolean(draft.clientId)} onChange={(e) => {
+                    if (!e.target.checked && !window.confirm('Örnek işaretini kaldırmak, belgedeki kurgusal adları ve bilgileri gerçek bilgilerle değiştirdiğiniz anlamına gelir. Devam edilsin mi?')) return;
+                    set({ sample: e.target.checked });
+                  }} />
+                  <span><b className="text-white">ÖRNEK (sentetik) belge</b> — kurgusal adlar içerebilir; PDF’te “ÖRNEK” yazar; kesinleştirilemez, gönderilemez, müşteri kaydına bağlanamaz.</span>
+                </label>
+              )}
             </Group>
 
             {/* Recipient */}
@@ -489,7 +504,7 @@ function EditorInner() {
               <p className="text-[12px] text-subtle">Belge alıcı bilgilerinin kendi kopyasını tutar; müşteri kaydı sonradan değişirse bu belge değişmez.</p>
               <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
                 <label className={label}>Müşteri kaydı
-                  <select className={field} value={draft.clientId ?? ''} onChange={(e) => setTop({ clientId: e.target.value || null })}>
+                  <select className={field} value={draft.clientId ?? ''} disabled={Boolean(c.sample)} title={c.sample ? 'Örnek belge müşteri kaydına bağlanamaz' : undefined} onChange={(e) => setTop({ clientId: e.target.value || null })}>
                     <option value="">Müşteriye bağlı değil</option>
                     {data.clients.filter((x) => !x.archived_at || x.id === draft.clientId).map((x) => <option key={x.id} value={x.id}>{clientDisplay(x)}</option>)}
                   </select>
@@ -516,26 +531,76 @@ function EditorInner() {
             {/* Line items */}
             {def.items && (
               <Group id="items" title="İş kalemleri" open={isOpen('items')} onToggle={toggle} tone={calc.totals.grand === null && calc.totals.lines.length ? 'warn' : undefined}
-                summary={`${calc.totals.lines.length} kalem · ${calc.totals.grand !== null ? `genel toplam ${money(calc.totals.grand)}` : calc.totals.lines.length ? 'fiyat eksik, toplam hesaplanmadı' : 'kalem yok'}`}>
+                summary={`${c.items.filter((x) => x.title.trim() || x.unitPrice.trim()).length} kalem · ${calc.totals.grand !== null ? `${calc.recurring.length ? 'tek seferlik' : 'genel'} toplam ${money(calc.totals.grand)}` : calc.totals.lines.length ? 'fiyat eksik, toplam hesaplanmadı' : 'tek seferlik kalem yok'}${calc.recurring.length ? ` · ${calc.recurring.length} tekrarlayan grup ayrı` : ''}`}>
                 <p className="text-[12px] text-subtle">Tutarları uygulama hesaplar (yarım yukarı yuvarlama, KDV her oran için bir kez). Fiyatı bilinmeyen kalemi boş bırakın; 0 yazmayın.</p>
                 {c.items.map((it, i) => {
-                  const line = calc.totals.lines.find((l) => l.id === it.id);
+                  const line = [...calc.totals.lines, ...calc.recurring.flatMap((g) => g.totals.lines)].find((l) => l.id === it.id);
                   return (
-                    <div key={it.id} className="grid gap-2 border border-line p-3">
+                    <div key={it.id} className="grid gap-2 border border-line p-3" data-testid={`item-${i}`}>
                       <div className="flex items-start gap-2">
                         <span className="mt-2 w-6 text-[12px] font-bold text-yoca-green">{String(i + 1).padStart(2, '0')}</span>
                         <div className="grid min-w-0 flex-1 gap-2">
                           <input aria-label={`${i + 1}. kalem başlığı`} className={field} value={it.title} onChange={(e) => setItem(i, { title: e.target.value })} placeholder="Kalem başlığı" />
                           <textarea aria-label={`${i + 1}. kalem açıklaması`} className={field} rows={2} value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} placeholder="Açıklama (isteğe bağlı)" />
                           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                            <label className={label}>Miktar<input className={field} inputMode="decimal" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} /></label>
-                            <label className={label}>Birim<input className={field} value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })} placeholder="adet, saat…" /></label>
-                            <label className={label}>Birim fiyat ({c.currency})<input className={`${field} ${!it.unitPrice.trim() && it.title.trim() ? '!border-yellow-400/70' : ''}`} inputMode="decimal" value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} placeholder="eksik" /></label>
+                            {(() => {
+                              // recurring line: "Adet / Süre" is the offered duration (term); the unit is the period
+                              const rec = !it.includedIn && (it.billing ?? 'once') !== 'once';
+                              return <>
+                                <label className={label}>Adet / Süre{rec ? ` (${BILLING_LABEL[it.billing ?? 'once'].per.tr})` : ''}
+                                  {rec
+                                    ? <input className={`${field} ${!it.term ? '!border-yellow-400/70' : ''}`} inputMode="numeric" value={it.term ?? ''} onChange={(e) => setItem(i, { term: e.target.value.replace(/\D/g, '').slice(0, 3) })} placeholder="belirtilmedi" />
+                                    : <input className={field} inputMode="decimal" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} />}
+                                </label>
+                                <label className={label}>Birim<UnitField className={field} value={it.unit} fixed={rec ? BILLING_LABEL[it.billing ?? 'once'].per.tr : undefined} onChange={(v) => setItem(i, { unit: v })} /></label>
+                              </>;
+                            })()}
+                            <label className={label}>Birim fiyat ({c.currency}{it.includedIn ? '' : (it.billing ?? 'once') !== 'once' ? ` / ${BILLING_LABEL[it.billing ?? 'once'].per.tr}` : ''})<input className={`${field} ${(!it.unitPrice.trim() && it.title.trim() && !it.includedIn) || it.aiPrice ? '!border-yellow-400/70' : ''}`} inputMode="decimal" value={it.includedIn ? '' : it.unitPrice} disabled={Boolean(it.includedIn)} onChange={(e) => setItem(i, { unitPrice: e.target.value, aiPrice: false })} placeholder={it.includedIn ? 'dahil' : 'eksik'} /></label>
                             <label className={label}>İndirim %<input className={field} inputMode="decimal" value={it.discountPct} onChange={(e) => setItem(i, { discountPct: e.target.value })} placeholder="0" /></label>
                             <label className={label}>KDV %<input className={field} inputMode="decimal" value={it.taxRate} onChange={(e) => setItem(i, { taxRate: e.target.value })} /></label>
                           </div>
+                          <div className="grid gap-2 sm:grid-cols-5">
+                            <label className={label}>Faturalama
+                              <select className={field} value={it.includedIn ? 'included' : it.billing ?? 'once'} onChange={(e) => {
+                                const v = e.target.value;
+                                const target = c.items.find((x) => x.id !== it.id && !x.includedIn && x.title.trim());
+                                set({ items: c.items.map((x, j) => (j === i ? setBilling(x, v as Billing | 'included', target?.id ?? '') : x)) });
+                              }}>
+                                <option value="once">{BILLING_LABEL.once.tr}</option><option value="monthly">{BILLING_LABEL.monthly.tr}</option><option value="yearly">{BILLING_LABEL.yearly.tr}</option>
+                                <option value="included">Dahil</option>
+                              </select>
+                            </label>
+                            {it.includedIn !== undefined && it.includedIn !== '' ? (
+                              <label className={`${label} sm:col-span-4`}>Dahil olduğu kalem
+                                <select className={field} value={it.includedIn} onChange={(e) => setItem(i, { includedIn: e.target.value })}>
+                                  {!c.items.some((x) => x.id === it.includedIn) && <option value={it.includedIn}>(bulunamadı — seçin)</option>}
+                                  {c.items.filter((x) => x.id !== it.id && !x.includedIn).map((x, j) => <option key={x.id} value={x.id}>{x.title || `${j + 1}. kalem`}</option>)}
+                                </select>
+                              </label>
+                            ) : (it.billing ?? 'once') !== 'once' ? <>
+                              <label className={label}>Başlangıç yılı
+                                <select className={field} value={String(it.startYear ?? 1)} onChange={(e) => setItem(i, { startYear: Number(e.target.value) })}>
+                                  <option value="1">1. yıldan</option><option value="2">2. yıldan</option><option value="3">3. yıldan</option>
+                                </select>
+                              </label>
+                              {(it.startYear ?? 1) > 1 && (
+                                <label className={label}>Fiyatın niteliği
+                                  <select className={field} value={it.priceBasis ?? ''} onChange={(e) => setItem(i, { priceBasis: e.target.value === 'fixed' ? 'fixed' : e.target.value === 'estimate' ? 'estimate' : '' })}>
+                                    <option value="">Seçin</option><option value="estimate">Tahmini (güncel tarife)</option><option value="fixed">Sabit (taahhüt)</option>
+                                  </select>
+                                </label>
+                              )}
+                            </> : null}
+                          </div>
+                          {it.aiPrice && it.unitPrice.trim() && !it.includedIn && (
+                            <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                              <Badge tone="warn">AI fiyat önerisi — kontrol edilmeli</Badge>
+                              <button type="button" className={small} onClick={() => setItem(i, { aiPrice: false })}>Fiyatı kontrol ettim</button>
+                            </div>
+                          )}
                           <p className="text-[12px] text-muted">
-                            {line?.error ? <span className="text-red-300">{line.error}</span> : line?.missingPrice ? <span className="text-yellow-200">Fiyat eksik — toplam hesaplanmaz.</span> : line?.net !== null && line?.net !== undefined ? <>Tutar: <b className="text-white">{money(line.net)}</b>{line.discount ? ` (indirim ${money(line.discount)})` : ''}</> : null}
+                            {line?.included ? <span className="text-subtle">Dahil — ayrı fiyatı yok, toplama eklenmez.</span> : line?.error ? <span className="text-red-300">{line.error}</span> : line?.missingPrice ? <span className="text-yellow-200">Fiyat eksik — toplam hesaplanmaz.</span> : line?.net !== null && line?.net !== undefined ? <>Tutar: <b className="text-white">{money(line.net)}</b>{(it.billing ?? 'once') !== 'once' ? ` / ${BILLING_LABEL[it.billing ?? 'once'].per.tr}` : ''}{line.discount ? ` (indirim ${money(line.discount)})` : ''}</> : null}
+                            {!it.includedIn && it.billing === 'monthly' ? <span className="block text-subtle">Aylık birim fiyat, toplam aylık hizmet bedelidir (süreyle çarpılmaz).</span> : null}
                           </p>
                         </div>
                         <div className="flex flex-col gap-1">
@@ -552,8 +617,9 @@ function EditorInner() {
                   <div className="flex justify-between gap-10"><span className="text-muted">Ara toplam</span><span className="tabular-nums">{money(calc.totals.subtotal)}</span></div>
                   {calc.totals.discount > BigInt(0) && <div className="flex justify-between gap-10"><span className="text-muted">İndirim</span><span className="tabular-nums">−{money(calc.totals.discount)}</span></div>}
                   {calc.totals.taxes.map((t) => <div key={String(t.rateBp)} className="flex justify-between gap-10"><span className="text-muted">KDV %{fmtPct(t.rateBp)} <span className="text-subtle">(matrah {money(t.base)})</span></span><span className="tabular-nums">{money(t.tax)}</span></div>)}
-                  <div className="flex justify-between gap-10 border-t border-line pt-1 font-extrabold"><span>Genel toplam</span><span className="tabular-nums">{calc.totals.grand !== null ? money(calc.totals.grand) : <span className="text-yellow-200">hesaplanamadı</span>}</span></div>
+                  <div className="flex justify-between gap-10 border-t border-line pt-1 font-extrabold"><span>{calc.recurring.length ? 'Tek seferlik toplam' : 'Genel toplam'}</span><span className="tabular-nums" data-testid="once-total">{calc.totals.grand !== null ? money(calc.totals.grand) : <span className="text-yellow-200">hesaplanamadı</span>}</span></div>
                 </div>
+                <RecurringSummary groups={calc.recurring} currency={c.currency} />
               </Group>
             )}
 
@@ -561,7 +627,7 @@ function EditorInner() {
             {def.payment && (
               <Group id="payment" title="Ödeme planı" open={isOpen('payment')} onToggle={toggle} tone={calc.payment.problem ? 'warn' : undefined}
                 summary={c.payment.length ? `${c.payment.length} adım · ${calc.payment.problem ? 'toplamla uyuşmuyor' : 'toplamla uyumlu'}` : 'adım yok'}>
-                <p className="text-[12px] text-subtle">Yüzdeler toplamı %100 olduğunda son adım kuruş farkını alır. Proforma tahsilat kaydı değildir; Operasyon ödemelerine dokunmaz.</p>
+                <p className="text-[12px] text-subtle">Yüzdeler toplamı %100 olduğunda son adım kuruş farkını alır. {calc.recurring.length ? <b className="text-white">Ödeme planı tek seferlik toplam üzerinden{calc.totals.grand !== null ? ` (${money(calc.totals.grand)})` : ''}; aylık / yıllık ücretler bu plana girmez, kendi dönemlerinde faturalanır.</b> : 'Plan tek seferlik toplam üzerinden hesaplanır.'} Teklif / proforma tahsilat kaydı değildir; Operasyon hizmeti, borç veya yenileme kaydı oluşturmaz.</p>
                 {c.payment.map((p, i) => {
                   const row = calc.payment.rows.find((r) => r.id === p.id);
                   return (
@@ -658,7 +724,7 @@ function EditorInner() {
         )}
 
         {/* Side column */}
-        <aside className="grid content-start gap-5">
+        <aside className="grid min-w-0 content-start gap-5">
           {editable && (
             <section className="admin-card grid gap-3 p-4">
               <button type="button" className="flex items-center justify-between text-left" onClick={() => setShowAi(!showAi)} aria-expanded={showAi}>
@@ -685,23 +751,34 @@ function EditorInner() {
                 </div>
               )}
               {showAi && kind !== 'letter' && <>
-                <p className="text-[12px] text-subtle">Kısa bir açıklama yazın. Öneri yalnızca metin içerir: fiyat, vergi oranı, şirket veya banka bilgisi yazmaz; bilmediği şeyleri “[EKSİK: …]” olarak işaretler. Hiçbir şey siz uygulamadan belgeye girmez.</p>
-                <textarea className={field} rows={5} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="Ör. Bu müşteri için marka kimliği ve iki dilli web sitesi teklifi hazırla. Süre altı hafta, iki revizyon, ödeme yüzde 50 başlangıçta." />
-                <button type="button" className="admin-btn admin-btn-primary" disabled={!!busy || brief.trim().length < 10} onClick={aiDraft}>{busy === 'ai' ? 'Hazırlanıyor…' : 'Taslak öner'}</button>
-                {suggestion && (
-                  <div className="grid gap-2 border border-yoca-lime/40 bg-yoca-lime/5 p-3 text-[13px]">
-                    <p className="font-bold">Öneri</p>
-                    {suggestion.warnings.map((w) => <p key={w} className="text-yellow-200">{w}</p>)}
-                    {suggestion.missing.length > 0 && <div><p className="font-semibold text-yellow-100">Sizin tamamlamanız gerekenler</p><ul className="list-disc ps-5 text-yellow-100">{suggestion.missing.map((m) => <li key={m}>{m}</li>)}</ul></div>}
-                    {suggestion.title && <div className="flex items-start justify-between gap-2"><p><span className="text-subtle">Başlık:</span> {suggestion.title}</p><button type="button" className={small} onClick={() => applySuggestion('title')}>Uygula</button></div>}
-                    {suggestion.subject && <div className="flex items-start justify-between gap-2"><p><span className="text-subtle">Konu:</span> {suggestion.subject}</p><button type="button" className={small} onClick={() => applySuggestion('subject')}>Uygula</button></div>}
-                    {suggestion.blocks.map((b) => <div key={b.key} className="grid gap-1 border-t border-line pt-2"><div className="flex items-center justify-between gap-2"><p className="font-semibold">{b.heading || BLOCK_LABEL[b.key as BlockKey]?.tr}</p><button type="button" className={small} onClick={() => applySuggestion('blocks', b.key)}>Uygula</button></div><p className="whitespace-pre-wrap text-muted">{b.body}</p></div>)}
-                    {suggestion.items.length > 0 && <div className="grid gap-1 border-t border-line pt-2"><div className="flex items-center justify-between gap-2"><p className="font-semibold">Kalemler ({suggestion.items.length}, fiyatsız)</p><button type="button" className={small} onClick={() => applySuggestion('items')}>Ekle</button></div><ul className="list-disc ps-5 text-muted">{suggestion.items.map((i) => <li key={i.title}>{i.title} — {i.quantity} {i.unit}</li>)}</ul></div>}
-                    {suggestion.payment.length > 0 && <div className="grid gap-1 border-t border-line pt-2"><div className="flex items-center justify-between gap-2"><p className="font-semibold">Ödeme planı</p><button type="button" className={small} onClick={() => applySuggestion('payment')}>Uygula</button></div><ul className="list-disc ps-5 text-muted">{suggestion.payment.map((p) => <li key={p.label}>{p.percent === null ? 'oran yok' : `%${p.percent}`} · {p.label} · {p.due}</li>)}</ul></div>}
-                    {suggestion.deliveryTime && <div className="flex items-start justify-between gap-2 border-t border-line pt-2"><p><span className="text-subtle">Süre:</span> {suggestion.deliveryTime}</p><button type="button" className={small} onClick={() => applySuggestion('delivery')}>Uygula</button></div>}
-                    <div className="flex gap-2 border-t border-line pt-2"><button type="button" className="admin-btn" onClick={() => applySuggestion('all')}>Hepsini uygula</button><button type="button" className="admin-btn" onClick={() => setSuggestion(null)}>Kapat</button></div>
-                  </div>
+                <p className="text-[12px] text-subtle">Kısa bir açıklama yazın. Hiçbir şey siz incelemeden ve “Uygula” demeden belgeye girmez; kaydetme, kesinleştirme ve gönderme sizdedir. Vergi oranı, şirket ve banka bilgisi yazmaz; bilmediği şeyleri “[EKSİK: …]” olarak işaretler.</p>
+                {def.items && <p className="text-[12px] text-muted">Para birimi: <b className="text-white">{CURRENCY_LABEL[c.currency]}</b> — öneri bu para biriminde hazırlanır; yapay zekâ değiştirmez.</p>}
+                <label className={label}>Ne hazırlansın?
+                  <select className={field} value={aiScope} onChange={(e) => setAiScope(e.target.value)}>
+                    <option value="all">Tüm teklif</option>
+                    <option value="title">Yalnızca başlık</option>
+                    {[...def.blocks, ...(def.items ? (['terms'] as BlockKey[]) : [])].map((k) => <option key={k} value={`block:${k}`}>Yalnızca {BLOCK_LABEL[k].tr.toLocaleLowerCase('tr')}</option>)}
+                    {def.items && <option value="items">Yalnızca kalemler{pricesAsked ? ' ve fiyatlar' : ''}</option>}
+                    {def.payment && <option value="payment">Yalnızca ödeme planı (ve ödeme koşulları)</option>}
+                    {def.deliveryTime && <option value="deliveryTime">Yalnızca takvim / teslim süresi</option>}
+                    {def.validity && <option value="validity">Yalnızca geçerlilik</option>}
+                    <option value="closing">Yalnızca kapanış cümlesi</option>
+                  </select>
+                </label>
+                {aiScope !== 'all' && <p className="text-[12px] text-subtle">Yalnızca seçilen bölüm önerilir; diğer alanlar ve elle yaptığınız değişiklikler değişmez.</p>}
+                <textarea aria-label="Yapay zekâ için açıklama" className={field} rows={5} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder={aiScope === 'all' ? 'Ör. Marka kimliği, web sitesi ve sosyal medya yönetimi için ayrı kalemlerle teklif hazırla. Marka kimliği ve web sitesi tek seferlik; sosyal medya aylık. Fiyatları da öner.' : 'Ör. Revizyon koşullarını üç tura çıkar. / Notları kısalt. / Ödemeyi üç adıma böl.'} />
+                {def.items && (
+                  <label className="flex items-start gap-2 text-[13px] text-muted">
+                    <input type="checkbox" className="mt-1" checked={pricesAsked} disabled={pricesRequested(brief)} onChange={(e) => setAiPrices(e.target.checked)} />
+                    <span>AI fiyat önerisi de hazırlasın {pricesRequested(brief) ? <span className="text-subtle">(açıklamanızda fiyat istendi)</span> : null}<br /><span className="text-[12px] text-subtle">Tahminidir, canlı piyasa araştırması değildir; her fiyat “kontrol edilmeli” işaretiyle gelir. KDV belge ayarlarından.</span></span>
+                  </label>
                 )}
+                <label className="flex items-start gap-2 text-[13px] text-muted">
+                  <input type="checkbox" className="mt-1" checked={sampleAsked && !draft.clientId} disabled={Boolean(draft.clientId) || (!aiSample && sampleRequested(brief))} onChange={(e) => setAiSample(e.target.checked)} />
+                  <span>ÖRNEK taslak (kurgusal adlar){draft.clientId ? <span className="text-subtle"> — belge müşteri kaydına bağlı; gerçek müşteri bilgileri değiştirilmez</span> : null}<br /><span className="text-[12px] text-subtle">“ÖRNEK” işaretlenir, kesinleştirilemez, müşteri kaydına yazılmaz.</span></span>
+                </label>
+                <button type="button" className="admin-btn admin-btn-primary" disabled={!!busy || brief.trim().length < 10} onClick={aiDraft}>{busy === 'ai' ? 'Hazırlanıyor…' : aiScope === 'all' ? 'Taslak öner' : 'Bu bölümü yeniden öner'}</button>
+                {suggestion && <p className="text-[12px] text-yoca-lime">Öneri hazır: sayfanın üstündeki “AI taslak önerisi” bölümünde inceleyin.</p>}
               </>}
               {showAi && <>
                 <div className="grid gap-2 border-t border-line pt-3">
@@ -815,6 +892,18 @@ function EditorInner() {
             onClose={() => { setMailing(false); void refreshEmails(); }} onSent={() => void refreshEmails()} />
         );
       })()}
+      {curAsk && (
+        <div role="dialog" aria-modal="true" aria-labelledby="cur-h" className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4" onKeyDown={(e) => { if (e.key === 'Escape') setCurAsk(null); }}>
+          <div className="admin-card grid w-full max-w-lg gap-3 p-5 text-[13px]">
+            <h2 id="cur-h" className="text-lg font-extrabold">Para birimi: {CURRENCY_LABEL[c.currency]} → {CURRENCY_LABEL[curAsk]}</h2>
+            <p className="text-muted">Bu belgede tutar girilmiş ({c.items.filter((x) => x.unitPrice.trim()).length} kalemde fiyat). Panelde döviz kuru altyapısı yok: tutarlar <b className="text-white">çevrilemez</b>. Ne yapılacağını siz seçin.</p>
+            <button type="button" className="admin-btn justify-self-start" disabled title="Kur çevrimi bu panelde yok">Kurla çevir (kullanılamıyor — kur altyapısı yok)</button>
+            <button type="button" autoFocus className="admin-btn justify-self-start" onClick={() => { set({ ...changeCurrency(c, curAsk, 'keep') }); setCurAsk(null); setFlash({ tone: 'warn', text: `Para birimi ${curAsk} oldu; tutarlar aynı sayılarla korundu (çevrilmedi). Fiyatları kontrol edin.` }); }}>Tutarları aynen koru (yalnızca para birimi değişir; çevrim yapılmaz)</button>
+            <button type="button" className="admin-btn justify-self-start" onClick={() => { set({ ...changeCurrency(c, curAsk, 'clear') }); setCurAsk(null); setFlash({ tone: 'warn', text: `Para birimi ${curAsk} oldu; fiyatlar ve tutarlı ödeme adımları temizlendi. Yeni para biriminde girin.` }); }}>Fiyatları temizle, yeni para biriminde gireceğim</button>
+            <button type="button" className="admin-btn justify-self-start" onClick={() => setCurAsk(null)}>Vazgeç ({c.currency} kalsın)</button>
+          </div>
+        </div>
+      )}
       {bankAsk && (
         <BankDecision number={doc.number} version={bankAsk.version} changes={bankAsk.changes} busy={!!busy} canRevise={doc.status === 'final' && bankAsk.version === doc.final_version}
           onClose={() => setBankAsk(null)}

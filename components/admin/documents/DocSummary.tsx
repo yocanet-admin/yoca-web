@@ -1,8 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { computeDocument, fmtMoney, fmtPct, fmtQty, parseMoney } from '@/lib/documents/calc';
-import { BLOCK_LABEL, KIND_DEF, KIND_LABEL, bodyParts, type DocContent, type DocKind } from '@/lib/documents/model';
+import { computeDocument, fmtMoney, fmtPct, parseMoney, quantityText } from '@/lib/documents/calc';
+import { BLOCK_LABEL, CURRENCY_LABEL, KIND_DEF, KIND_LABEL, billingText, bodyParts, type DocContent, type DocKind } from '@/lib/documents/model';
+import { RecurringSummary } from '@/components/admin/documents/Recurring';
 import { formatIban, type BankAccount } from '@/lib/documents/settings';
 import { fmtDate } from '@/components/admin/ops/ui';
 
@@ -49,7 +50,8 @@ function Body({ text, list }: { text: string; list: boolean }) {
 
 export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: DocKind; content: DocContent; banks: BankAccount[]; sourceNumber?: string | null }) {
   const def = KIND_DEF[kind];
-  const { totals, payment } = computeDocument(c);
+  const { totals, payment, recurring } = computeDocument(c);
+  const lines = [...totals.lines, ...recurring.flatMap((g) => g.totals.lines)].sort((a, b) => a.index - b.index);
   const money = (m: bigint) => fmtMoney(m, c.currency, 'tr');
   const r = c.recipient;
   const blocks = c.blocks.filter((b) => b.body.trim());
@@ -61,7 +63,8 @@ export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: Do
           <Fact k="Tür" v={KIND_LABEL[kind].tr} />
           <Fact k="Düzenleme" v={fmtDate(c.issueDate)} />
           {def.validity && c.validUntil ? <Fact k="Geçerlilik" v={fmtDate(c.validUntil)} /> : null}
-          {def.items ? <Fact k="Para birimi" v={c.currency} /> : null}
+          {def.items ? <Fact k="Para birimi" v={CURRENCY_LABEL[c.currency]} /> : null}
+          {c.sample ? <Fact k="Örnek" v="ÖRNEK (sentetik) belge — gerçek teklif değildir" /> : null}
           <Fact k="Dil" v={c.locale === 'tr' ? 'Türkçe' : 'English'} />
           {c.projectName ? <Fact k="Proje" v={c.projectName} /> : null}
           {def.period && c.period ? <Fact k="Dönem" v={c.period} /> : null}
@@ -83,21 +86,21 @@ export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: Do
       </Card>
 
       {def.items && (
-        <Card title="Kalemler" aside={<span className="text-[12px] text-subtle">{totals.lines.length} kalem</span>}>
+        <Card title="Kalemler" aside={<span className="text-[12px] text-subtle">{lines.length} kalem</span>}>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[620px] text-[13px]">
               <thead className="text-left text-[11px] uppercase tracking-[0.08em] text-subtle">
-                <tr><th className="py-1.5 pe-2">#</th><th className="py-1.5 pe-2">Açıklama</th><th className="py-1.5 pe-2 text-right">Miktar</th><th className="py-1.5 pe-2 text-right">Birim fiyat</th>{showDisc && <th className="py-1.5 pe-2 text-right">İnd.</th>}<th className="py-1.5 pe-2 text-right">KDV</th><th className="py-1.5 text-right">Tutar</th></tr>
+                <tr><th className="py-1.5 pe-2">#</th><th className="py-1.5 pe-2">Açıklama</th><th className="py-1.5 pe-2 text-right">Adet / Süre</th><th className="py-1.5 pe-2 text-right">Birim fiyat</th>{showDisc && <th className="py-1.5 pe-2 text-right">İnd.</th>}<th className="py-1.5 pe-2 text-right">KDV</th><th className="py-1.5 text-right">Tutar</th></tr>
               </thead>
               <tbody>
-                {totals.lines.map((l) => {
+                {lines.map((l) => {
                   const it = c.items[l.index];
                   return (
                     <tr key={l.id} className="border-t border-line align-top">
                       <td className="py-2 pe-2 font-bold text-yoca-green">{String(l.index + 1).padStart(2, '0')}</td>
-                      <td className="py-2 pe-2"><p className="font-semibold text-white">{it.title}</p>{it.description ? <p className="mt-0.5 whitespace-pre-wrap text-[12px] text-muted">{it.description}</p> : null}</td>
-                      <td className="whitespace-nowrap py-2 pe-2 text-right tabular-nums text-muted">{fmtQty(it.quantity)}{it.unit ? ` ${it.unit}` : ''}</td>
-                      <td className="whitespace-nowrap py-2 pe-2 text-right tabular-nums text-muted">{l.missingPrice ? <span className="text-yellow-200">eksik</span> : money(parseMoney(it.unitPrice) ?? BigInt(0))}</td>
+                      <td className="py-2 pe-2"><p className="font-semibold text-white">{it.title}</p>{it.description ? <p className="mt-0.5 whitespace-pre-wrap text-[12px] text-muted">{it.description}</p> : null}<p className="mt-0.5 text-[11px] text-subtle">{billingText(it, c.items)}</p></td>
+                      <td className="whitespace-nowrap py-2 pe-2 text-right tabular-nums text-muted">{quantityText(it)}</td>
+                      <td className="whitespace-nowrap py-2 pe-2 text-right tabular-nums text-muted">{l.included ? 'Dahil' : l.missingPrice ? <span className="text-yellow-200">eksik</span> : money(parseMoney(it.unitPrice) ?? BigInt(0))}</td>
                       {showDisc && <td className="py-2 pe-2 text-right tabular-nums text-muted">{it.discountPct && it.discountPct !== '0' ? `%${it.discountPct}` : '—'}</td>}
                       <td className="py-2 pe-2 text-right tabular-nums text-muted">{l.taxRateBp !== null ? `%${fmtPct(l.taxRateBp)}` : ''}</td>
                       <td className="whitespace-nowrap py-2 text-right font-semibold tabular-nums text-white">{l.net !== null ? money(l.net) : '—'}</td>
@@ -111,13 +114,15 @@ export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: Do
             <div className="flex justify-between gap-10"><span className="text-muted">Ara toplam</span><span className="tabular-nums">{money(totals.subtotal)}</span></div>
             {totals.discount > BigInt(0) && <div className="flex justify-between gap-10"><span className="text-muted">İndirim</span><span className="tabular-nums">−{money(totals.discount)}</span></div>}
             {totals.taxes.map((t) => <div key={String(t.rateBp)} className="flex justify-between gap-10"><span className="text-muted">KDV %{fmtPct(t.rateBp)} <span className="text-subtle">(matrah {money(t.base)})</span></span><span className="tabular-nums">{money(t.tax)}</span></div>)}
-            <div className="flex justify-between gap-10 border-t border-line pt-1 text-[15px] font-extrabold"><span>Genel toplam</span><span className="tabular-nums">{totals.grand !== null ? money(totals.grand) : <span className="text-yellow-200">hesaplanamadı</span>}</span></div>
+            <div className="flex justify-between gap-10 border-t border-line pt-1 text-[15px] font-extrabold"><span>{recurring.length ? 'Tek seferlik toplam' : 'Genel toplam'}</span><span className="tabular-nums">{totals.grand !== null ? money(totals.grand) : <span className="text-yellow-200">hesaplanamadı</span>}</span></div>
           </div>
+          <RecurringSummary groups={recurring} currency={c.currency} />
         </Card>
       )}
 
       {def.payment && (payment.rows.length > 0 || (def.deliveryTime && c.deliveryTime)) && (
         <Card title="Ödeme planı">
+          {payment.rows.length > 0 && recurring.length > 0 && totals.grand !== null ? <p className="text-[12px] text-subtle">Ödeme planı tek seferlik toplam üzerinden ({money(totals.grand)}); aylık / yıllık ücretler bu plana girmez.</p> : null}
           {payment.rows.length > 0 ? (
             <ul className="grid gap-1 text-[13px]">
               {payment.rows.map((p) => (

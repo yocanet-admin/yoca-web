@@ -12,7 +12,7 @@ export function Group({ id, title, summary, open, onToggle, children, tone, acti
   tone?: 'warn'; actions?: ReactNode;
 }) {
   return (
-    <section className={`admin-card grid ${open ? 'gap-4' : 'gap-0'} p-0`} aria-labelledby={`g-${id}`}>
+    <section className={`admin-card grid min-w-0 grid-cols-1 ${open ? 'gap-4' : 'gap-0'} p-0`} aria-labelledby={`g-${id}`}>
       <div className="flex flex-wrap items-center gap-2 px-4 py-3">
         <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-expanded={open} aria-controls={`gp-${id}`} onClick={() => onToggle(id)}>
           <span aria-hidden className={`inline-block w-3 text-subtle transition-transform ${open ? 'rotate-90' : ''}`}>›</span>
