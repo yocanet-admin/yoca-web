@@ -98,9 +98,9 @@ function draftSchema(kind: DocKind) {
             properties: {
               ref: str('Short unique key of this line, e.g. "web"'),
               title: { type: 'string' }, description: { type: 'string' },
-              quantity: str('Decimal, e.g. "1"'), unit: str('e.g. "paket", "proje", "ay", "yıl"'),
+              quantity: str('"Adet / Süre" of a one-time line, decimal (e.g. "1" proje, "12" saat). Always "1" for monthly / yearly lines (their duration goes in term).'), unit: str('e.g. "proje", "paket", "saat", "adet"; "ay" for monthly and "yıl" for yearly lines'),
               billing: { type: 'string', enum: [...BILLINGS], description: 'once = one-time; monthly = billed every month (unit price per month); yearly = billed every year (unit price per year)' },
-              term: str('Recurring lines only: number of months/years ONLY if the brief states it, else empty'),
+              term: str('Recurring lines only: the offered duration in months/years ONLY if the brief states it (e.g. "6"), else empty. Never assume 1.'),
               startYear: { type: 'integer', description: '1 = billed from the start; 2 = a renewal billed from year 2 (never part of today\'s total)' },
               includedIn: str('ref of the line this one is included in (e.g. first-year domain and hosting included in the website), else empty. An included line has no price.'),
               unitPrice: str('ONLY when prices were requested: estimated unit price, plain decimal number in the document currency, VAT excluded, e.g. "85000". Else empty.'),
@@ -173,7 +173,7 @@ export function draftDocument(model: string, input: DraftInput): Promise<OpenAIR
       SCOPE_TEXT(input.scope) +
       (def.items
         ? `Document currency: ${input.currency}. It was chosen by the user; you cannot change it. If the brief asks for another currency, put that currency in requestedCurrency (still write unitPrice in ${input.currency}).\n` +
-          'Propose line items for the work described (scope pieces a client can recognise), each with a one- or two-sentence description, quantity and unit. Billing: set "once" for one-time work, "monthly" for monthly services (unit price per month, quantity 1, unit "ay"), "yearly" for yearly fees. Never merge one-time, monthly and future-yearly work into one line. ' +
+          'Propose line items for the work described (scope pieces a client can recognise), each with a one- or two-sentence description, quantity and unit (read together as "Adet / Süre": brand identity "1 proje" or "1 paket", website "1 proje", hourly work in hours "12 saat"). Billing: set "once" for one-time work, "monthly" for monthly services (unit price per month, quantity 1, unit "ay", the offered number of months in term), "yearly" for yearly fees (unit "yıl"). A duration ("6 ay") is not a billing frequency ("aylık"): never multiply the monthly price by the duration in the line. Never merge one-time, monthly and future-yearly work into one line. ' +
           'If the brief says something is included in another item for the first year (e.g. domain and hosting included in the website in year 1), add it as its own line with includedIn = that item\'s ref and no price, and if a renewal follows (e.g. yearly from year 2) add a separate yearly line with startYear 2. ' +
           'If the duration of a monthly service is not given, leave term empty and add an assumption that the duration is not stated (you may suggest one, marked as a suggestion to check).\n' + pricing
         : 'Return no line items.\n') +
@@ -349,6 +349,12 @@ export function cleanDraft(kind: DocKind, d: RawDraft, ctx: CleanContext): Draft
   for (const it of items) {
     if (it.includedIn && (it.includedIn === it.ref || !items.some((x) => x.ref === it.includedIn))) it.includedIn = '';
     if (it.includedIn) { it.billing = 'once'; it.term = ''; it.startYear = 1; }
+    // Recurring line: quantity 1, the period as unit, the duration only in term (a model that put "6" in quantity meant 6 months).
+    if (it.billing !== 'once') {
+      if (!it.term && /^\d{1,3}$/.test(it.quantity) && Number(it.quantity) > 1) it.term = String(Number(it.quantity));
+      it.quantity = '1';
+      it.unit = it.billing === 'monthly' ? 'ay' : 'yıl';
+    }
     const price = parseMoney(it.unitPrice.replace(/\s/g, ''));
     if (!ctx.prices || it.includedIn) { if (it.unitPrice) droppedPrices += ctx.prices ? 0 : 1; it.unitPrice = ''; it.priceNote = ctx.prices ? it.priceNote : ''; }
     else if (it.unitPrice && (price === undefined || price === null || price <= BigInt(0))) { it.unitPrice = ''; warnings.push(`“${it.title}” için önerilen fiyat okunamadı; fiyatı siz girin.`); }

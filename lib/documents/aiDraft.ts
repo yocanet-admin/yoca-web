@@ -186,16 +186,40 @@ export function itemsFromSuggestion(items: SuggestedItem[], withPrices: boolean,
     const recurring = !included && s.billing !== 'once';
     return {
       ...it,
-      title: s.title, description: s.description, quantity: s.quantity || '1', unit: s.unit,
+      // recurring: quantity 1 and the period as unit; the duration is `term` (see lib/documents/calc.ts computeLine)
+      title: s.title, description: s.description, quantity: recurring ? '1' : s.quantity || '1', unit: recurring ? PERIOD_UNIT[s.billing as 'monthly' | 'yearly'] : s.unit,
       billing: included ? 'once' : s.billing,
       term: recurring ? s.term : '',
       startYear: recurring ? Math.max(1, s.startYear || 1) : 1,
       includedIn: included,
       unitPrice: price,
       priceBasis: recurring && (s.startYear || 1) > 1 ? s.priceBasis : '',
+      // every price that comes from the AI is unchecked, even if the same line was checked before
       aiPrice: Boolean(price),
     } satisfies LineItem;
   });
+}
+
+const PERIOD_UNIT = { monthly: 'ay', yearly: 'yıl' } as const;
+
+/**
+ * Change how a line is billed, keeping "Adet / Süre" coherent (pure):
+ *  - one-time → monthly / yearly: a whole quantity > 1 becomes the duration (term),
+ *    quantity becomes 1 and the unit the period ("6 ay" stays "6 ay", never 6 × the monthly fee);
+ *  - monthly / yearly → one-time: the duration becomes the quantity ("6 ay" one-time = 6 × price);
+ *  - included: no price of its own, linked to `target`.
+ */
+export function setBilling(it: LineItem, to: Billing | 'included', target = ''): LineItem {
+  const from = it.includedIn ? 'included' : it.billing ?? 'once';
+  if (to === 'included') return { ...it, includedIn: target, billing: 'once', term: '', startYear: 1, priceBasis: '', unitPrice: '', aiPrice: false };
+  if (to === 'once') {
+    if (from === 'monthly' || from === 'yearly') return { ...it, includedIn: '', billing: 'once', quantity: it.term || '1', unit: it.unit || PERIOD_UNIT[from], term: '', startYear: 1, priceBasis: '' };
+    return { ...it, includedIn: '', billing: 'once' };
+  }
+  const wasRecurring = from === 'monthly' || from === 'yearly';
+  const q = it.quantity.trim();
+  const term = wasRecurring ? it.term ?? '' : /^\d{1,3}$/.test(q) && Number(q) > 1 ? String(Number(q)) : '';
+  return { ...it, includedIn: '', billing: to, quantity: '1', unit: PERIOD_UNIT[to], term, startYear: wasRecurring ? it.startYear ?? 1 : 1, priceBasis: wasRecurring ? it.priceBasis ?? '' : '' };
 }
 
 export function applyDraft(doc: { title: string; content: DocContent }, s: DraftSuggestion, opts: ApplyOptions): ApplyResult {

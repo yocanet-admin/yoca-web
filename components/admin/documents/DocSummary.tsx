@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { computeDocument, fmtMoney, fmtPct, fmtQty, parseMoney } from '@/lib/documents/calc';
+import { computeDocument, fmtMoney, fmtPct, parseMoney, quantityText } from '@/lib/documents/calc';
 import { BLOCK_LABEL, CURRENCY_LABEL, KIND_DEF, KIND_LABEL, billingText, bodyParts, type DocContent, type DocKind } from '@/lib/documents/model';
 import { RecurringSummary } from '@/components/admin/documents/Recurring';
 import { formatIban, type BankAccount } from '@/lib/documents/settings';
@@ -90,7 +90,7 @@ export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: Do
           <div className="overflow-x-auto">
             <table className="w-full min-w-[620px] text-[13px]">
               <thead className="text-left text-[11px] uppercase tracking-[0.08em] text-subtle">
-                <tr><th className="py-1.5 pe-2">#</th><th className="py-1.5 pe-2">Açıklama</th><th className="py-1.5 pe-2 text-right">Miktar</th><th className="py-1.5 pe-2 text-right">Birim fiyat</th>{showDisc && <th className="py-1.5 pe-2 text-right">İnd.</th>}<th className="py-1.5 pe-2 text-right">KDV</th><th className="py-1.5 text-right">Tutar</th></tr>
+                <tr><th className="py-1.5 pe-2">#</th><th className="py-1.5 pe-2">Açıklama</th><th className="py-1.5 pe-2 text-right">Adet / Süre</th><th className="py-1.5 pe-2 text-right">Birim fiyat</th>{showDisc && <th className="py-1.5 pe-2 text-right">İnd.</th>}<th className="py-1.5 pe-2 text-right">KDV</th><th className="py-1.5 text-right">Tutar</th></tr>
               </thead>
               <tbody>
                 {lines.map((l) => {
@@ -99,7 +99,7 @@ export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: Do
                     <tr key={l.id} className="border-t border-line align-top">
                       <td className="py-2 pe-2 font-bold text-yoca-green">{String(l.index + 1).padStart(2, '0')}</td>
                       <td className="py-2 pe-2"><p className="font-semibold text-white">{it.title}</p>{it.description ? <p className="mt-0.5 whitespace-pre-wrap text-[12px] text-muted">{it.description}</p> : null}<p className="mt-0.5 text-[11px] text-subtle">{billingText(it, c.items)}</p></td>
-                      <td className="whitespace-nowrap py-2 pe-2 text-right tabular-nums text-muted">{fmtQty(it.quantity)}{it.unit ? ` ${it.unit}` : ''}</td>
+                      <td className="whitespace-nowrap py-2 pe-2 text-right tabular-nums text-muted">{quantityText(it)}</td>
                       <td className="whitespace-nowrap py-2 pe-2 text-right tabular-nums text-muted">{l.included ? 'Dahil' : l.missingPrice ? <span className="text-yellow-200">eksik</span> : money(parseMoney(it.unitPrice) ?? BigInt(0))}</td>
                       {showDisc && <td className="py-2 pe-2 text-right tabular-nums text-muted">{it.discountPct && it.discountPct !== '0' ? `%${it.discountPct}` : '—'}</td>}
                       <td className="py-2 pe-2 text-right tabular-nums text-muted">{l.taxRateBp !== null ? `%${fmtPct(l.taxRateBp)}` : ''}</td>

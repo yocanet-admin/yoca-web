@@ -15,13 +15,14 @@ import type { BankChange } from '@/lib/documents/settings';
 import { readDocBackup, writeDocBackup, type DocBackup } from '@/lib/documents/backup';
 import { getAdminClient } from '@/lib/adminClient';
 import {
-  BILLING_LABEL, BLOCK_LABEL, CURRENCY_LABEL, DOC_CURRENCIES, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, QUOTE_STATES, STATUS_LABEL,
+  BILLING_LABEL, BLOCK_LABEL, CURRENCY_LABEL, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, QUOTE_STATES, STATUS_LABEL,
   blockHeading, localId, missingFor, newItem, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PaymentStep, type QuoteState,
 } from '@/lib/documents/model';
 import { computeDocument, fmtMoney, fmtPct } from '@/lib/documents/calc';
-import { applyDraft, changeCurrency, hasAmounts, pricesRequested, sampleRequested, sectionLabel, type DraftSuggestion } from '@/lib/documents/aiDraft';
+import { applyDraft, setBilling, changeCurrency, hasAmounts, pricesRequested, sampleRequested, sectionLabel, type DraftSuggestion } from '@/lib/documents/aiDraft';
 import { AiDraftReview, type ReviewApply } from '@/components/admin/documents/AiDraftReview';
 import { RecurringSummary } from '@/components/admin/documents/Recurring';
+import { CurrencyOptions, UnitField } from '@/components/admin/documents/fields';
 
 /**
  * Yoca — Teklifler ve Belgeler: editor.
@@ -470,7 +471,7 @@ function EditorInner() {
                 <label className={label}>Dil<select className={field} value={c.locale} onChange={(e) => set({ locale: e.target.value === 'en' ? 'en' : 'tr' })}><option value="tr">Türkçe</option><option value="en">English</option></select></label>
                 <label className={label}>Düzenleme tarihi<input type="date" className={field} value={c.issueDate} onChange={(e) => set({ issueDate: e.target.value })} /></label>
                 {def.validity && <label className={label}>Geçerlilik tarihi<input type="date" className={field} value={c.validUntil} onChange={(e) => set({ validUntil: e.target.value })} /></label>}
-                {def.items && <label className={label}>Para birimi<select className={field} value={c.currency} onChange={(e) => pickCurrency(e.target.value as DocCurrency)}>{DOC_CURRENCIES.map((x) => <option key={x} value={x}>{CURRENCY_LABEL[x]}</option>)}</select></label>}
+                {def.items && <label className={label}>Para birimi<select className={field} value={c.currency} onChange={(e) => pickCurrency(e.target.value as DocCurrency)}><CurrencyOptions /></select></label>}
                 {def.period && <label className={label}>Rapor dönemi<input className={field} value={c.period} onChange={(e) => set({ period: e.target.value })} placeholder="Ör. 20 Ekim – 3 Kasım 2026" /></label>}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -542,8 +543,18 @@ function EditorInner() {
                           <input aria-label={`${i + 1}. kalem başlığı`} className={field} value={it.title} onChange={(e) => setItem(i, { title: e.target.value })} placeholder="Kalem başlığı" />
                           <textarea aria-label={`${i + 1}. kalem açıklaması`} className={field} rows={2} value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} placeholder="Açıklama (isteğe bağlı)" />
                           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                            <label className={label}>Miktar<input className={field} inputMode="decimal" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} /></label>
-                            <label className={label}>Birim<input className={field} value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })} placeholder="adet, saat…" /></label>
+                            {(() => {
+                              // recurring line: "Adet / Süre" is the offered duration (term); the unit is the period
+                              const rec = !it.includedIn && (it.billing ?? 'once') !== 'once';
+                              return <>
+                                <label className={label}>Adet / Süre{rec ? ` (${BILLING_LABEL[it.billing ?? 'once'].per.tr})` : ''}
+                                  {rec
+                                    ? <input className={`${field} ${!it.term ? '!border-yellow-400/70' : ''}`} inputMode="numeric" value={it.term ?? ''} onChange={(e) => setItem(i, { term: e.target.value.replace(/\D/g, '').slice(0, 3) })} placeholder="belirtilmedi" />
+                                    : <input className={field} inputMode="decimal" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} />}
+                                </label>
+                                <label className={label}>Birim<UnitField className={field} value={it.unit} fixed={rec ? BILLING_LABEL[it.billing ?? 'once'].per.tr : undefined} onChange={(v) => setItem(i, { unit: v })} /></label>
+                              </>;
+                            })()}
                             <label className={label}>Birim fiyat ({c.currency}{it.includedIn ? '' : (it.billing ?? 'once') !== 'once' ? ` / ${BILLING_LABEL[it.billing ?? 'once'].per.tr}` : ''})<input className={`${field} ${(!it.unitPrice.trim() && it.title.trim() && !it.includedIn) || it.aiPrice ? '!border-yellow-400/70' : ''}`} inputMode="decimal" value={it.includedIn ? '' : it.unitPrice} disabled={Boolean(it.includedIn)} onChange={(e) => setItem(i, { unitPrice: e.target.value, aiPrice: false })} placeholder={it.includedIn ? 'dahil' : 'eksik'} /></label>
                             <label className={label}>İndirim %<input className={field} inputMode="decimal" value={it.discountPct} onChange={(e) => setItem(i, { discountPct: e.target.value })} placeholder="0" /></label>
                             <label className={label}>KDV %<input className={field} inputMode="decimal" value={it.taxRate} onChange={(e) => setItem(i, { taxRate: e.target.value })} /></label>
@@ -553,8 +564,7 @@ function EditorInner() {
                               <select className={field} value={it.includedIn ? 'included' : it.billing ?? 'once'} onChange={(e) => {
                                 const v = e.target.value;
                                 const target = c.items.find((x) => x.id !== it.id && !x.includedIn && x.title.trim());
-                                if (v === 'included') setItem(i, { includedIn: target?.id ?? '', billing: 'once', term: '', startYear: 1, priceBasis: '', aiPrice: false });
-                                else setItem(i, { includedIn: '', billing: v as Billing, term: v === 'once' ? '' : it.term ?? '', startYear: v === 'once' ? 1 : it.startYear ?? 1, priceBasis: v === 'once' ? '' : it.priceBasis ?? '' });
+                                set({ items: c.items.map((x, j) => (j === i ? setBilling(x, v as Billing | 'included', target?.id ?? '') : x)) });
                               }}>
                                 <option value="once">{BILLING_LABEL.once.tr}</option><option value="monthly">{BILLING_LABEL.monthly.tr}</option><option value="yearly">{BILLING_LABEL.yearly.tr}</option>
                                 <option value="included">Dahil (başka kalemde)</option>
@@ -568,7 +578,6 @@ function EditorInner() {
                                 </select>
                               </label>
                             ) : (it.billing ?? 'once') !== 'once' ? <>
-                              <label className={label}>Süre ({BILLING_LABEL[it.billing ?? 'once'].per.tr})<input className={field} inputMode="numeric" value={it.term ?? ''} onChange={(e) => setItem(i, { term: e.target.value.replace(/\D/g, '').slice(0, 3) })} placeholder="belirtilmedi" /></label>
                               <label className={label}>Başlangıç
                                 <select className={field} value={String(it.startYear ?? 1)} onChange={(e) => setItem(i, { startYear: Number(e.target.value) })}>
                                   <option value="1">Başlangıçtan itibaren</option><option value="2">2. yıldan itibaren</option><option value="3">3. yıldan itibaren</option>

@@ -46,7 +46,7 @@ import React from 'react';
 import type { BankAccount } from '@/lib/documents/settings';
 import { formatIban } from '@/lib/documents/settings';
 import { BLOCK_LABEL, KIND_DEF, KIND_LABEL, bodyParts, type Block, type DocContent, type DocKind, type Issuer } from '@/lib/documents/model';
-import { computeDocument, fmtMoney, fmtPct, fmtQty, parseMoney, type LineResult, type RecurringGroup } from '@/lib/documents/calc';
+import { computeDocument, fmtMoney, fmtPct, parseMoney, quantityText, type LineResult, type RecurringGroup } from '@/lib/documents/calc';
 
 // @react-pdf/renderer is ESM-only ("import" export condition): it is loaded with
 // a dynamic import, so this module also works where it is compiled as CommonJS.
@@ -133,7 +133,7 @@ const L = {
     number: 'Belge no', valid: 'Geçerlilik', currency: 'Para birimi', source: 'Kaynak teklif', period: 'Dönem',
     preparedFor: 'Hazırlanan', docDate: 'Belge / tarih', refDate: 'Sayı / tarih', recipient: 'Alıcı', subject: 'Konu',
     project: 'Proje', attention: 'İlgili', taxOffice: 'Vergi dairesi', taxNo: 'Vergi no', vkn: 'VKN', mersis: 'MERSİS', tradeReg: 'Ticaret sicil', kep: 'KEP', reference: 'İlgi',
-    service: 'Hizmet / kapsam', qty: 'Miktar', amount: 'Tutar', disc: 'İnd.', tax: 'KDV',
+    service: 'Hizmet / kapsam', qty: 'Adet / Süre', amount: 'Tutar', disc: 'İnd.', tax: 'KDV',
     subtotal: 'Ara toplam', discount: 'İndirim', net: 'Net tutar', taxLine: (r: string) => `KDV %${r}`, base: 'matrah', grand: 'Genel toplam', investment: 'Toplam yatırım',
     missingTotal: (n: number) => `Genel toplam hesaplanmadı: ${n} kalemin fiyatı eksik.`, priceMissing: 'Fiyat eksik',
     paymentTerms: 'Ödeme ve koşullar', payment: 'Ödeme planı', delivery: 'Takvim', bank: 'Banka bilgileri', holder: 'Hesap sahibi', iban: 'IBAN', swift: 'SWIFT', branch: 'Şube',
@@ -145,7 +145,7 @@ const L = {
     recurringNote: 'Bu ücretler bugünkü (tek seferlik) toplama ve ödeme planına dahil değildir; kendi dönemlerinde faturalanır.',
     group: (b: 'monthly' | 'yearly', y: number) => `${b === 'monthly' ? 'Aylık' : 'Yıllık'} · ${y > 1 ? `${y}. yıldan itibaren` : 'başlangıçtan itibaren'}`,
     per: { monthly: 'ay', yearly: 'yıl' }, groupTotal: (per: string) => `Dönem toplamı, KDV dahil / ${per}`,
-    termTotal: (n: number, per: string) => `${n} ${per} varsayımıyla toplam (bilgi amaçlı)`, noTerm: (per: string) => `Süre belirtilmedi: hizmet sürdükçe her ${per} faturalanır.`,
+    termTotal: (n: number, per: string) => `${n} ${per} için toplam (bilgi amaçlı)`, billed: { monthly: 'aylık faturalanır', yearly: 'yıllık faturalanır' }, noTerm: (per: string) => `Süre belirtilmedi: hizmet sürdükçe her ${per} faturalanır.`,
     basis: { fixed: 'Sabit fiyat (taahhüt)', estimate: 'Güncel tarifeye göre tahmini; yenileme tarihinde güncellenebilir', '': '' },
     continued: (h: string) => `${h} — devam`,
     head: {
@@ -160,7 +160,7 @@ const L = {
     number: 'Document no', valid: 'Valid until', currency: 'Currency', source: 'Source quotation', period: 'Period',
     preparedFor: 'Prepared for', docDate: 'Document / date', refDate: 'Ref. / date', recipient: 'To', subject: 'Subject',
     project: 'Project', attention: 'Attn.', taxOffice: 'Tax office', taxNo: 'Tax no', vkn: 'Tax ID', mersis: 'MERSIS', tradeReg: 'Trade registry', kep: 'KEP', reference: 'Reference',
-    service: 'Service / scope', qty: 'Qty', amount: 'Amount', disc: 'Disc.', tax: 'VAT',
+    service: 'Service / scope', qty: 'Qty / Duration', amount: 'Amount', disc: 'Disc.', tax: 'VAT',
     subtotal: 'Subtotal', discount: 'Discount', net: 'Net amount', taxLine: (r: string) => `VAT ${r}%`, base: 'base', grand: 'Grand total', investment: 'Total investment',
     missingTotal: (n: number) => `Grand total not calculated: ${n} line(s) without a price.`, priceMissing: 'Price missing',
     paymentTerms: 'Payment and terms', payment: 'Payment plan', delivery: 'Timeline', bank: 'Bank details', holder: 'Account holder', iban: 'IBAN', swift: 'SWIFT', branch: 'Branch',
@@ -172,7 +172,7 @@ const L = {
     recurringNote: 'These fees are not part of today\'s (one-time) total or the payment plan; they are billed in their own periods.',
     group: (b: 'monthly' | 'yearly', y: number) => `${b === 'monthly' ? 'Monthly' : 'Yearly'} · ${y > 1 ? `from year ${y}` : 'from the start'}`,
     per: { monthly: 'month', yearly: 'year' }, groupTotal: (per: string) => `Period total incl. VAT / ${per}`,
-    termTotal: (n: number, per: string) => `Total assuming ${n} ${per}${n > 1 ? 's' : ''} (for information)`, noTerm: (per: string) => `Duration not stated: billed every ${per} while the service runs.`,
+    termTotal: (n: number, per: string) => `Total for ${n} ${per}${n > 1 ? 's' : ''} (for information)`, billed: { monthly: 'billed monthly', yearly: 'billed yearly' }, noTerm: (per: string) => `Duration not stated: billed every ${per} while the service runs.`,
     basis: { fixed: 'Fixed price (commitment)', estimate: 'Estimate per current tariff; may change at renewal', '': '' },
     continued: (h: string) => `${h} — continued`,
     head: {
@@ -510,7 +510,8 @@ function ItemsTable({ c, t, tail, k = 1, lines: only, per, header = true }: { c:
       {totals.lines.map((l, li) => {
         const it = c.items[l.index];
         const disc = it.discountPct.trim() && it.discountPct.trim() !== '0';
-        const qtyOne = (parseMoney(it.quantity) ?? BigInt(0)) === BigInt(100) || it.quantity.trim() === '1';
+        const recurring = !l.included && (it.billing ?? 'once') !== 'once';
+        const qtyOne = recurring || (parseMoney(it.quantity) ?? BigInt(0)) === BigInt(100) || it.quantity.trim() === '1';
         const showUnit = !l.missingPrice && !l.included && (!qtyOne || disc);
         const row = (
           <R.View key={l.id} style={[st.row, { paddingVertical: 12 * k }]} wrap={false}>
@@ -524,7 +525,8 @@ function ItemsTable({ c, t, tail, k = 1, lines: only, per, header = true }: { c:
               </R.View>
             </R.View>
             <R.View style={{ width: COL_QTY, paddingHorizontal: 12, paddingTop: 2, marginRight: GAP }}>
-              <R.Text style={st.qty}>{fmtQty(it.quantity, c.locale)}{it.unit ? ` ${it.unit}` : ''}</R.Text>
+              <R.Text style={recurring && !it.term ? [st.qty, { fontSize: 9 }] : st.qty}>{quantityText(it, c.locale)}</R.Text>
+              {recurring ? <R.Text style={st.fig}>{t.billed[(it.billing ?? 'monthly') as 'monthly' | 'yearly']}</R.Text> : null}
               {showUnit ? <R.Text style={st.fig}>× {fmtMoney(parseMoney(it.unitPrice) ?? BigInt(0), c.currency, c.locale, false)}</R.Text> : null}
               {disc ? <R.Text style={st.fig}>{t.disc} {pctText(it.discountPct, c.locale)}</R.Text> : null}
               {lineTax && l.taxRateBp !== null ? <R.Text style={st.fig}>{t.tax} {pct(l.taxRateBp, c.locale)}</R.Text> : null}

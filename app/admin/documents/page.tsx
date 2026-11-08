@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { Badge, Empty, Flash, PageHead, field, label, small, fmtDate } from '@/components/admin/ops/ui';
 import { clientDisplay, docAction, draftPdf, loadDoc, loadList, moneyOf, newKey, storedPdf, type ClientLite, type DocList, type DocListRow, type ProjectLite } from '@/lib/documents/client';
-import { CURRENCY_LABEL, DOC_CURRENCIES, DOC_KINDS, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, STATUS_LABEL, type DocCurrency, type DocKind } from '@/lib/documents/model';
+import { CurrencyOptions } from '@/components/admin/documents/fields';
+import { DOC_KINDS, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, STATUS_LABEL, type DocCurrency, type DocKind } from '@/lib/documents/model';
 import type { BankChange } from '@/lib/documents/settings';
 import { BankDecision } from '@/components/admin/documents/BankDecision';
 
@@ -85,7 +86,7 @@ function NewDocument({ clients, projects, onClose, preset, defaultCurrency }: { 
         <div className={`grid gap-3 ${KIND_DEF[kind].items ? 'sm:grid-cols-3' : 'grid-cols-2'}`}>
           {KIND_DEF[kind].items && (
             <label className={label}>Para birimi
-              <select className={field} value={currency} onChange={(e) => setCurrency(e.target.value as DocCurrency)}>{DOC_CURRENCIES.map((x) => <option key={x} value={x}>{CURRENCY_LABEL[x]}</option>)}</select>
+              <select className={field} value={currency} onChange={(e) => setCurrency(e.target.value as DocCurrency)}><CurrencyOptions /></select>
             </label>
           )}
           <label className={label}>Dil

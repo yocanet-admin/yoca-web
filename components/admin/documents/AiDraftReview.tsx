@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, field, label, small } from '@/components/admin/ops/ui';
 import { RecurringSummary } from '@/components/admin/documents/Recurring';
+import { UnitField } from '@/components/admin/documents/fields';
 import { applyDraft, sectionLabel, sectionsOf, type DraftSuggestion, type SuggestedItem } from '@/lib/documents/aiDraft';
 import { computeDocument, fmtMoney, fmtPct } from '@/lib/documents/calc';
 import { BLOCK_LABEL, BILLING_LABEL, CURRENCY_LABEL, type BlockKey, type DocContent } from '@/lib/documents/model';
@@ -147,7 +148,13 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
                         <select className={field} value={it.includedIn ? 'included' : it.billing} onChange={(e) => {
                           const v = e.target.value;
                           if (v === 'included') setItem(i, { includedIn: others[0]?.ref ?? '', unitPrice: '', billing: 'once', term: '', startYear: 1 });
-                          else setItem(i, { includedIn: '', billing: v as SuggestedItem['billing'], startYear: v === 'once' ? 1 : it.startYear || 1, term: v === 'once' ? '' : it.term });
+                          else if (v === 'once') setItem(i, { includedIn: '', billing: 'once', startYear: 1, quantity: recurring ? it.term || '1' : it.quantity, term: '' });
+                          else {
+                            // duration ("6 ay") moves to term; the period becomes the unit; quantity stays 1 (no double counting)
+                            const q = it.quantity.trim();
+                            const term = recurring ? it.term : /^\d{1,3}$/.test(q) && Number(q) > 1 ? String(Number(q)) : it.term;
+                            setItem(i, { includedIn: '', billing: v as SuggestedItem['billing'], startYear: recurring ? it.startYear || 1 : 1, term, quantity: '1', unit: v === 'monthly' ? 'ay' : 'yıl' });
+                          }
                         }}>
                           <option value="once">{BILLING_LABEL.once.tr}</option><option value="monthly">{BILLING_LABEL.monthly.tr}</option><option value="yearly">{BILLING_LABEL.yearly.tr}</option>
                           {others.length > 0 && <option value="included">Dahil (başka kalemde)</option>}
@@ -158,21 +165,20 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
                           <select className={field} value={it.includedIn} onChange={(e) => setItem(i, { includedIn: e.target.value })}>{others.map((o) => <option key={o.ref} value={o.ref}>{o.title}</option>)}</select>
                         </label>
                       ) : <>
-                        <label className={label}>Miktar<input className={field} inputMode="decimal" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} /></label>
-                        <label className={label}>Birim<input className={field} value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })} /></label>
+                        {recurring ? (
+                          <label className={label}>Adet / Süre ({BILLING_LABEL[it.billing].per.tr})
+                            <select className={field} value={it.term} onChange={(e) => setItem(i, { term: e.target.value })}>
+                              {Array.from(new Set([...TERM_OPTIONS, it.term])).map((o) => <option key={o} value={o}>{o ? `${o} ${BILLING_LABEL[it.billing].per.tr}` : 'Belirtilmedi'}</option>)}
+                            </select>
+                          </label>
+                        ) : <label className={label}>Adet / Süre<input className={field} inputMode="decimal" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} /></label>}
+                        <label className={label}>Birim<UnitField className={field} value={it.unit} fixed={recurring ? BILLING_LABEL[it.billing].per.tr : undefined} onChange={(v) => setItem(i, { unit: v })} /></label>
                         {s.prices ? (
                           <label className={label}>Birim fiyat ({c.currency}{recurring ? ` / ${BILLING_LABEL[it.billing].per.tr}` : ''}, KDV hariç)
                             <input className={`${field} ${it.unitPrice ? '!border-yellow-400/70' : ''}`} inputMode="decimal" value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} placeholder="boş = siz girersiniz" />
                           </label>
                         ) : <p className="self-end text-[12px] text-subtle">Fiyat istenmedi; siz girersiniz.</p>}
                       </>}
-                      {recurring && (
-                        <label className={label}>Süre ({BILLING_LABEL[it.billing].per.tr})
-                          <select className={field} value={TERM_OPTIONS.includes(it.term) ? it.term : it.term} onChange={(e) => setItem(i, { term: e.target.value })}>
-                            {Array.from(new Set([...TERM_OPTIONS, it.term])).map((o) => <option key={o} value={o}>{o ? `${o} ${BILLING_LABEL[it.billing].per.tr}` : 'Belirtilmedi'}</option>)}
-                          </select>
-                        </label>
-                      )}
                       {recurring && (
                         <label className={label}>Başlangıç
                           <select className={field} value={String(it.startYear || 1)} onChange={(e) => setItem(i, { startYear: Number(e.target.value), priceBasis: Number(e.target.value) > 1 ? it.priceBasis || 'estimate' : '' })}>
@@ -190,6 +196,7 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
                     </div>
                     <div className="flex flex-wrap gap-1.5 text-[12px]">
                       {it.includedIn ? <Badge tone="info">{`“${s.items.find((x) => x.ref === it.includedIn)?.title ?? ''}” kalemine dahil — ayrı fiyatı yok`}</Badge> : null}
+                      {!it.includedIn ? <span data-testid={`review-qty-${it.ref}`}><Badge tone="muted">{`Adet / Süre: ${recurring ? (it.term ? `${it.term} ${BILLING_LABEL[it.billing].per.tr}` : 'süre belirtilmedi') : `${it.quantity || '1'}${it.unit ? ` ${it.unit}` : ''}`}${recurring ? ` · ${BILLING_LABEL[it.billing].tr.toLocaleLowerCase('tr')} faturalanır` : ''}`}</Badge></span> : null}
                       {recurring && !it.term ? <Badge tone="warn">Süre belirtilmedi — varsayım; isterseniz süre seçin</Badge> : null}
                       {recurring && it.startYear > 1 ? <Badge tone="muted">Bugünkü toplama dahil değil</Badge> : null}
                       {s.prices && it.unitPrice && !it.includedIn ? <Badge tone="warn">AI fiyat önerisi — kontrol edilmeli</Badge> : null}

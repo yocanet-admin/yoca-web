@@ -27,7 +27,7 @@ export function RecurringSummary({ groups, currency, compact = false }: { groups
             </div>
             <p className="text-[12px] text-subtle">
               {g.totals.grand !== null ? `KDV dahil (net ${money(g.totals.net)} + KDV ${money(g.totals.tax)}). ` : ''}
-              {g.term !== null && g.termTotal !== null ? `${g.term} ${per} varsayımıyla toplam ${money(g.termTotal)} (bilgi amaçlı).` : g.billing === 'monthly' && g.startYear === 1 ? 'Süre belirtilmedi: hizmet sürdükçe her ay faturalanır.' : g.startYear > 1 ? 'Bugünkü toplama dahil değil.' : ''}
+              {g.term !== null && g.termTotal !== null ? `${g.term} ${per} için toplam ${money(g.termTotal)} (bilgi amaçlı; tek seferlik toplama dahil değil).` : g.billing === 'monthly' && g.startYear === 1 ? 'Süre belirtilmedi: hizmet sürdükçe her ay faturalanır.' : g.startYear > 1 ? 'Bugünkü toplama dahil değil.' : ''}
             </p>
           </div>
         );

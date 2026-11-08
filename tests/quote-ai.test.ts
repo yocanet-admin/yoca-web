@@ -11,9 +11,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { cleanDraft, type RawDraft } from '../lib/ai/documents';
 import { mockStructured } from '../lib/ai/mock';
-import { applyDraft, changeCurrency, currencyMentions, hasAmounts, pricesRequested, restrictToScope, sampleRequested, sectionsOf, stripAverageClaims, type ApplyOptions, type DraftSuggestion } from '../lib/documents/aiDraft';
-import { billingErrors, computeDocument, computeTotals, totalsJson } from '../lib/documents/calc';
-import { missingFor, newContent, newItem, sanitizeContent, type DocContent, type DocCurrency } from '../lib/documents/model';
+import { applyDraft, setBilling, changeCurrency, currencyMentions, hasAmounts, pricesRequested, restrictToScope, sampleRequested, sectionsOf, stripAverageClaims, type ApplyOptions, type DraftSuggestion } from '../lib/documents/aiDraft';
+import { billingErrors, computeDocument, computeLine, computeTotals, quantityText, totalsJson } from '../lib/documents/calc';
+import { DOC_CURRENCIES, OTHER_CURRENCIES, PRIMARY_CURRENCIES, missingFor, newContent, newItem, sanitizeContent, type DocContent, type DocCurrency } from '../lib/documents/model';
 import { SAMPLE_ISSUER, sampleQuote } from './fixtures-documents';
 
 const B = (n: number | string) => BigInt(n);
@@ -312,4 +312,106 @@ test('PDF: one-time total apart from monthly / year-2 groups, "Dahil" for the in
   const r = await renderDocumentPdf({ kind: 'quote', number: 'TKL-2026-0100', title: sample.title, content: sample.content, issuer, bankAccounts: [], mode: 'draft' });
   const txt = pdfText(r.buffer);
   if (txt) assert.ok(/ÖRNEK/.test(txt) && txt.includes('ÖRNEK belge · gerçek teklif değildir') && !/TASLAK/.test(txt.slice(0, 400)), 'sample marking');
+});
+
+test('"Adet / Süre": quantity + unit for one-time lines; duration for recurring lines (never an assumed 1 ay); old lines unchanged', () => {
+  const once = { ...newItem('20'), title: 'Marka kimliği', quantity: '1', unit: 'proje' };
+  assert.equal(quantityText(once), '1 proje');
+  assert.equal(quantityText({ ...once, quantity: '12', unit: 'saat' }), '12 saat');
+  assert.equal(quantityText({ ...once, quantity: '1500', unit: '' }), '1.500');
+  const social = { ...newItem('20'), title: 'Sosyal medya', billing: 'monthly' as const, quantity: '1', unit: 'ay', unitPrice: '100' };
+  assert.equal(quantityText(social), 'süre belirtilmedi');
+  assert.equal(quantityText({ ...social, term: '6' }), '6 ay');
+  assert.equal(quantityText({ ...social, term: '6' }, 'en'), '6 months');
+  assert.equal(quantityText({ ...social, billing: 'yearly', startYear: 2, term: '' }), 'süre belirtilmedi');
+  // fixture written before the field existed: same text as before ("6 bin kelime", "1 paket")
+  const old = sampleQuote();
+  assert.deepEqual(old.items.map((i) => quantityText(i)), ['1 paket', '1 paket', '1 proje', '6 bin kelime', '1 yıl']);
+});
+
+test('recurring line: the unit price is the period amount; the duration never multiplies it (no double count)', () => {
+  const social = { ...newItem('20'), id: 's', title: 'Sosyal medya', billing: 'monthly' as const, quantity: '6', unit: 'ay', unitPrice: '1000', term: '6' };
+  assert.equal(computeLine(social, 0).net, B(100000), 'a stray quantity 6 is not a multiplier on a monthly line');
+  const d = computeDocument({ ...newContent('quote', { now: NOW }), items: [social] });
+  assert.equal(d.recurring[0].totals.grand, B(120000), '₺1.200 / ay incl. VAT');
+  assert.equal(d.recurring[0].termTotal, B(720000), '6 ay için toplam = 6 × 1.200');
+  assert.equal(d.totals.grand, null, 'nothing one-time: no "today" total');
+  const noTerm = computeDocument({ ...newContent('quote', { now: NOW }), items: [{ ...social, term: '' }] });
+  assert.equal(noTerm.recurring[0].term, null);
+  assert.equal(noTerm.recurring[0].termTotal, null, 'no duration → no definite total');
+});
+
+test('billing switch keeps "Adet / Süre" coherent: 6 ay one-time ⇄ monthly × 6 ay; included has no price', () => {
+  const once = { ...newItem('20'), id: 'a', title: 'Sosyal medya', quantity: '6', unit: 'ay', unitPrice: '1000' };
+  const m = setBilling(once, 'monthly');
+  assert.deepEqual([m.billing, m.quantity, m.unit, m.term], ['monthly', '1', 'ay', '6']);
+  const back = setBilling(m, 'once');
+  assert.deepEqual([back.billing, back.quantity, back.unit, back.term], ['once', '6', 'ay', '']);
+  assert.equal(computeLine(back, 0).net, B(600000), 'one-time 6 ay × price');
+  const y = setBilling({ ...newItem('20'), quantity: '1', unit: 'proje' }, 'yearly');
+  assert.deepEqual([y.quantity, y.unit, y.term], ['1', 'yıl', '']);
+  const inc = setBilling({ ...once, unitPrice: '5', aiPrice: true }, 'included', 'web');
+  assert.deepEqual([inc.includedIn, inc.unitPrice, inc.aiPrice], ['web', '', false]);
+});
+
+test('AI: a stated duration ("6 ay") becomes term; a model that put it in quantity is normalized; unstated stays unstated', () => {
+  const stated = suggest({ currency: 'USD', brief: `${REQUEST} Sosyal medya yönetimi 6 ay olsun.` });
+  const soc = stated.items.find((i) => i.ref === 'social')!;
+  assert.deepEqual([soc.billing, soc.quantity, soc.unit, soc.term], ['monthly', '1', 'ay', '6']);
+  assert.ok(stated.blocks.find((b) => b.key === 'assumptions')!.body.includes('6 ay için teklif edilmiştir'));
+  const c = applyDraft({ title: '', content: quote('USD') }, stated, OPTS).content;
+  const d = computeDocument(c);
+  assert.equal(d.recurring[0].term, 6);
+  assert.equal(d.recurring[0].termTotal, B(712800), '6 × $1.188,00');
+  assert.equal(d.totals.grand, B(828000), 'the 6-month total is never added to today');
+  assert.ok(!missingFor('quote', c, SAMPLE_ISSUER, { title: 'x' }).warnings.some((w) => /süresi belirtilmedi/.test(w)));
+  const unstated = suggest({ currency: 'USD' }).items.find((i) => i.ref === 'social')!;
+  assert.equal(unstated.term, '');
+  const raw = mockStructured('doc_draft', userMsg({ currency: 'USD', prices: true })) as RawDraft;
+  raw.items[3] = { ...raw.items[3], quantity: '6', unit: 'ay', term: '' };
+  raw.items[4] = { ...raw.items[4], unit: 'adet' };
+  const n = cleanDraft('quote', raw, { currency: 'USD', prices: true, sample: false, scope: 'all', brief: REQUEST });
+  assert.deepEqual([n.items[3].quantity, n.items[3].unit, n.items[3].term], ['1', 'ay', '6']);
+  assert.equal(n.items[4].unit, 'yıl');
+});
+
+test('AI price check: checked or user-entered prices stay; a price the AI writes again is unchecked again', () => {
+  const s = suggest({ currency: 'USD' });
+  const first = applyDraft({ title: '', content: quote('USD') }, s, OPTS).content;
+  // the admin checks every price (or types their own): no AI flag left
+  const checked = { ...first, items: first.items.map((i) => ({ ...i, aiPrice: false })) };
+  assert.ok(!missingFor('quote', checked, SAMPLE_ISSUER, { title: 'x' }).blocking.some((x) => /AI fiyat/.test(x)));
+  // a section regeneration that does not touch items leaves the checks alone
+  const rev = suggest({ currency: 'USD', scope: 'block:revisions', brief: 'Revizyon koşullarını yeniden yaz.' });
+  assert.ok(applyDraft({ title: '', content: checked }, rev, OPTS).content.items.every((i) => !i.aiPrice));
+  // the AI writes the prices again (items regenerated) → unchecked again, finalizing blocked again
+  const again = applyDraft({ title: '', content: checked }, suggest({ currency: 'USD', scope: 'items', brief: 'Kalemlere fiyat öner.' }), { ...OPTS, itemMode: 'replace' }).content;
+  assert.equal(again.items.filter((i) => i.aiPrice).length, 4);
+  assert.equal(missingFor('quote', again, SAMPLE_ISSUER, { title: 'x' }).blocking.filter((x) => /AI fiyat/.test(x)).length, 4);
+});
+
+test('currencies: TRY, USD, EUR first; GBP and AZN still supported (sanitize, labels, PDF code)', () => {
+  assert.deepEqual(PRIMARY_CURRENCIES, ['TRY', 'USD', 'EUR']);
+  assert.deepEqual(OTHER_CURRENCIES, ['GBP', 'AZN']);
+  assert.deepEqual([...DOC_CURRENCIES], ['TRY', 'USD', 'EUR', 'GBP', 'AZN']);
+  assert.equal(sanitizeContent({ currency: 'GBP' }, 'quote').currency, 'GBP');
+  assert.equal(sanitizeContent({ currency: 'AZN' }, 'quote').currency, 'AZN');
+  const gbp = suggest({ currency: 'GBP' });
+  assert.equal(gbp.items[0].unitPrice, '2050');
+});
+
+test('PDF: "ADET / SÜRE" column reads "1 paket", "1 proje", "6 ay" / "süre belirtilmedi" with "aylık faturalanır"; old quote keeps its quantities', async () => {
+  const { renderDocumentPdf } = await import('../lib/documents/pdf');
+  const issuer = { ...SAMPLE_ISSUER, legalName: 'Yoca Test Ltd. Şti.' };
+  const c = applyDraft({ title: '', content: quote('USD') }, suggest({ currency: 'USD', brief: `${REQUEST} Sosyal medya yönetimi 6 ay olsun.` }), { ...OPTS, acceptCurrency: true }).content;
+  const r = await renderDocumentPdf({ kind: 'quote', number: 'TKL-2026-0101', title: 'Test', content: c, issuer, bankAccounts: [], mode: 'draft' });
+  const txt = pdfText(r.buffer);
+  if (!txt) return;
+  const ns = txt.replace(/\s+/g, '');
+  assert.ok(ns.includes('ADET/SÜRE') && !/MİKTAR/.test(ns), 'column label');
+  assert.ok(txt.includes('1 paket') && txt.includes('1 proje') && txt.includes('6 ay') && txt.includes('aylık faturalanır') && txt.includes('yıllık faturalanır'));
+  assert.ok(txt.includes('6 ay için toplam') && txt.includes('7.128,00 USD'), '6-month total, informational');
+  const old = await renderDocumentPdf({ kind: 'quote', number: 'TKL-2026-0102', title: 'Eski', content: sampleQuote(), issuer, bankAccounts: [], mode: 'final', version: 1 });
+  const ot = pdfText(old.buffer)!;
+  assert.ok(ot.includes('6 bin kelime') && ot.includes('1 paket') && ot.includes('298.080,58') && !/TEKRARLAYAN/.test(ot.replace(/\s+/g, '')), 'old quote: same quantities and total, no recurring block');
 });

@@ -26,6 +26,13 @@ export const CURRENCY_LABEL: Record<DocCurrency, string> = {
   TRY: 'Türk lirası (TRY)', USD: 'ABD doları (USD)', EUR: 'Euro (EUR)', GBP: 'İngiliz sterlini (GBP)', AZN: 'Azerbaycan manatı (AZN)',
 };
 
+/** Shown first in currency pickers; the others stay fully supported and selectable. */
+export const PRIMARY_CURRENCIES: DocCurrency[] = ['TRY', 'USD', 'EUR'];
+export const OTHER_CURRENCIES: DocCurrency[] = DOC_CURRENCIES.filter((c) => !PRIMARY_CURRENCIES.includes(c));
+
+/** Units offered in the "Birim" picker (a unit written earlier that is not in the list stays as it is). */
+export const UNIT_OPTIONS = ['adet', 'proje', 'paket', 'saat', 'gün', 'sayfa', 'ay', 'yıl'] as const;
+
 /** How a line is billed. "once" = one-time (the default and every line written before this field existed). */
 export const BILLINGS = ['once', 'monthly', 'yearly'] as const;
 export type Billing = (typeof BILLINGS)[number];

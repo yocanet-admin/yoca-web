@@ -131,9 +131,13 @@ export function computeLine(item: LineItem, index: number): LineResult {
   const label = item.title.trim() || `${index + 1}. kalem`;
   const base: LineResult = { id: item.id, index, label, gross: null, discount: null, net: null, taxRateBp: null, error: null, missingPrice: false, included: false };
   if (item.includedIn) return { ...base, included: true };
-  const qty = parseScaled(item.quantity || '1', 3);
-  if (qty === undefined || qty === null) return { ...base, error: `${label}: miktar geçersiz (en çok 3 ondalık, örn. 1,5).` };
-  if (qty <= ZERO) return { ...base, error: `${label}: miktar sıfırdan büyük olmalı.` };
+  // Recurring line: the unit price IS the amount per period (month / year). Its
+  // duration lives in `term` (shown as "Adet / Süre", e.g. "6 ay") and never
+  // multiplies the period amount, so a duration can not be counted twice.
+  const recurring = (item.billing ?? 'once') !== 'once';
+  const qty = recurring ? BigInt(1000) : parseScaled(item.quantity || '1', 3);
+  if (qty === undefined || qty === null) return { ...base, error: `${label}: adet / süre geçersiz (en çok 3 ondalık, örn. 1,5).` };
+  if (qty <= ZERO) return { ...base, error: `${label}: adet / süre sıfırdan büyük olmalı.` };
   const disc = parseScaled(item.discountPct || '0', 2);
   if (disc === undefined || disc === null || disc > BigInt(10000)) return { ...base, error: `${label}: indirim oranı 0–100 arasında olmalı.` };
   const rate = parseScaled(item.taxRate || '0', 2);
@@ -234,6 +238,22 @@ export function fmtPct(bp: bigint, locale: 'tr' | 'en' = 'tr'): string {
   if (frac === ZERO) return String(whole);
   const f = String(frac).padStart(2, '0').replace(/0$/, '');
   return `${whole}${locale === 'tr' ? ',' : '.'}${f}`;
+}
+
+/**
+ * "Adet / Süre" as the customer reads it: quantity and unit together for a
+ * one-time line ("1 proje", "12 saat"); for a recurring line the offered
+ * duration in periods ("6 ay") or, when none was stated, that it was not
+ * stated (never an assumed "1 ay").
+ */
+export function quantityText(it: LineItem, locale: 'tr' | 'en' = 'tr'): string {
+  const b = it.billing ?? 'once';
+  if (b !== 'once' && !it.includedIn) {
+    const per = b === 'monthly' ? (locale === 'tr' ? 'ay' : 'month') : locale === 'tr' ? 'yıl' : 'year';
+    if (!it.term) return locale === 'tr' ? 'süre belirtilmedi' : 'duration not stated';
+    return `${it.term} ${per}${locale === 'en' && it.term !== '1' ? 's' : ''}`;
+  }
+  return `${fmtQty(it.quantity, locale)}${it.unit ? ` ${it.unit}` : ''}`;
 }
 
 export function fmtQty(input: string, locale: 'tr' | 'en' = 'tr'): string {
