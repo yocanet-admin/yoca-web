@@ -119,7 +119,11 @@ function mockQuoteDraft(input: string, brief: string, scope: string) {
   // "[mock-yalniz-plan]": a payment-only answer that does not rewrite the payment-terms text.
   const weak = brief.includes('[mock-eksik-plan]');
   const planOnly = brief.includes('[mock-yalniz-plan]');
-  const payment = weak ? [{ label: '[EKSİK: Ödeme aşamaları ve oranları]', percent: null, due: '' }] : scope === 'payment'
+  // the document already has a plan: no plan back, the terms text describes that plan
+  const existing = /^Existing payment plan: (.+)$/m.exec(input)?.[1] ?? '';
+  // "[mock-cakisma]": a terms text whose percentages contradict the document's plan (conflict tests)
+  const clash = brief.includes('[mock-cakisma]');
+  const payment = existing && scope === 'all' ? [] : weak ? [{ label: '[EKSİK: Ödeme aşamaları ve oranları]', percent: null, due: '' }] : scope === 'payment'
     ? [{ label: 'Başlangıç ödemesi', percent: 40, due: 'Sözleşme imzasında' }, { label: 'Marka kimliği onayı', percent: 30, due: 'Marka kimliği onaylandığında' }, { label: 'Web sitesi yayını', percent: 30, due: 'Web sitesi yayına alındığında' }]
     : [{ label: 'Başlangıç ödemesi', percent: 50, due: 'Sözleşme imzasında' }, { label: 'Teslim ödemesi', percent: 50, due: 'Web sitesi yayına alındığında' }];
   return {
@@ -132,7 +136,7 @@ function mockQuoteDraft(input: string, brief: string, scope: string) {
       { key: 'assumptions', heading: 'Varsayımlar', body: `Metinler ve fotoğraflar müşteri tarafından sağlanır.\n${months ? `Sosyal medya yönetimi ${months} ay için teklif edilmiştir; ücret aylık faturalanır.` : 'Sosyal medya yönetimi için sözleşme süresi belirtilmedi; aylık ücret hizmet sürdükçe her ay faturalanır. Kontrol edilecek öneri: en az 6 ay.'}\nDomain ve hosting ilk yıl web sitesi bedeline dahildir; 2. yıldan itibaren yıllık yenileme ayrıca faturalanır.${weak ? '' : '\nWeb sitesi en çok 8 sayfa olarak varsayılmıştır.\nSosyal medya: 2 platform, ayda 12 gönderi varsayılmıştır.'}` },
       { key: 'out_of_scope', heading: 'Kapsam dışı', body: 'Sosyal medya reklam bütçesi\nFotoğraf ve video çekimi\nE-ticaret ve ödeme altyapısı' },
       { key: 'revisions', heading: 'Revizyon koşulları', body: revisions },
-      ...(planOnly ? [] : [{ key: 'terms', heading: 'Ödeme koşulları', body: weak ? 'Tek seferlik çalışmaların ödeme planı: [EKSİK: Ödeme aşamaları ve oranları]. Sosyal medya yönetimi aylık, 2. yıldan itibaren domain ve hosting yenilemesi yıllık faturalanır.' : scope === 'payment' ? 'Tek seferlik işlerin bedeli üç adımda ödenir. Sosyal medya yönetimi her ayın ilk iş günü faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; ilk dönem toplamlarına dahil değildir.' : 'Ödeme planı tek seferlik işler (marka kimliği ve web sitesi) içindir. Sosyal medya yönetimi aylık olarak her ayın başında faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; ilk dönem toplamlarına dahil değildir.' }]),
+      ...(planOnly ? [] : [{ key: 'terms', heading: 'Ödeme koşulları', body: clash ? 'Ödeme %50 başlangıçta, %50 teslimde alınır. Sosyal medya yönetimi aylık faturalanır.' : existing && scope === 'all' && !weak ? `Tek seferlik işler için ödeme planı: ${existing}. Sosyal medya yönetimi aylık olarak her ayın başında faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; ilk dönem toplamlarına dahil değildir.` : weak ? 'Tek seferlik çalışmaların ödeme planı: [EKSİK: Ödeme aşamaları ve oranları]. Sosyal medya yönetimi aylık, 2. yıldan itibaren domain ve hosting yenilemesi yıllık faturalanır.' : scope === 'payment' ? 'Tek seferlik işlerin bedeli üç adımda ödenir. Sosyal medya yönetimi her ayın ilk iş günü faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; ilk dönem toplamlarına dahil değildir.' : 'Ödeme planı tek seferlik işler (marka kimliği ve web sitesi) içindir. Sosyal medya yönetimi aylık olarak her ayın başında faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; ilk dönem toplamlarına dahil değildir.' }]),
       { key: 'notes', heading: 'Notlar', body: notes },
     ],
     items: [

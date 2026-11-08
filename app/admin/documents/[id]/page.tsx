@@ -226,6 +226,7 @@ function EditorInner() {
       mode: 'draft', kind, locale: c.locale, brief, recipient: c.recipient.company || c.recipient.name, projectName: c.projectName, requestKey: newKey(),
       id: doc.id, clientId: draft.clientId ?? null, currency: c.currency, prices: pricesAsked, sample: sampleAsked && !draft.clientId, scope: aiScope,
       ...(aiScope !== 'all' ? { current: c, title: draft.title } : {}),
+      currentPayment: c.payment.map((p) => ({ label: p.label, mode: p.mode, value: p.value, due: p.due })),
     });
     setBusy(null);
     if (!r.ok || !r.suggestion) return setFlash({ tone: 'bad', text: r.error ?? 'Yapay zekâ önerisi alınamadı. Belgeniz değişmedi.' });

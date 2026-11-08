@@ -345,6 +345,54 @@ export function fillPaymentMarkers(text: string, steps: PaymentStep[], locale: D
   return { text: out, filled };
 }
 
+/* ── Payment percentages written in text vs the structured plan ── */
+
+const PAY_WORD = /ödeme|ödenir|ödenecek|peşin|avans|başlangıç|teslim|bakiye|kalan|imza|sözleşme|taksit|vade|fatura|payment|upfront|deposit|advance|balance|delivery|signature|instal/i;
+const TAX_WORD = /kdv|vat|vergi|stopaj|tax/i;
+
+/**
+ * Payment percentages a text states ("%50 başlangıçta, %50 teslimde", "yüzde 30 peşin"):
+ * only in a sentence that talks about payment, never one next to KDV / VAT / tax
+ * ("%20 KDV"), and never above 100. A sentence without payment words ("%100 memnuniyet") is ignored.
+ */
+export function paymentPercentsInText(text: string): number[] {
+  const out: number[] = [];
+  for (const sentence of text.split(/(?<=[.!?;])\s+|\n+/)) {
+    if (!PAY_WORD.test(sentence)) continue;
+    const re = /(?:%\s?(\d{1,3}(?:[.,]\d{1,2})?)|(\d{1,3}(?:[.,]\d{1,2})?)\s?%|yüzde\s+(\d{1,3}(?:[.,]\d{1,2})?))/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(sentence))) {
+      const around = sentence.slice(Math.max(0, m.index - 14), m.index + m[0].length + 14);
+      if (TAX_WORD.test(around)) continue;
+      const n = Number((m[1] ?? m[2] ?? m[3]).replace(',', '.'));
+      if (n > 0 && n <= 100) out.push(n);
+    }
+  }
+  return out;
+}
+
+/** Percentages of a complete plan ([] when the plan is not complete). */
+export function planPercents(steps: PaymentStep[]): number[] {
+  return planComplete(steps) ? steps.filter((s) => s.value.trim()).map((s) => Number(s.value.replace(',', '.'))) : [];
+}
+
+/**
+ * The payment text (sections "Ödeme koşulları" and "Notlar") states percentages that a complete
+ * plan does not have — a percentage that is not in the plan, or a full split (adding to 100) that
+ * differs. Mentioning only some of the plan's own percentages is not a conflict.
+ */
+export function paymentTextConflict(c: Pick<DocContent, 'blocks' | 'payment'>): { text: number[]; plan: number[] } | null {
+  const plan = planPercents(c.payment);
+  if (!plan.length) return null;
+  const text = c.blocks.filter((b) => b.key === 'terms' || b.key === 'notes').flatMap((b) => paymentPercentsInText(b.body));
+  if (!text.length) return null;
+  const sorted = (a: number[]) => [...a].sort((x, y) => x - y).join('/');
+  const foreign = text.some((n) => !plan.includes(n));
+  const fullDiffers = Math.abs(text.reduce((a, n) => a + n, 0) - 100) < 0.001 && sorted(text) !== sorted(plan);
+  return foreign || fullDiffers ? { text, plan } : null;
+}
+export const pctList = (a: number[]) => a.map((n) => `%${String(n).replace('.', ',')}`).join(' / ');
+
 /* ── File names shown to people (downloads, e-mail attachments) ──── */
 
 const KIND_FILE: Record<DocKind, string> = { quote: 'Teklif', proforma: 'Proforma', letter: 'Yazı', status_report: 'Durum-Raporu', delivery: 'Teslim-Belgesi' };
@@ -431,6 +479,8 @@ export function missingFor(kind: DocKind, c: DocContent, issuer: Issuer, extra: 
     const stale = c.blocks.flatMap((b) => b.body.match(PAYMENT_MARKER) ?? []);
     if (stale.length) blocking.push(`Ödeme planı dolu ama metinde hâlâ ${stale[0]} yazıyor. Metni planla uyumlu hâle getirin (Eksikler kutusundaki “İşareti ödeme planıyla doldur”).`);
   }
+  const conflict = def.payment ? paymentTextConflict(c) : null;
+  if (conflict) blocking.push(`Ödeme metni ile plan uyuşmuyor: metinde ${pctList(conflict.text)}, planda ${pctList(conflict.plan)}. Metni veya planı düzeltin.`);
   const markers = allText(c).match(MISSING_MARKER) ?? [];
   for (const m of Array.from(new Set(markers)).slice(0, 10)) blocking.push(`Metinde doldurulmamış yer var: ${m}`);
   return { blocking, warnings };

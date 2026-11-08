@@ -21,7 +21,7 @@
  *  - All amounts are computed by lib/documents/calc.ts, never here.
  */
 
-import { addDaysIso, fillPaymentMarkers, localId, newItem, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PriceBasis, BLOCK_KEYS, DOC_CURRENCIES, blockHeading } from '@/lib/documents/model';
+import { addDaysIso, fillPaymentMarkers, localId, newItem, paymentTextConflict, pctList, planComplete, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PriceBasis, BLOCK_KEYS, DOC_CURRENCIES, blockHeading } from '@/lib/documents/model';
 import { parseMoney } from '@/lib/documents/calc';
 
 export interface SuggestedItem {
@@ -290,12 +290,19 @@ export function applyDraft(doc: { title: string; content: DocContent }, s: Draft
     next.payment = s.payment.map((p) => ({ id: localId('p'), label: p.label, mode: 'percent' as const, value: p.percent === null ? '' : String(p.percent).replace('.', ','), due: p.due }));
     applied.push('payment');
   }
-  // A complete plan was applied: "[EKSİK: ödeme …]" left in the texts would contradict it — it is replaced by the plan itself.
-  if (want.has('payment')) {
+  // "[EKSİK: ödeme …]" next to a complete plan would contradict it: it is replaced by the plan itself —
+  // in every text when the plan itself was applied, otherwise only in the texts applied now (the document's existing plan).
+  if (planComplete(next.payment)) {
+    const appliedKeys = new Set(blockIds.map((x) => x.slice(6)));
     let filled = 0;
-    next.blocks = (next.blocks ?? c.blocks).map((b) => { const r = fillPaymentMarkers(b.body, next.payment, c.locale); filled += r.filled; return r.filled ? { ...b, body: r.text } : b; });
-    if (filled) notes.push(`Metindeki ${filled} “[EKSİK: ödeme …]” işareti uygulanan ödeme planıyla dolduruldu.`);
+    next.blocks = (next.blocks ?? c.blocks).map((b) => {
+      if (!want.has('payment') && !appliedKeys.has(b.key)) return b;
+      const r = fillPaymentMarkers(b.body, next.payment, c.locale); filled += r.filled; return r.filled ? { ...b, body: r.text } : b;
+    });
+    if (filled) notes.push(`Metindeki ${filled} “[EKSİK: ödeme …]” işareti ${want.has('payment') ? 'uygulanan' : 'belgedeki'} ödeme planıyla dolduruldu.`);
   }
+  const conflict = paymentTextConflict({ blocks: next.blocks ?? c.blocks, payment: next.payment ?? c.payment });
+  if (conflict && (want.has('payment') || blockIds.length)) notes.push(`Ödeme metni ile plan uyuşmuyor (metinde ${pctList(conflict.text)}, planda ${pctList(conflict.plan)}); kesinleştirmeden önce metni veya planı düzeltin.`);
   if (want.has('deliveryTime')) { next.deliveryTime = s.deliveryTime.trim(); applied.push('deliveryTime'); }
   if (want.has('validity') && s.validityDays && c.issueDate) { next.validUntil = addDaysIso(c.issueDate, s.validityDays); applied.push('validity'); }
   if (want.has('closing')) { next.closing = s.closing.trim(); applied.push('closing'); }

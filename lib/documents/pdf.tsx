@@ -45,7 +45,7 @@ import path from 'node:path';
 import React from 'react';
 import type { BankAccount } from '@/lib/documents/settings';
 import { formatIban } from '@/lib/documents/settings';
-import { BLOCK_LABEL, KIND_DEF, KIND_LABEL, MISSING_MARKER, allText, bodyParts, type Block, type DocContent, type DocKind, type Issuer } from '@/lib/documents/model';
+import { BLOCK_LABEL, KIND_DEF, KIND_LABEL, MISSING_MARKER, allText, paymentTextConflict, bodyParts, type Block, type DocContent, type DocKind, type Issuer } from '@/lib/documents/model';
 import { computeDocument, fmtMoney, fmtPct, parseMoney, quantityText, type LineResult, type RecurringGroup } from '@/lib/documents/calc';
 
 // @react-pdf/renderer is ESM-only ("import" export condition): it is loaded with
@@ -145,6 +145,7 @@ const L = {
     recurringNote: 'Bu ücretler tek seferlik toplama ve ödeme planına dahil değildir; kendi dönemlerinde faturalanır. Birim fiyatlar KDV hariç, dönem toplamları KDV dahildir.',
     exVat: 'Tutarlar KDV hariç', renewal: (b: 'monthly' | 'yearly', y: number) => [`${b === 'monthly' ? 'Aylık' : 'Yıllık'} yenileme`, `${y}. yıldan itibaren`],
     markersLine: (n: number) => `Doldurulmamış yer var (${n}) · kesinleştirmeden önce tamamlanmalı`,
+    planConflict: 'Ödeme metni ile plan uyuşmuyor · kesinleştirmeden önce düzeltilmeli',
     group: (b: 'monthly' | 'yearly', y: number) => `${b === 'monthly' ? 'Aylık' : 'Yıllık'} · ${y > 1 ? `${y}. yıldan itibaren` : 'başlangıçtan itibaren'}`,
     per: { monthly: 'ay', yearly: 'yıl' },
     groupTotal: (b: 'monthly' | 'yearly', y: number) => (b === 'monthly' ? 'Aylık toplam (KDV dahil)' : y > 1 ? 'Yıllık yenileme (KDV dahil)' : 'Yıllık toplam (KDV dahil)'),
@@ -177,6 +178,7 @@ const L = {
     recurringNote: 'These fees are not part of the one-time total or the payment plan; they are billed in their own periods. Unit prices exclude VAT; period totals include VAT.',
     exVat: 'Amounts excl. VAT', renewal: (b: 'monthly' | 'yearly', y: number) => [`${b === 'monthly' ? 'Monthly' : 'Yearly'} renewal`, `from year ${y}`],
     markersLine: (n: number) => `${n} placeholder(s) still to fill · must be completed before finalizing`,
+    planConflict: 'Payment text and payment plan do not match · must be fixed before finalizing',
     group: (b: 'monthly' | 'yearly', y: number) => `${b === 'monthly' ? 'Monthly' : 'Yearly'} · ${y > 1 ? `from year ${y}` : 'from the start'}`,
     per: { monthly: 'month', yearly: 'year' },
     groupTotal: (b: 'monthly' | 'yearly', y: number) => (b === 'monthly' ? 'Monthly total (incl. VAT)' : y > 1 ? 'Yearly renewal (incl. VAT)' : 'Yearly total (incl. VAT)'),
@@ -877,6 +879,7 @@ function CommercialDocument({ input, layout }: { input: RenderInput; layout?: La
           {c.reference ? <R.Text style={st.small}>{t.reference}: {c.reference}</R.Text> : null}
           {statusLine(input, t) ? <R.Text style={st.small}>{statusLine(input, t)}</R.Text> : null}
           {markerCount(c) ? <R.Text style={[st.missing, { marginTop: 2 }]}>{t.markersLine(markerCount(c))}</R.Text> : null}
+          {def.payment && paymentTextConflict(c) ? <R.Text style={[st.missing, { marginTop: 2 }]}>{t.planConflict}</R.Text> : null}
         </InfoCol>
       </R.View>
 

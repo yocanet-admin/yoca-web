@@ -263,6 +263,7 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
           </div>
           <RecurringSummary groups={calc.recurring} currency={c.currency} compact />
           {preview.skipped.map((x) => <p key={x.id} className="text-[12px] text-yellow-200">{x.why}</p>)}
+          {preview.notes.map((x) => <p key={x} className={`text-[12px] ${/uyuşmuyor/.test(x) ? 'text-yellow-200' : 'text-subtle'}`} data-testid="review-note">Uygulanırsa: {x}</p>)}
         </aside>
       </div>
 
