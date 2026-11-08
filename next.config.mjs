@@ -1,8 +1,12 @@
+import { withSentryConfig } from '@sentry/nextjs';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   experimental: {
+    // Next 14: loads instrumentation.ts (GlitchTip server SDK).
+    instrumentationHook: true,
     // Document PDFs read the embedded fonts and the original logo SVG from disk.
     outputFileTracingIncludes: {
       // pdfkit loads its built-in font metrics (Helvetica, used as the initial
@@ -33,4 +37,15 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+// GlitchTip (Sentry protocol): server-side error reports only. No source map upload,
+// no release creation, no build telemetry, no client bundle changes.
+export default withSentryConfig(nextConfig, {
+  silent: true,
+  telemetry: false,
+  sourcemaps: { disable: true },
+  release: { create: false },
+  autoInstrumentServerFunctions: true,
+  autoInstrumentMiddleware: false,
+  autoInstrumentAppDirectory: true,
+  disableLogger: true,
+});
