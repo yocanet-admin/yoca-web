@@ -1,6 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
 import { dropBreadcrumb, toSafeEvent } from '@/lib/observability/scrub';
-import { GlitchTipSelfTest, selftestDue } from '@/lib/observability/selftest';
 
 /**
  * Yoca — server-side error reports to GlitchTip (Sentry protocol).
@@ -34,12 +33,4 @@ if (dsn) {
     beforeSendTransaction: () => null,
     beforeBreadcrumb: dropBreadcrumb,
   });
-
-  // One synthetic event per server instance of the deployment named in
-  // GLITCHTIP_SELFTEST (lib/observability/selftest.ts); otherwise nothing.
-  const flag = globalThis as { __yocaGlitchTipSelfTest?: boolean };
-  if (selftestDue({ GLITCHTIP_SELFTEST: process.env.GLITCHTIP_SELFTEST, VERCEL_GIT_COMMIT_SHA: process.env.VERCEL_GIT_COMMIT_SHA }, flag.__yocaGlitchTipSelfTest === true)) {
-    flag.__yocaGlitchTipSelfTest = true;
-    Sentry.captureException(new GlitchTipSelfTest());
-  }
 }

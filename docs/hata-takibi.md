@@ -39,9 +39,9 @@ Olaylar arka planda gönderilir. Yerel denemede (8 Kasım, sentetik veri) Glitch
 
 Kaynak haritası yüklenmediği için yığın konumları derlenmiş dosyalardadır (ör. `.next/server/chunks/7092.js:18`). Kaynak haritası yüklemek ayrı bir karardır (GlitchTip'e kaynak kodu gider).
 
-## Bağlantı testi (tek sentetik olay)
+## Uçtan uca bağlantı doğrulaması (açık)
 
-`GLITCHTIP_SELFTEST` dağıtılan commit'in ilk 7–40 karakterine eşitse, o dağıtımın her sunucu örneği açılışta **en fazla bir** sentetik olay gönderir (`lib/observability/selftest.ts`): tür `GlitchTipSelfTest`, değer `code GLITCHTIP_SELFTEST`, yığın konumları ve sürüm. Rota, istek, veritabanı veya yanıt etkisi yoktur. Başka bir commit dağıtılınca kendiliğinden kapanır; değişken silinince tamamen kapanır. Serverless'ta birden fazla örnek açılırsa olay sayısı örnek sayısı kadar olabilir (hepsi aynı sorunda toplanır).
+Olayın GlitchTip'e ulaştığı henüz doğrulanmadı. Sunucu başlangıcına bağlı bir test her sunucu örneğinde yeniden çalışabildiği için (tek olay garanti edilemez, ücretsiz kotayı tüketir) eklenmedi. Tekrar çalıştırılsa da tek olay üretmek kalıcı bir "gönderildi" kaydı gerektirir; bunun için production veritabanına yazmak veya yeni altyapı eklemek gerekir, bu da yapılmadı. Production'da DSN tanımlandıktan sonra ilk gerçek sunucu hatası GlitchTip'te izin listesine göre incelenir.
 
 ## Hesap
 
