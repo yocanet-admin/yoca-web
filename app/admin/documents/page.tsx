@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { Badge, Empty, Flash, PageHead, field, label, small, fmtDate } from '@/components/admin/ops/ui';
 import { clientDisplay, docAction, draftPdf, loadDoc, loadList, moneyOf, newKey, storedPdf, type ClientLite, type DocList, type DocListRow, type ProjectLite } from '@/lib/documents/client';
-import { DOC_KINDS, KIND_LABEL, QUOTE_STATE_LABEL, STATUS_LABEL, type DocKind } from '@/lib/documents/model';
+import { CURRENCY_LABEL, DOC_CURRENCIES, DOC_KINDS, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, STATUS_LABEL, type DocCurrency, type DocKind } from '@/lib/documents/model';
 import type { BankChange } from '@/lib/documents/settings';
 import { BankDecision } from '@/components/admin/documents/BankDecision';
 
@@ -19,7 +19,7 @@ import { BankDecision } from '@/components/admin/documents/BankDecision';
 const STATUS_TONE = { draft: 'warn', final: 'ok', archived: 'muted' } as const;
 const QUOTE_TONE = { sent: 'info', accepted: 'ok', rejected: 'bad', expired: 'muted' } as const;
 
-function NewDocument({ clients, projects, onClose, preset }: { clients: ClientLite[]; projects: ProjectLite[]; onClose: () => void; preset: { clientId?: string; kind?: DocKind } }) {
+function NewDocument({ clients, projects, onClose, preset, defaultCurrency }: { clients: ClientLite[]; projects: ProjectLite[]; onClose: () => void; preset: { clientId?: string; kind?: DocKind }; defaultCurrency: DocCurrency }) {
   const router = useRouter();
   const [kind, setKind] = useState<DocKind>(preset.kind ?? 'quote');
   const [clientId, setClientId] = useState(preset.clientId ?? '');
@@ -27,6 +27,7 @@ function NewDocument({ clients, projects, onClose, preset }: { clients: ClientLi
   const [company, setCompany] = useState('');
   const [person, setPerson] = useState('');
   const [locale, setLocale] = useState<'tr' | 'en'>('tr');
+  const [currency, setCurrency] = useState<DocCurrency>(defaultCurrency);
   const [start, setStart] = useState<'manual' | 'ai'>('manual');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +39,7 @@ function NewDocument({ clients, projects, onClose, preset }: { clients: ClientLi
   const create = async () => {
     setBusy(true); setError(null);
     const r = await docAction<{ id: string }>({
-      action: 'create', kind, clientId: clientId || null, locale, requestKey: key,
+      action: 'create', kind, clientId: clientId || null, locale, requestKey: key, ...(KIND_DEF[kind].items ? { currency } : {}),
       projectId: projectId || null,
       recipient: clientId ? undefined : { company, name: person },
     });
@@ -81,7 +82,12 @@ function NewDocument({ clients, projects, onClose, preset }: { clients: ClientLi
             </select>
           </label>
         )}
-        <div className="grid grid-cols-2 gap-3">
+        <div className={`grid gap-3 ${KIND_DEF[kind].items ? 'sm:grid-cols-3' : 'grid-cols-2'}`}>
+          {KIND_DEF[kind].items && (
+            <label className={label}>Para birimi
+              <select className={field} value={currency} onChange={(e) => setCurrency(e.target.value as DocCurrency)}>{DOC_CURRENCIES.map((x) => <option key={x} value={x}>{CURRENCY_LABEL[x]}</option>)}</select>
+            </label>
+          )}
           <label className={label}>Dil
             <select className={field} value={locale} onChange={(e) => setLocale(e.target.value === 'en' ? 'en' : 'tr')}><option value="tr">Türkçe</option><option value="en">English</option></select>
           </label>
@@ -89,7 +95,7 @@ function NewDocument({ clients, projects, onClose, preset }: { clients: ClientLi
             <select className={field} value={start} onChange={(e) => setStart(e.target.value === 'ai' ? 'ai' : 'manual')}><option value="manual">Elle dolduracağım</option><option value="ai">{letter ? 'AI ile kurumsal metin hazırla' : 'Yapay zekâ ile ilk taslak'}</option></select>
           </label>
         </div>
-        <p className="text-[12px] text-subtle">Şirket bilgileri “Şirket bilgileri” ayarından gelir. Belge numarası türe göre otomatik verilir. {letter ? 'Antetli yazıda konu ve yapılan işi siz yazarsınız; yapay zekâ yalnızca bu bilgilere dayanan bir öneri hazırlar, siz “Uygula” demeden belgeye yazılmaz. Boş antet (numarasız) Kurumsal materyaller sekmesindedir.' : 'Yapay zekâ taslağı yalnızca öneri olarak gelir; fiyat, vergi ve şirket bilgisi yazmaz.'}</p>
+        <p className="text-[12px] text-subtle">Şirket bilgileri “Şirket bilgileri” ayarından gelir. Belge numarası türe göre otomatik verilir. {letter ? 'Antetli yazıda konu ve yapılan işi siz yazarsınız; yapay zekâ yalnızca bu bilgilere dayanan bir öneri hazırlar, siz “Uygula” demeden belgeye yazılmaz. Boş antet (numarasız) Kurumsal materyaller sekmesindedir.' : 'Yapay zekâ taslağı yalnızca öneri olarak gelir; siz isterseniz tahmini fiyat önerir (kontrol edilmeli işaretiyle), vergi oranı ve şirket bilgisi yazmaz. Tek teklif tek para birimiyle hazırlanır.'}</p>
         {error && <Flash tone="bad" message={error} />}
         <div className="flex justify-end gap-2">
           <button type="button" className="admin-btn" onClick={onClose} disabled={busy}>Vazgeç</button>
@@ -217,7 +223,7 @@ function ListInner() {
       {rows.length === 0 ? (
         <Empty text={data.documents.length ? 'Bu filtrelerle eşleşen belge yok.' : 'Henüz belge yok.'} action={<button type="button" className="admin-btn admin-btn-primary" onClick={() => setCreating(true)}>+ Yeni belge</button>} />
       ) : (
-        <div className="overflow-x-auto border border-line">
+        <div className="relative overflow-x-auto border border-line">
           <table className="w-full min-w-[860px] text-[13px]">
             <thead className="bg-surface-secondary text-left text-[11px] uppercase tracking-[0.08em] text-subtle">
               <tr><th className="px-3 py-2">Belge no</th><th className="px-3 py-2">Başlık</th><th className="px-3 py-2">Tür</th><th className="px-3 py-2">Müşteri / alıcı</th><th className="px-3 py-2">Tarih</th><th className="px-3 py-2">Durum</th><th className="px-3 py-2 text-right">Toplam</th><th className="px-3 py-2"><span className="sr-only">İşlemler</span></th></tr>
@@ -252,7 +258,7 @@ function ListInner() {
       )}
       <p className="text-[12px] text-subtle">Daha önce indirdiğiniz veya e-postayla gönderdiğiniz PDF dosyaları değişmez. Yeni indirme, o anki şirket bilgileriyle üretilir; belgenin kalemleri, tutarları, alıcısı ve tarihi değişmez.</p>
       {bankAsk && <BankDecision number={bankAsk.doc.number} version={bankAsk.version} changes={bankAsk.changes} busy={busy === bankAsk.doc.id} canRevise={bankAsk.doc.status === 'final'} onClose={() => setBankAsk(null)} onKeep={() => void download(bankAsk.doc, true)} onRevise={() => void reviseForBank(bankAsk.doc)} />}
-      {creating && <NewDocument clients={data.clients} projects={data.projects ?? []} preset={{ clientId: params.get('client') ?? undefined }} onClose={() => setCreating(false)} />}
+      {creating && <NewDocument clients={data.clients} projects={data.projects ?? []} defaultCurrency={data.settings.defaultCurrency} preset={{ clientId: params.get('client') ?? undefined }} onClose={() => setCreating(false)} />}
     </div>
   );
 }

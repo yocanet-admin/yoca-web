@@ -5,13 +5,16 @@ import { hasOpenAIKey, OpenAIError } from '@/lib/ai/openai';
 import { mockEnabled } from '@/lib/ai/mock';
 import { checkModel, getAiSettings, resolveModel } from '@/lib/ai/settings';
 import { finishRun, startRun } from '@/lib/ai/runs';
-import { cleanDraft, cleanLetter, draftDocument, letterText, moneyMentions, rewriteText, translateDocument, type RewriteOp } from '@/lib/ai/documents';
-import { DOC_KINDS, sanitizeContent, type DocKind, type DocLocale } from '@/lib/documents/model';
+import { cleanDraft, cleanLetter, draftDocument, draftScopes, letterText, moneyMentions, rewriteText, translateDocument, type RewriteOp } from '@/lib/ai/documents';
+import { DOC_CURRENCIES, DOC_KINDS, KIND_DEF, sanitizeContent, type DocCurrency, type DocKind, type DocLocale } from '@/lib/documents/model';
+import { pricesRequested } from '@/lib/documents/aiDraft';
 
 /**
  * Yoca — AI help for documents (admin only; existing server-side OpenAI key,
  * model settings, monthly budget and ai_runs ledger; no key ever reaches the browser).
- * POST { mode: 'draft', kind, locale, brief, recipient?, projectName?, requestKey }
+ * POST { mode: 'draft', kind, locale, brief, currency (types with line items; required, never defaulted),
+ *        prices?, sample?, scope? ('all' | section id), id? (the document: client link + draft status checked),
+ *        current? (document content, for a section-level regeneration), recipient?, projectName?, requestKey }
  *      { mode: 'rewrite', op: 'shorten'|'formal'|'simplify', locale, text, requestKey }
  *      { mode: 'translate', id, kind, content, title, to: 'tr'|'en', requestKey }
  *      { mode: 'letter', locale, subject?, facts, recipient?, projectName?, requestKey } (Antetli yazı / Bilgilendirme)
@@ -60,6 +63,23 @@ export async function POST(request: NextRequest) {
   const op = (['shorten', 'formal', 'simplify'] as const).includes(body.op as RewriteOp) ? (body.op as RewriteOp) : null;
   if (mode === 'rewrite' && !op) return NextResponse.json({ ok: false, error: 'Geçersiz işlem.' }, { status: 400 });
   if (mode === 'translate' && body.to !== 'tr' && body.to !== 'en') return NextResponse.json({ ok: false, error: 'Hedef dil seçin.' }, { status: 400 });
+  // Draft: the document currency is the admin's choice and must come with the request (never defaulted to TRY).
+  const draftCurrency = (DOC_CURRENCIES as readonly string[]).includes(body.currency as string) ? (body.currency as DocCurrency) : null;
+  if (mode === 'draft' && KIND_DEF[kind].items && !draftCurrency) return NextResponse.json({ ok: false, error: 'Para birimi seçilmedi: önce Belge bilgileri → Para birimi’ni seçin. Yapay zekâ para birimini kendisi seçmez.' }, { status: 400 });
+  const scope = mode === 'draft' && typeof body.scope === 'string' && draftScopes(kind).includes(body.scope) ? body.scope : 'all';
+  const sample = mode === 'draft' && body.sample === true;
+  let realClient = false;
+  if (mode === 'draft' && body.id !== undefined) {
+    const client = getSupabaseAsUser(bearerToken(request));
+    const id = String(body.id ?? '');
+    const row = client && /^[0-9a-f-]{36}$/i.test(id) ? ((await client.from('doc_documents').select('id, status, client_id').eq('id', id).maybeSingle()).data as { status: string; client_id: string | null } | null) : null;
+    if (!row) return NextResponse.json({ ok: false, error: 'Belge bulunamadı.' }, { status: 404 });
+    if (row.status !== 'draft') return NextResponse.json({ ok: false, error: 'Kesinleşmiş veya arşivlenmiş belgeye taslak önerilmez; önce “Revize et”.' }, { status: 409 });
+    // The editor may have linked a client that is not saved yet: that counts as linked too.
+    const linked = Boolean(row.client_id) || (typeof body.clientId === 'string' && body.clientId.length > 0);
+    realClient = linked || (!sample && String(body.recipient ?? '').trim().length > 0);
+    if (sample && linked) return NextResponse.json({ ok: false, error: 'Bu belge bir müşteri kaydına bağlı: örnek (kurgusal) taslak hazırlanmaz. Örnek için müşteriye bağlı olmayan yeni bir belge açın.' }, { status: 409 });
+  }
   if (mode === 'translate') {
     // The document must exist and be readable by this admin.
     const client = getSupabaseAsUser(bearerToken(request));
@@ -92,8 +112,21 @@ export async function POST(request: NextRequest) {
     let requestId: string | undefined;
     let isMock = false;
     if (mode === 'draft') {
-      const r = await draftDocument(model, { kind, locale, brief: String(body.brief), recipient: String(body.recipient ?? '').slice(0, 300), projectName: String(body.projectName ?? '').slice(0, 200) });
-      result = { suggestion: cleanDraft(kind, r.data) };
+      const brief = String(body.brief);
+      const currency: DocCurrency = draftCurrency ?? 'TRY'; // types without line items carry no amounts
+      const prices = KIND_DEF[kind].items && (body.prices === true || pricesRequested(brief));
+      let current: unknown;
+      if (scope !== 'all' && body.current) {
+        const c = sanitizeContent(body.current, kind);
+        current = {
+          title: String(body.title ?? '').slice(0, 200), currency: c.currency, deliveryTime: c.deliveryTime, closing: c.closing,
+          blocks: c.blocks.filter((b) => b.body.trim()).map((b) => ({ key: b.key, heading: b.heading, body: b.body })),
+          items: c.items.filter((i) => i.title.trim()).map((i) => ({ title: i.title, description: i.description, billing: i.billing, term: i.term, startYear: i.startYear, included: Boolean(i.includedIn), unitPrice: i.unitPrice })),
+          payment: c.payment.map((p) => ({ label: p.label, mode: p.mode, value: p.value, due: p.due })),
+        };
+      }
+      const r = await draftDocument(model, { kind, locale, brief, recipient: String(body.recipient ?? '').slice(0, 300), projectName: String(body.projectName ?? '').slice(0, 200), currency, prices, sample, realClient, scope, current });
+      result = { suggestion: cleanDraft(kind, r.data, { currency, prices, sample, scope, brief }) };
       usage = r.usage; requestId = r.requestId; isMock = Boolean(r.mock);
     } else if (mode === 'letter') {
       const facts = String(body.facts).slice(0, 6000);

@@ -21,6 +21,21 @@ export type DocLocale = (typeof DOC_LOCALES)[number];
 export const DOC_CURRENCIES = ['TRY', 'USD', 'EUR', 'GBP', 'AZN'] as const;
 export type DocCurrency = (typeof DOC_CURRENCIES)[number];
 
+/** Panel labels for the currency picker (one currency per document; there is no exchange-rate system). */
+export const CURRENCY_LABEL: Record<DocCurrency, string> = {
+  TRY: 'Türk lirası (TRY)', USD: 'ABD doları (USD)', EUR: 'Euro (EUR)', GBP: 'İngiliz sterlini (GBP)', AZN: 'Azerbaycan manatı (AZN)',
+};
+
+/** How a line is billed. "once" = one-time (the default and every line written before this field existed). */
+export const BILLINGS = ['once', 'monthly', 'yearly'] as const;
+export type Billing = (typeof BILLINGS)[number];
+export const BILLING_LABEL: Record<Billing, { tr: string; en: string; per: { tr: string; en: string } }> = {
+  once: { tr: 'Tek seferlik', en: 'One-time', per: { tr: '', en: '' } },
+  monthly: { tr: 'Aylık', en: 'Monthly', per: { tr: 'ay', en: 'month' } },
+  yearly: { tr: 'Yıllık', en: 'Yearly', per: { tr: 'yıl', en: 'year' } },
+};
+export type PriceBasis = '' | 'fixed' | 'estimate';
+
 export const DOC_STATUSES = ['draft', 'final', 'archived'] as const;
 export type DocStatus = (typeof DOC_STATUSES)[number];
 
@@ -110,6 +125,18 @@ export interface LineItem {
   discountPct: string;
   /** VAT/KDV percent, chosen by the admin (never by the AI). */
   taxRate: string;
+  /** One-time (default), monthly or yearly. Optional only for content written before it existed. */
+  billing?: Billing;
+  /** Recurring lines: number of periods (months / years) this quote assumes. '' = not stated (shown as such, never guessed). */
+  term?: string;
+  /** Recurring lines: the year billing starts. 1 = from the start; 2 = from year 2 (a future renewal, never in today's total). */
+  startYear?: number;
+  /** id of another line this one is included in (e.g. first-year domain + hosting in the website). It has no price of its own. */
+  includedIn?: string;
+  /** Lines billed from year 2 on: 'fixed' = price commitment, 'estimate' = per the current tariff, may change. */
+  priceBasis?: PriceBasis;
+  /** The unit price is an AI suggestion that nobody has reviewed yet (cleared when the admin edits or confirms it). */
+  aiPrice?: boolean;
 }
 
 export interface PaymentStep {
@@ -152,6 +179,8 @@ export interface DocContent {
   signatory: { name: string; title: string };
   /** Optional link to an Operasyon project (ops_projects.id); the document keeps its own copy of the name. */
   projectId: string | null;
+  /** ÖRNEK (synthetic) document: fictional names allowed, printed "ÖRNEK", never finalized, sent or linked to a client. */
+  sample?: boolean;
 }
 
 export const EMPTY_RECIPIENT: Recipient = { name: '', company: '', attention: '', address: '', taxOffice: '', taxNumber: '', email: '', phone: '' };
@@ -169,7 +198,7 @@ export function blockHeading(key: BlockKey, locale: DocLocale): string {
 }
 
 export function newItem(defaultTaxRate = '20'): LineItem {
-  return { id: localId('i'), title: '', description: '', quantity: '1', unit: '', unitPrice: '', discountPct: '', taxRate: defaultTaxRate };
+  return { id: localId('i'), title: '', description: '', quantity: '1', unit: '', unitPrice: '', discountPct: '', taxRate: defaultTaxRate, billing: 'once', term: '', startYear: 1, includedIn: '', priceBasis: '', aiPrice: false };
 }
 
 export function todayIso(now = new Date()): string {
@@ -207,6 +236,7 @@ export function newContent(kind: DocKind, opts: { locale?: DocLocale; currency?:
     closing: kind === 'letter' ? (locale === 'tr' ? 'Saygılarımızla,' : 'Kind regards,') : '',
     signatory: opts.signatory ?? { name: '', title: '' },
     projectId: null,
+    sample: false,
   };
 }
 
@@ -245,10 +275,18 @@ export function sanitizeContent(input: unknown, kind: DocKind): DocContent {
     items: def.items
       ? items.map((raw) => {
           const it = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+          const billing: Billing = (BILLINGS as readonly string[]).includes(it.billing as string) ? (it.billing as Billing) : 'once';
+          const sy = Number(it.startYear);
           return {
             id: id(it.id, 'i'), title: str(it.title, LIMITS.title), description: str(it.description, LIMITS.itemDescription),
             quantity: str(it.quantity, 20).trim(), unit: str(it.unit, 30), unitPrice: str(it.unitPrice, 30).trim(),
             discountPct: str(it.discountPct, 10).trim(), taxRate: str(it.taxRate, 10).trim(),
+            billing,
+            term: billing !== 'once' && /^\d{1,3}$/.test(str(it.term, 4).trim()) && Number(it.term) >= 1 ? String(Number(it.term)) : '',
+            startYear: billing !== 'once' && Number.isInteger(sy) && sy >= 1 && sy <= 5 ? sy : 1,
+            includedIn: typeof it.includedIn === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(it.includedIn) ? it.includedIn : '',
+            priceBasis: it.priceBasis === 'fixed' || it.priceBasis === 'estimate' ? it.priceBasis : '',
+            aiPrice: it.aiPrice === true,
           };
         })
       : [],
@@ -269,6 +307,7 @@ export function sanitizeContent(input: unknown, kind: DocKind): DocContent {
     closing: str(v.closing, 120),
     signatory: { name: str(sig.name, 120), title: str(sig.title, 120) },
     projectId: typeof v.projectId === 'string' && /^[0-9a-f-]{36}$/i.test(v.projectId) ? v.projectId : null,
+    sample: v.sample === true,
   };
 }
 
@@ -315,7 +354,10 @@ export function missingFor(kind: DocKind, c: DocContent, issuer: Issuer, extra: 
     if (!real.length) blocking.push('En az bir iş kalemi gerekli.');
     real.forEach((i, n) => { if (!i.title.trim()) blocking.push(`${n + 1}. kalemin açıklaması (başlığı) boş.`); });
     for (const label of extra.missingPrices ?? []) blocking.push(`Fiyatı eksik kalem: ${label}`);
+    real.forEach((i, n) => { if (i.aiPrice && i.unitPrice.trim() && !i.includedIn) blocking.push(`AI fiyat önerisi kontrol edilmedi: ${i.title.trim() || `${n + 1}. kalem`} (fiyatı düzenleyin veya “Fiyatı kontrol ettim” deyin).`); });
+    real.forEach((i, n) => { if ((i.billing ?? 'once') === 'monthly' && !i.includedIn && !i.term) warnings.push(`${i.title.trim() || `${n + 1}. kalem`}: aylık hizmetin süresi belirtilmedi (teklifte “süre belirtilmedi” yazar).`); });
   }
+  if (c.sample) blocking.push('Bu bir ÖRNEK (sentetik) belge: kesinleştirilemez ve gönderilemez. Gerçek teklif için yeni belge açın veya örnek işaretini kaldırıp bilgileri gerçek bilgilerle değiştirin.');
   if (def.validity && !c.validUntil) (kind === 'quote' ? blocking : warnings).push('Geçerlilik tarihi yok.');
   if (def.validity && c.validUntil && c.issueDate && c.validUntil < c.issueDate) blocking.push('Geçerlilik tarihi düzenleme tarihinden önce.');
   if (def.payment && extra.paymentProblem) blocking.push(extra.paymentProblem);
@@ -354,4 +396,19 @@ export function bodyParts(body: string, list: boolean): Array<{ type: 'p' | 'li'
   }
   flush();
   return out.filter((p) => p.text);
+}
+
+/** One line of panel text about how a line is billed ("Aylık · süre belirtilmedi", "Web sitesi kalemine dahil", …). */
+export function billingText(it: LineItem, items: LineItem[]): string {
+  if (it.includedIn) {
+    const t = items.find((x) => x.id === it.includedIn);
+    return t ? `“${t.title.trim() || 'kalem'}” kalemine dahil (ayrı fiyatı yok)` : 'Dahil olduğu kalem bulunamadı';
+  }
+  const b = it.billing ?? 'once';
+  if (b === 'once') return 'Tek seferlik';
+  const per = BILLING_LABEL[b].per.tr;
+  const start = (it.startYear ?? 1) > 1 ? `${it.startYear}. yıldan itibaren` : 'başlangıçtan itibaren';
+  const term = it.term ? `${it.term} ${per}` : 'süre belirtilmedi';
+  const basis = (it.startYear ?? 1) > 1 ? (it.priceBasis === 'fixed' ? 'sabit fiyat' : it.priceBasis === 'estimate' ? 'güncel tarifeye göre tahmini' : 'fiyat niteliği seçilmedi') : '';
+  return [BILLING_LABEL[b].tr, start, term, basis].filter(Boolean).join(' · ');
 }

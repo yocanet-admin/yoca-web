@@ -19,6 +19,17 @@
 
 import type { DocContent, LineItem, PaymentStep } from '@/lib/documents/model';
 
+/*
+ * One-time vs recurring (2026-11): every line has a billing (one-time,
+ * monthly, yearly) and recurring lines a start year. Only one-time lines make
+ * up "today's" total and the payment plan; each recurring kind (e.g. monthly
+ * from the start, yearly from year 2) is its own group with its own totals and
+ * is never added to the one-time total. A line included in another line
+ * (first-year domain + hosting in the website) has no amount and is not
+ * "price missing". Content written before these fields existed is all
+ * one-time, so its totals are unchanged.
+ */
+
 const ZERO = BigInt(0);
 const ONE = BigInt(1);
 const TWO = BigInt(2);
@@ -88,6 +99,8 @@ export interface LineResult {
   taxRateBp: bigint | null;
   error: string | null;
   missingPrice: boolean;
+  /** Included in another line: no amount of its own, never "price missing". */
+  included: boolean;
 }
 
 export interface TaxRow {
@@ -116,7 +129,8 @@ const isBlankLine = (i: LineItem) => !i.title.trim() && !i.description.trim() &&
 
 export function computeLine(item: LineItem, index: number): LineResult {
   const label = item.title.trim() || `${index + 1}. kalem`;
-  const base: LineResult = { id: item.id, index, label, gross: null, discount: null, net: null, taxRateBp: null, error: null, missingPrice: false };
+  const base: LineResult = { id: item.id, index, label, gross: null, discount: null, net: null, taxRateBp: null, error: null, missingPrice: false, included: false };
+  if (item.includedIn) return { ...base, included: true };
   const qty = parseScaled(item.quantity || '1', 3);
   if (qty === undefined || qty === null) return { ...base, error: `${label}: miktar geçersiz (en çok 3 ondalık, örn. 1,5).` };
   if (qty <= ZERO) return { ...base, error: `${label}: miktar sıfırdan büyük olmalı.` };
@@ -132,8 +146,9 @@ export function computeLine(item: LineItem, index: number): LineResult {
   return { ...base, gross, discount, net: gross - discount, taxRateBp: rate };
 }
 
-export function computeTotals(items: LineItem[]): Totals {
-  const lines = items.map((it, i) => ({ it, i })).filter(({ it }) => !isBlankLine(it)).map(({ it, i }) => computeLine(it, i));
+/** Totals of the lines `pick` selects (all by default). Line indexes stay those of `items`. */
+export function computeTotals(items: LineItem[], pick: (it: LineItem) => boolean = () => true): Totals {
+  const lines = items.map((it, i) => ({ it, i })).filter(({ it }) => !isBlankLine(it) && pick(it)).map(({ it, i }) => computeLine(it, i));
   let subtotal = ZERO;
   let discount = ZERO;
   let net = ZERO;
@@ -141,6 +156,7 @@ export function computeTotals(items: LineItem[]): Totals {
   const missingPrices: string[] = [];
   const errors: string[] = [];
   for (const l of lines) {
+    if (l.included) continue;
     if (l.error) { errors.push(l.error); continue; }
     if (l.missingPrice) { missingPrices.push(l.label); continue; }
     subtotal += l.gross as bigint;
@@ -154,7 +170,7 @@ export function computeTotals(items: LineItem[]): Totals {
   const taxes = Array.from(byRate.values()).sort((a, b) => (a.rateBp < b.rateBp ? -1 : a.rateBp > b.rateBp ? 1 : 0));
   let tax = ZERO;
   for (const t of taxes) { t.tax = divRound(t.base * t.rateBp, BigInt(10000)); tax += t.tax; }
-  const complete = lines.length > 0 && !missingPrices.length && !errors.length;
+  const complete = lines.some((l) => !l.included) && !missingPrices.length && !errors.length;
   return { lines, subtotal, discount, net, taxes, tax, grand: complete ? net + tax : null, complete, missingPrices, errors };
 }
 
@@ -244,17 +260,78 @@ export function fmtMoney(minor: bigint, currency: string, locale: 'tr' | 'en' = 
   return sym ? `${neg ? '−' : ''}${sym}${num}` : `${neg ? '−' : ''}${num} ${currency}`;
 }
 
+/* ── One-time vs recurring groups ─────────────────────────────── */
+
+export type LineGroupKey = 'once' | `${'monthly' | 'yearly'}:${number}`;
+
+/** Which total a line belongs to. Included lines sit with the one-time lines (they carry no amount). */
+export function lineGroup(it: LineItem): LineGroupKey {
+  const b = it.billing ?? 'once';
+  if (it.includedIn || b === 'once') return 'once';
+  return `${b}:${Math.max(1, it.startYear ?? 1)}`;
+}
+
+export interface RecurringGroup {
+  key: LineGroupKey;
+  billing: 'monthly' | 'yearly';
+  /** 1 = billed from the start; 2 = from year 2 (a future renewal). */
+  startYear: number;
+  totals: Totals;
+  /** The number of periods when every line of the group states the same one; null otherwise. */
+  term: number | null;
+  /** grand × term (informational: never added to the one-time total); null when term or grand is unknown. */
+  termTotal: bigint | null;
+}
+
+/** Problems of the billing fields (block finalizing): included-in targets and the basis of future prices. */
+export function billingErrors(items: LineItem[]): string[] {
+  const out: string[] = [];
+  const real = items.filter((i) => !isBlankLine(i));
+  real.forEach((it) => {
+    const label = it.title.trim() || `${items.indexOf(it) + 1}. kalem`;
+    if (it.includedIn) {
+      const target = real.find((x) => x.id === it.includedIn);
+      if (!target || target.id === it.id) out.push(`${label}: dahil olduğu kalem bulunamadı; kalemi seçin veya “dahil” işaretini kaldırın.`);
+      else if (target.includedIn) out.push(`${label}: başka bir kaleme dahil olan bir kaleme dahil edilemez.`);
+      return;
+    }
+    if ((it.billing ?? 'once') !== 'once' && (it.startYear ?? 1) > 1 && it.unitPrice.trim() && !it.priceBasis) {
+      out.push(`${label}: ${it.startYear}. yıldan itibaren geçerli fiyatın sabit taahhüt mü, güncel tarifeye göre tahmin mi olduğunu seçin.`);
+    }
+  });
+  return out;
+}
+
 /** Everything the panel and the PDF need about the money of one document. */
 export function computeDocument(c: DocContent) {
-  const totals = computeTotals(c.items);
+  // "totals" = one-time lines only: today's payable total and the base of the payment plan.
+  const totals = computeTotals(c.items, (it) => lineGroup(it) === 'once');
   const fmt = (m: bigint) => fmtMoney(m, c.currency, c.locale);
-  const payment = computePayment(c.payment, totals.grand, fmt);
-  return { totals, payment, fmt };
+  let payment = computePayment(c.payment, totals.grand, fmt);
+  const keys = Array.from(new Set(c.items.filter((i) => !isBlankLine(i)).map(lineGroup).filter((k) => k !== 'once')));
+  const recurring: RecurringGroup[] = keys
+    .map((key) => {
+      const [billing, start] = key.split(':') as ['monthly' | 'yearly', string];
+      const t = computeTotals(c.items, (it) => lineGroup(it) === key);
+      const terms = new Set(t.lines.map((l) => c.items[l.index].term ?? ''));
+      const only = terms.size === 1 ? Array.from(terms)[0] : '';
+      const term = only && /^\d+$/.test(only) ? Number(only) : null;
+      return { key, billing, startYear: Number(start), totals: t, term, termTotal: term !== null && t.grand !== null ? t.grand * BigInt(term) : null };
+    })
+    .sort((a, b) => a.startYear - b.startYear || (a.billing === b.billing ? 0 : a.billing === 'monthly' ? -1 : 1));
+  if (payment.problem && totals.lines.filter((l) => !l.included).length === 0 && payment.rows.length) {
+    payment = { ...payment, problem: 'Ödeme planı tek seferlik toplam üzerinden hesaplanır; bu belgede tek seferlik fiyatlı kalem yok. Aylık / yıllık ücretlerin ödemesini “Ödeme koşulları” bölümünde yazın.' };
+  }
+  const issues = {
+    missingPrices: [...totals.missingPrices, ...recurring.flatMap((g) => g.totals.missingPrices)],
+    errors: [...totals.errors, ...recurring.flatMap((g) => g.totals.errors), ...billingErrors(c.items)],
+  };
+  return { totals, payment, fmt, recurring, issues };
 }
 
 /** Plain JSON copy of the totals (strings) for storing in a version snapshot. */
 export function totalsJson(c: DocContent) {
-  const { totals, payment } = computeDocument(c);
+  const { totals, payment, recurring } = computeDocument(c);
   const s = (v: bigint | null) => (v === null ? null : v.toString());
   return {
     currency: c.currency,
@@ -263,6 +340,8 @@ export function totalsJson(c: DocContent) {
     lines: totals.lines.map((l) => ({ id: l.id, gross: s(l.gross), discount: s(l.discount), net: s(l.net), taxRateBp: s(l.taxRateBp) })),
     payment: payment.rows.map((r) => ({ id: r.id, label: r.label, due: r.due, pctBp: s(r.pctBp), amount: s(r.amount) })),
     paymentAdjusted: payment.adjusted.toString(),
+    // recurring groups are kept apart; "grand" above is the one-time total only
+    recurring: recurring.map((g) => ({ billing: g.billing, startYear: g.startYear, net: s(g.totals.net), tax: s(g.totals.tax), grand: s(g.totals.grand), term: g.term, termTotal: s(g.termTotal) })),
   };
 }
 

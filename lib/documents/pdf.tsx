@@ -46,7 +46,7 @@ import React from 'react';
 import type { BankAccount } from '@/lib/documents/settings';
 import { formatIban } from '@/lib/documents/settings';
 import { BLOCK_LABEL, KIND_DEF, KIND_LABEL, bodyParts, type Block, type DocContent, type DocKind, type Issuer } from '@/lib/documents/model';
-import { computeDocument, fmtMoney, fmtPct, fmtQty, parseMoney } from '@/lib/documents/calc';
+import { computeDocument, fmtMoney, fmtPct, fmtQty, parseMoney, type LineResult, type RecurringGroup } from '@/lib/documents/calc';
 
 // @react-pdf/renderer is ESM-only ("import" export condition): it is loaded with
 // a dynamic import, so this module also works where it is compiled as CommonJS.
@@ -139,6 +139,14 @@ const L = {
     paymentTerms: 'Ödeme ve koşullar', payment: 'Ödeme planı', delivery: 'Takvim', bank: 'Banka bilgileri', holder: 'Hesap sahibi', iban: 'IBAN', swift: 'SWIFT', branch: 'Şube',
     notInvoice: 'Fatura yerine geçmez', plan: 'Plan ve koşullar',
     draft: 'Taslak', sample: 'Örnek', versionLine: (v: number, at: string) => `Sürüm ${v}${at ? ` · ${at}` : ''}`, draftLine: 'Taslak · kesinleşmemiş belge',
+    sampleLine: 'ÖRNEK belge · gerçek teklif değildir · kurgusal bilgiler içerir',
+    included: 'Dahil', includedIn: (x: string) => `${x} kalemine dahil`, onceTotal: 'Tek seferlik toplam', once: 'Tek seferlik',
+    recurringHead: 'Tekrarlayan ve sonraki dönem ücretleri',
+    recurringNote: 'Bu ücretler bugünkü (tek seferlik) toplama ve ödeme planına dahil değildir; kendi dönemlerinde faturalanır.',
+    group: (b: 'monthly' | 'yearly', y: number) => `${b === 'monthly' ? 'Aylık' : 'Yıllık'} · ${y > 1 ? `${y}. yıldan itibaren` : 'başlangıçtan itibaren'}`,
+    per: { monthly: 'ay', yearly: 'yıl' }, groupTotal: (per: string) => `Dönem toplamı, KDV dahil / ${per}`,
+    termTotal: (n: number, per: string) => `${n} ${per} varsayımıyla toplam (bilgi amaçlı)`, noTerm: (per: string) => `Süre belirtilmedi: hizmet sürdükçe her ${per} faturalanır.`,
+    basis: { fixed: 'Sabit fiyat (taahhüt)', estimate: 'Güncel tarifeye göre tahmini; yenileme tarihinde güncellenebilir', '': '' },
     continued: (h: string) => `${h} — devam`,
     head: {
       quote: { kicker: 'Fiyat teklifi', h1: 'Teklif', sub: '' },
@@ -158,6 +166,14 @@ const L = {
     paymentTerms: 'Payment and terms', payment: 'Payment plan', delivery: 'Timeline', bank: 'Bank details', holder: 'Account holder', iban: 'IBAN', swift: 'SWIFT', branch: 'Branch',
     notInvoice: 'Not an invoice (fatura yerine geçmez)', plan: 'Plan and terms',
     draft: 'Draft', sample: 'Sample', versionLine: (v: number, at: string) => `Version ${v}${at ? ` · ${at}` : ''}`, draftLine: 'Draft · not final',
+    sampleLine: 'SAMPLE document · not a real quotation · fictional data',
+    included: 'Included', includedIn: (x: string) => `Included in ${x}`, onceTotal: 'One-time total', once: 'One-time',
+    recurringHead: 'Recurring and later-period fees',
+    recurringNote: 'These fees are not part of today\'s (one-time) total or the payment plan; they are billed in their own periods.',
+    group: (b: 'monthly' | 'yearly', y: number) => `${b === 'monthly' ? 'Monthly' : 'Yearly'} · ${y > 1 ? `from year ${y}` : 'from the start'}`,
+    per: { monthly: 'month', yearly: 'year' }, groupTotal: (per: string) => `Period total incl. VAT / ${per}`,
+    termTotal: (n: number, per: string) => `Total assuming ${n} ${per}${n > 1 ? 's' : ''} (for information)`, noTerm: (per: string) => `Duration not stated: billed every ${per} while the service runs.`,
+    basis: { fixed: 'Fixed price (commitment)', estimate: 'Estimate per current tariff; may change at renewal', '': '' },
     continued: (h: string) => `${h} — continued`,
     head: {
       quote: { kicker: 'Price quotation', h1: 'Quote', sub: '' },
@@ -408,7 +424,8 @@ function Frame({ input, t, foot, pages = 1 }: { input: RenderInput; t: Labels; f
   // page number width from the previous pass's page count ("01" or "01 / 03")
   const pageW = (pages > 1 ? 7 : 2) * 9.75 * 0.6;
   const head = t.head[input.kind];
-  const badge = input.mode === 'draft' ? up(t.draft) : input.sample ? up(t.sample) : '';
+  const sample = input.sample || input.content.sample;
+  const badge = sample ? up(t.sample) : input.mode === 'draft' ? up(t.draft) : '';
   const pillW = badge ? badge.length * (7 * 0.72 + 0.9) + 12 + 10 : 0;
   return (
     <>
@@ -451,7 +468,7 @@ function Masthead({ input, t, sub, k = 1 }: { input: RenderInput; t: Labels; sub
       <Logo width={100.5} />
       <R.View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 36 * k }}>
         <R.Text style={st.kicker}>{kicker}</R.Text>
-        {input.mode === 'draft' || input.sample ? <R.Text style={[st.pill, { marginLeft: 10 }]}>{up(input.mode === 'draft' ? t.draft : t.sample)}</R.Text> : null}
+        {input.mode === 'draft' || input.sample || input.content.sample ? <R.Text style={[st.pill, { marginLeft: 10 }]}>{up(input.sample || input.content.sample ? t.sample : t.draft)}</R.Text> : null}
       </R.View>
       <R.View style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: -1 }}>
         <R.Text style={input.kind === 'letter' ? [st.h1, { fontSize: 60, letterSpacing: -60 * 0.035 }] : st.h1}>{head.h1}</R.Text>
@@ -475,23 +492,26 @@ function Kicker({ children, style }: { children: React.ReactNode; style?: Sty })
  * with the unit price, discount and line tax when they add information — and
  * the net amount. No data column is dropped.
  */
-function ItemsTable({ c, t, tail, k = 1 }: { c: DocContent; t: Labels; tail?: React.ReactNode; k?: number }) {
-  const { totals } = computeDocument(c);
+function ItemsTable({ c, t, tail, k = 1, lines: only, per, header = true }: { c: DocContent; t: Labels; tail?: React.ReactNode; k?: number; lines?: LineResult[]; per?: string; header?: boolean }) {
+  const doc = computeDocument(c);
+  const totals = { lines: only ?? doc.totals.lines };
   if (!totals.lines.length) return null;
-  const rates = new Set(totals.lines.map((l) => (l.taxRateBp === null ? '' : String(l.taxRateBp))));
+  const all = [...doc.totals.lines, ...doc.recurring.flatMap((g) => g.totals.lines)].filter((l) => !l.included);
+  const rates = new Set(all.map((l) => (l.taxRateBp === null ? '' : String(l.taxRateBp))));
   const lineTax = rates.size > 1;
+  const titleOf = (id: string) => c.items.find((x) => x.id === id)?.title || '—';
   return (
     <R.View>
-      <R.View style={{ flexDirection: 'row' }} fixed>
+      {header ? <R.View style={{ flexDirection: 'row' }} fixed>
         <R.View style={[st.th, { flexGrow: 1, flexBasis: 0, marginRight: GAP }]}><R.Text style={st.thText}>{up(t.service)}</R.Text></R.View>
         <R.View style={[st.th, { width: COL_QTY, marginRight: GAP }]}><R.Text style={st.thText}>{up(t.qty)}</R.Text></R.View>
         <R.View style={[st.th, { width: COL_AMT }]}><R.Text style={[st.thText, { textAlign: 'right' }]}>{up(t.amount)} / {c.currency}</R.Text></R.View>
-      </R.View>
+      </R.View> : null}
       {totals.lines.map((l, li) => {
         const it = c.items[l.index];
         const disc = it.discountPct.trim() && it.discountPct.trim() !== '0';
         const qtyOne = (parseMoney(it.quantity) ?? BigInt(0)) === BigInt(100) || it.quantity.trim() === '1';
-        const showUnit = !l.missingPrice && (!qtyOne || disc);
+        const showUnit = !l.missingPrice && !l.included && (!qtyOne || disc);
         const row = (
           <R.View key={l.id} style={[st.row, { paddingVertical: 12 * k }]} wrap={false}>
             <R.View style={{ flexGrow: 1, flexBasis: 0, flexDirection: 'row', paddingHorizontal: 12, marginRight: GAP }}>
@@ -499,6 +519,8 @@ function ItemsTable({ c, t, tail, k = 1 }: { c: DocContent; t: Labels; tail?: Re
               <R.View style={{ flexGrow: 1, flexBasis: 0 }}>
                 <R.Text style={st.itemTitle}>{it.title || '—'}</R.Text>
                 {it.description ? <R.Text style={st.itemDesc}>{it.description}</R.Text> : null}
+                {l.included ? <R.Text style={[st.fig, { marginTop: 3 }]}>{up(t.includedIn(titleOf(it.includedIn ?? '')))}</R.Text> : null}
+                {per && (it.startYear ?? 1) > 1 && it.priceBasis ? <R.Text style={[st.fig, { marginTop: 3 }]}>{t.basis[it.priceBasis]}</R.Text> : null}
               </R.View>
             </R.View>
             <R.View style={{ width: COL_QTY, paddingHorizontal: 12, paddingTop: 2, marginRight: GAP }}>
@@ -508,7 +530,8 @@ function ItemsTable({ c, t, tail, k = 1 }: { c: DocContent; t: Labels; tail?: Re
               {lineTax && l.taxRateBp !== null ? <R.Text style={st.fig}>{t.tax} {pct(l.taxRateBp, c.locale)}</R.Text> : null}
             </R.View>
             <R.View style={{ width: COL_AMT, paddingHorizontal: 12, paddingTop: 1 }}>
-              {l.missingPrice ? <R.Text style={[st.missing, { textAlign: 'right' }]}>{t.priceMissing}</R.Text> : <R.Text style={st.amount}>{l.net !== null ? fmtMoney(l.net, c.currency, c.locale, false) : ''}</R.Text>}
+              {l.included ? <R.Text style={[st.amount, { fontSize: 10.5 }]}>{t.included}</R.Text> : l.missingPrice ? <R.Text style={[st.missing, { textAlign: 'right' }]}>{t.priceMissing}</R.Text> : <R.Text style={st.amount}>{l.net !== null ? fmtMoney(l.net, c.currency, c.locale, false) : ''}</R.Text>}
+              {per && !l.included && !l.missingPrice ? <R.Text style={[st.fig, { textAlign: 'right' }]}>/ {per}</R.Text> : null}
             </R.View>
           </R.View>
         );
@@ -526,7 +549,8 @@ function Totals({ input, t, k = 1 }: { input: RenderInput; t: Labels; k?: number
   if (!totals.lines.length) return null;
   const multi = totals.taxes.length > 1;
   const grandText = totals.grand !== null ? money(totals.grand) : '';
-  const kicker = `${up(input.kind === 'quote' ? t.investment : t.grand)} / ${c.currency}`;
+  const hasRecurring = computeDocument(c).recurring.length > 0;
+  const kicker = `${up(hasRecurring ? t.onceTotal : input.kind === 'quote' ? t.investment : t.grand)} / ${c.currency}`;
   // 56 px (42 pt) like the sample; long amounts get smaller so they stay on one line
   const room = CW - 24 - kicker.length * KICK * 0.78 - 30;
   const size = Math.min(42, Math.floor(room / (Math.max(grandText.length, 1) * 0.62)));
@@ -554,6 +578,39 @@ function Totals({ input, t, k = 1 }: { input: RenderInput; t: Labels; k?: number
       ) : (
         <R.View style={st.warnBox}><R.Text style={st.missing}>{t.missingTotal(totals.missingPrices.length + totals.errors.length)}</R.Text></R.View>
       )}
+    </R.View>
+  );
+}
+
+/**
+ * Recurring and later-period fees (monthly from the start, yearly from year 2 …):
+ * one block per group with its own rows and period total; never added to the
+ * one-time total above. A monthly group without a stated duration says so.
+ */
+function RecurringGroups({ c, t, k = 1 }: { c: DocContent; t: Labels; k?: number }) {
+  const { recurring } = computeDocument(c);
+  if (!recurring.length) return null;
+  const money = (m: bigint) => fmtMoney(m, c.currency, c.locale, false);
+  const line = (g: RecurringGroup) => {
+    const per = t.per[g.billing];
+    if (g.totals.grand === null) return t.missingTotal(g.totals.missingPrices.length + g.totals.errors.length);
+    const base = `${t.groupTotal(per)}: ${money(g.totals.grand)} ${c.currency}`;
+    if (g.term !== null && g.termTotal !== null) return `${base} · ${t.termTotal(g.term, per)}: ${money(g.termTotal)} ${c.currency}`;
+    return g.billing === 'monthly' && g.startYear === 1 ? `${base} · ${t.noTerm(per)}` : base;
+  };
+  return (
+    <R.View style={{ marginTop: 26 * k }}>
+      <R.View wrap={false} minPresenceAhead={80}>
+        <Kicker>{up(t.recurringHead)}</Kicker>
+        <R.Text style={[st.small, { marginTop: 3, marginBottom: 8 }]}>{t.recurringNote}</R.Text>
+      </R.View>
+      {recurring.map((g) => (
+        <R.View key={g.key} style={{ marginTop: 6 * k }}>
+          <R.Text style={[st.strong, { fontSize: 10, marginBottom: 4 }]} minPresenceAhead={40}>{t.group(g.billing, g.startYear)}</R.Text>
+          <ItemsTable c={c} t={t} k={k} lines={g.totals.lines} per={t.per[g.billing]} header={false}
+            tail={<R.Text style={[st.small, { textAlign: 'right', marginTop: 6, paddingHorizontal: 12 }]}>{line(g)}</R.Text>} />
+        </R.View>
+      ))}
     </R.View>
   );
 }
@@ -726,6 +783,7 @@ function recipientDetail(c: DocContent, t: Labels, commercial: boolean): string[
 }
 
 function statusLine(input: RenderInput, t: Labels): string {
+  if (input.sample || input.content.sample) return t.sampleLine;
   return input.mode === 'draft' ? t.draftLine : input.version ? t.versionLine(input.version, input.versionAt ?? '') : '';
 }
 
@@ -798,6 +856,7 @@ function CommercialDocument({ input, layout }: { input: RenderInput; layout?: La
 
       <R.View style={{ marginTop: 30 * k }}>
         <ItemsTable c={c} t={t} k={k} tail={<Totals input={input} t={t} k={k} />} />
+        <RecurringGroups c={c} t={t} k={k} />
       </R.View>
 
       {(() => {

@@ -79,6 +79,77 @@ export function mockPng(width = 96, height = 64, seed = 0): Buffer {
 // ── Canned structured results (shape-valid for every schema we send) ──
 const MOCK_BODY = `## Mock taslak\n\nBu metin AI_MOCK=1 ile yerel testte üretildi; OpenAI çağrılmadı.\n\nBu sadece bir test değil, aynı zamanda akışın kontrolü. Araştırmalar gösteriyor ki %40 daha hızlı. [KAYNAK GEREKLİ]\n\n## İkinci bölüm\n\nGünümüzün hızla değişen dijital dünyasında randevu formu tek ekranda kalmalı.`;
 
+/**
+ * Realistic structured answer for the quote request used in local tests
+ * ("Marka kimliği, web sitesi ve sosyal medya yönetimi … Fiyatları da öner."):
+ * one-time brand identity and website, first-year domain + hosting included in
+ * the website, monthly social media with no stated duration, yearly renewal
+ * from year 2. Prices follow the selected currency and are left empty when
+ * prices were not requested. Like a real model it returns the whole draft even
+ * for a section-level request (the server keeps only the requested section),
+ * and its pricing text contains one "average" claim the server must remove.
+ */
+const MOCK_PRICES: Record<string, { brand: string; web: string; social: string; renew: string }> = {
+  TRY: { brand: '85000', web: '140000', social: '32000', renew: '6500' },
+  USD: { brand: '2600', web: '4300', social: '990', renew: '200' },
+  EUR: { brand: '2400', web: '3950', social: '900', renew: '185' },
+  GBP: { brand: '2050', web: '3400', social: '780', renew: '160' },
+  AZN: { brand: '4400', web: '7300', social: '1680', renew: '340' },
+};
+function mockQuoteDraft(input: string, brief: string, scope: string) {
+  const cur = /^Selected currency: (\w{3})/m.exec(input)?.[1] ?? 'TRY';
+  const priced = /^Prices requested: yes/m.test(input);
+  const sample = /^Sample: yes/m.test(input);
+  const rec = (/^Recipient: (.+)$/m.exec(input)?.[1] ?? '').replace(/ \(real client record\)$/, '');
+  const recipient = rec && rec !== '(not given)' ? rec : sample ? 'ÖRNEK — Kurgusal Kafe Ltd. Şti.' : '';
+  let current: { blocks?: Array<{ key: string; body: string }> } = {};
+  try { current = JSON.parse(/<CURRENT>\n([\s\S]*?)\n<\/CURRENT>/.exec(input)?.[1] ?? '{}'); } catch { current = {}; }
+  const p = MOCK_PRICES[cur] ?? MOCK_PRICES.TRY;
+  const price = (v: string) => (priced ? v : '');
+  const firstSentence = (t: string) => (t.split(/(?<=[.!?])\s+/)[0] ?? t).trim();
+  const curNotes = current.blocks?.find((b) => b.key === 'notes')?.body ?? '';
+  const notes = scope === 'block:notes' && curNotes ? firstSentence(curNotes)
+    : 'Fiyatlara KDV dahil değildir; KDV belge ayarlarındaki oranla eklenir. Sosyal medya reklam bütçesi teklife dahil değildir ve müşteri tarafından doğrudan ödenir.';
+  const revisions = scope === 'block:revisions'
+    ? 'Marka kimliğinde seçilen yön için üç revizyon turu, web sitesi tasarımında sayfa şablonu başına iki revizyon turu dahildir. Sosyal medya içeriklerinde her gönderi için bir revizyon turu dahildir. Ek revizyonlar ayrıca fiyatlandırılır.'
+    : 'Marka kimliği ve web sitesi tasarımı için iki revizyon turu dahildir. Ek revizyonlar ayrıca fiyatlandırılır.';
+  const payment = scope === 'payment'
+    ? [{ label: 'Başlangıç ödemesi', percent: 40, due: 'Sözleşme imzasında' }, { label: 'Marka kimliği onayı', percent: 30, due: 'Marka kimliği onaylandığında' }, { label: 'Web sitesi yayını', percent: 30, due: 'Web sitesi yayına alındığında' }]
+    : [{ label: 'Başlangıç ödemesi', percent: 50, due: 'Sözleşme imzasında' }, { label: 'Teslim ödemesi', percent: 50, due: 'Web sitesi yayına alındığında' }];
+  return {
+    title: 'Marka kimliği, web sitesi ve sosyal medya yönetimi teklifi',
+    subject: '',
+    blocks: [
+      { key: 'intro', heading: 'Giriş', body: `Bu teklif${recipient ? `, ${recipient} için` : ''} marka kimliği, kurumsal web sitesi ve sosyal medya yönetimi çalışmalarının kapsamını, tek seferlik ve aylık ücretlerini ve koşullarını içerir.` },
+      { key: 'scope', heading: 'Kapsam', body: 'Marka kimliği ve web sitesi tek seferlik işlerdir: önce marka kimliği hazırlanır ve onaylanır, web sitesi onaylanan kimlikle tasarlanıp geliştirilir.\n\nSosyal medya yönetimi aylık bir hizmettir: içerik planı, gönderi tasarımı ve yayın takibi her ay tekrarlanır.' },
+      { key: 'deliverables', heading: 'Teslimatlar', body: 'Logo dosyaları (SVG, PDF, PNG), renk paleti, tipografi ve kullanım kılavuzu\nYayında çalışan, mobil uyumlu kurumsal web sitesi ve yönetim paneli erişimi\nİlk yıl için domain ve hosting kurulumu\nHer ay içerik planı ve 12 gönderi tasarımı' },
+      { key: 'assumptions', heading: 'Varsayımlar', body: 'Metinler ve fotoğraflar müşteri tarafından sağlanır.\nSosyal medya yönetimi için sözleşme süresi belirtilmedi; aylık ücret hizmet sürdükçe her ay faturalanır. Kontrol edilecek öneri: en az 6 ay.\nDomain ve hosting ilk yıl web sitesi bedeline dahildir; 2. yıldan itibaren yıllık yenileme ayrıca faturalanır.' },
+      { key: 'out_of_scope', heading: 'Kapsam dışı', body: 'Sosyal medya reklam bütçesi\nFotoğraf ve video çekimi\nE-ticaret ve ödeme altyapısı' },
+      { key: 'revisions', heading: 'Revizyon koşulları', body: revisions },
+      { key: 'terms', heading: 'Ödeme koşulları', body: scope === 'payment' ? 'Tek seferlik işlerin bedeli üç adımda ödenir. Sosyal medya yönetimi her ayın ilk iş günü faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; bugünkü toplama dahil değildir.' : 'Ödeme planı tek seferlik işler (marka kimliği ve web sitesi) içindir. Sosyal medya yönetimi aylık olarak her ayın başında faturalanır. Domain ve hosting yenilemesi 2. yıldan itibaren yıllık faturalanır; bugünkü toplama dahil değildir.' },
+      { key: 'notes', heading: 'Notlar', body: notes },
+    ],
+    items: [
+      { ref: 'brand', title: 'Marka kimliği', description: 'Logo, renk paleti, tipografi ve temel kullanım kılavuzu.', quantity: '1', unit: 'paket', billing: 'once', term: '', startYear: 1, includedIn: '', unitPrice: price(p.brand), priceBasis: '', priceNote: priced ? 'İki logo yönü, seçilen yönün geliştirilmesi ve kılavuz (yaklaşık 60–70 saat) varsayımıyla.' : '' },
+      { ref: 'web', title: 'Kurumsal web sitesi', description: 'En çok 8 sayfa, mobil uyumlu tasarım, içerik yönetim paneli ve iletişim formu. İlk yıl domain ve hosting dahildir.', quantity: '1', unit: 'proje', billing: 'once', term: '', startYear: 1, includedIn: '', unitPrice: price(p.web), priceNote: priced ? 'En çok 8 şablon sayfa ve hazır içerik yönetim paneli (yaklaşık 110–130 saat) varsayımıyla.' : '', priceBasis: '' },
+      { ref: 'host1', title: 'Domain ve hosting (1. yıl)', description: 'İlk yıl için alan adı ve barındırma; web sitesi bedeline dahildir.', quantity: '1', unit: 'yıl', billing: 'once', term: '', startYear: 1, includedIn: 'web', unitPrice: price('1500'), priceBasis: '', priceNote: '' },
+      { ref: 'social', title: 'Sosyal medya yönetimi', description: 'Aylık içerik planı, ayda 12 gönderi tasarımı, yayın ve yorum takibi, aylık kısa rapor.', quantity: '1', unit: 'ay', billing: 'monthly', term: '', startYear: 1, includedIn: '', unitPrice: price(p.social), priceBasis: '', priceNote: priced ? 'İki platform ve ayda 12 gönderi varsayımıyla; reklam bütçesi hariç.' : '' },
+      { ref: 'renew', title: 'Domain ve hosting yıllık yenileme', description: '2. yıldan itibaren her yıl; güncel sağlayıcı tarifesine göre tahmini, yenileme tarihinde güncellenebilir.', quantity: '1', unit: 'yıl', billing: 'yearly', term: '', startYear: 2, includedIn: '', unitPrice: price(p.renew), priceBasis: priced ? 'estimate' : '', priceNote: priced ? 'Bugünkü sağlayıcı tarifesine göre tahmin.' : '' },
+    ],
+    payment,
+    deliveryTime: 'Marka kimliği 3 hafta; web sitesi marka kimliği onayından sonra 5 hafta (toplam yaklaşık 8 hafta). Sosyal medya yönetimi web sitesi yayınından sonraki ay başlar.',
+    validityDays: 30,
+    closing: 'Sorularınız için bize her zaman ulaşabilirsiniz.',
+    pricing: priced
+      ? { basis: 'Fiyatlar canlı piyasa araştırmasına değil, kapsamdaki işler ve tahmini efor üzerinden hazırlanmış tahminlerdir. Fiyatlar Türkiye ortalamasına göre belirlenmiştir.', assumptions: ['Marka kimliği: iki logo yönü ve iki revizyon turu.', 'Web sitesi: en çok 8 sayfa, içerik müşteriden.', 'Sosyal medya: iki platform, ayda 12 gönderi; reklam bütçesi hariç.', 'Yenileme: bugünkü sağlayıcı tarifesine göre tahmin.'] }
+      : { basis: '', assumptions: [] },
+    proposed: ['block:revisions', 'payment', 'deliveryTime', 'validity'],
+    requestedCurrency: '',
+    sampleRecipient: sample ? { company: 'Kurgusal Kafe Ltd. Şti.', name: 'Deniz Örnek' } : { company: '', name: '' },
+    missing: [brief.length > 0 && !recipient ? 'Alıcı firma adı' : ''].filter(Boolean),
+  };
+}
+
 export function mockStructured(schemaName: string, input: string): unknown {
   switch (schemaName) {
     case 'article_draft':
@@ -135,6 +206,9 @@ export function mockStructured(schemaName: string, input: string): unknown {
     // Teklifler ve Belgeler. "[mock-hata]" in the brief/text simulates a failed AI call (local tests only).
     case 'doc_draft': {
       if (input.includes('[mock-hata]')) throw new Error('Mock: yapay zekâ isteği başarısız (test).');
+      const brief = /<BRIEF>\n([\s\S]*?)\n<\/BRIEF>/.exec(input)?.[1] ?? input;
+      const scope = /^Scope: (\S+)/m.exec(input)?.[1] ?? 'all';
+      if (/sosyal medya/i.test(brief) || scope !== 'all') return mockQuoteDraft(input, brief, scope);
       return {
         title: 'Marka kimliği ve iki dilli web sitesi teklifi',
         subject: '',
@@ -152,14 +226,15 @@ export function mockStructured(schemaName: string, input: string): unknown {
           { key: 'delivered', heading: 'Teslim edilenler', body: 'Mock teslim edilen' },
         ],
         items: [
-          { title: 'Marka kimliği', description: 'Logo, renk, tipografi ve kullanım kılavuzu.', quantity: '1', unit: 'paket' },
-          { title: 'İki dilli web sitesi', description: 'Türkçe ve İngilizce, mobil uyumlu site.', quantity: '1', unit: 'proje' },
+          { ref: 'brand', title: 'Marka kimliği', description: 'Logo, renk, tipografi ve kullanım kılavuzu.', quantity: '1', unit: 'paket', billing: 'once', term: '', startYear: 1, includedIn: '', unitPrice: '', priceBasis: '', priceNote: '' },
+          { ref: 'web', title: 'İki dilli web sitesi', description: 'Türkçe ve İngilizce, mobil uyumlu site.', quantity: '1', unit: 'proje', billing: 'once', term: '', startYear: 1, includedIn: '', unitPrice: '', priceBasis: '', priceNote: '' },
         ],
         payment: [
           { label: 'Başlangıç ödemesi', percent: 50, due: 'Başlangıçta' },
           { label: 'Kalan ödeme', percent: null, due: '[EKSİK: kalan ödemenin zamanı]' },
         ],
         deliveryTime: '6 hafta',
+        validityDays: null, closing: '', pricing: { basis: '', assumptions: [] }, proposed: [], requestedCurrency: '', sampleRecipient: { company: '', name: '' },
         missing: ['Kalem fiyatları', 'Kalan ödemenin zamanı', 'Müşterinin vergi numarası'],
       };
     }

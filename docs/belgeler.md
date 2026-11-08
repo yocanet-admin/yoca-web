@@ -115,7 +115,16 @@ Tutarları uygulama hesaplar; yapay zekâ hesaplamaz. Hesap kuruş cinsinden tam
 
 **Eksik fiyat:** Fiyatı boş kalem 0 sayılmaz. Genel toplam hesaplanmaz ve belge kesinleştirilemez.
 
-**Para birimi:** TRY, USD, EUR, GBP, AZN. Bir belgede tek para birimi kullanılır.
+**Para birimi:** TRY, USD, EUR (“Euro (EUR)”), GBP, AZN. Bir belgede tek para birimi kullanılır; “Yeni belge” penceresinde seçilir (seçilmezse Belge ayarlarındaki varsayılan). Döviz kuru altyapısı yoktur: tutar girilmiş bir belgede para birimi değiştirilirken yönetici açıkça seçer — “Tutarları aynen koru” (aynı sayılar, çevrim yapılmaz) veya “Fiyatları temizle”; “Kurla çevir” kullanılamaz olarak gösterilir.
+
+**Tek seferlik / tekrarlayan kalemler** (belge içeriğinde saklanır; migration yok)
+- Her kalemin faturalaması vardır: tek seferlik (varsayılan; eski belgelerin tümü), aylık, yıllık. Tekrarlayan kalemde süre (ay/yıl; boşsa “süre belirtilmedi” yazar, tahmin edilmez) ve başlangıç yılı (1 = başlangıçtan, 2 = 2. yıldan itibaren yenileme) seçilir.
+- “Başka kaleme dahil” kalemin kendi fiyatı yoktur (ör. ilk yıl domain + hosting web sitesine dahil); PDF’te “Dahil” ve “… kalemine dahil” yazar, “fiyat eksik” sayılmaz.
+- 2. yıldan itibaren geçerli fiyat için “sabit fiyat (taahhüt)” veya “güncel tarifeye göre tahmini” seçilmeden belge kesinleştirilemez.
+- Genel toplam (listedeki tutar, ödeme planı, “Tek seferlik toplam”) yalnızca tek seferlik kalemlerden oluşur. Aylık ve yıllık / gelecek dönem kalemleri ayrı gruplarda, kendi dönem toplamlarıyla gösterilir (“Tekrarlayan ve sonraki dönem ücretleri”); bugünkü toplama eklenmez. Süre verilmişse “N ay varsayımıyla toplam” yalnızca bilgi amaçlıdır.
+- Teklif hazırlamak Operasyon hizmeti, borç veya yenileme kaydı oluşturmaz.
+
+**ÖRNEK belge:** kurgusal adlar içerebilir; PDF’te “ÖRNEK” ve “ÖRNEK belge · gerçek teklif değildir” yazar; kesinleştirilemez, gönderilemez, müşteri kaydına bağlanamaz.
 
 ## Kesinleştirme ve sürümler
 
@@ -144,7 +153,12 @@ Tutarları uygulama hesaplar; yapay zekâ hesaplamaz. Hesap kuruş cinsinden tam
 Mevcut sunucu altyapısı kullanılır: OpenAI anahtarı, model ayarı, aylık bütçe ve `ai_runs` kaydı. Tarayıcıya anahtar gitmez.
 
 Yapay zekânın yaptıkları:
-- **Taslak:** kapsam, teslimatlar, varsayımlar, kapsam dışı işler ve ödeme koşulları önerir. Kalemler fiyatsız gelir.
+- **Taslak (tüm teklif):** başlık, giriş, kalemler (faturalama, dahil ilişkisi, yenileme), kapsam, teslimatlar, varsayımlar, kapsam dışı, revizyon ve ödeme koşulları, ödeme planı (yalnızca tek seferlik toplam için), takvim, geçerlilik ve kapanış önerir. Kullanıcının vermediği ticari koşullar (revizyon sayısı, süre, ödeme yüzdeleri, geçerlilik) “Kontrol edilecek öneri” olarak işaretlenir.
+- **Fiyat önerisi:** yalnızca kullanıcı açıkça isterse (“Fiyatları da öner” veya “AI fiyat önerisi” seçeneği). Belgenin para biriminde, KDV hariç tahmini birim fiyatlar gelir; “AI fiyat önerisi — kontrol edilmeli” işaretlidir ve kontrol edilene (“Fiyatı kontrol ettim” veya fiyatı düzenlemek) kadar belge kesinleştirilemez. “Piyasa / Türkiye ortalaması” iddiası öneriden çıkarılır; tahminin dayanağı ve varsayımları gösterilir. KDV oranı her zaman Belge ayarlarından gelir.
+- **Bölüm bazında yeniden yazma:** “Ne hazırlansın?” ile tek bölüm (ör. yalnızca revizyon koşulları, notlar, ödeme planı) istenir; sunucu yalnızca o bölümü döndürür, diğer alanlar ve elle yapılan değişiklikler değişmez.
+- **İnceleme ekranı:** her alan düzenlenebilir; seçilen bölümler veya hepsi uygulanır; boş öneri dolu alanı silmez; “Vazgeç” hiçbir şey yazmaz. Toplamlar uygulamanın hesaplama kurallarıyla gösterilir.
+- **Para birimi:** istek belgenin para birimini taşır (yoksa istek reddedilir; TRY’ye düşülmez). Talep başka bir para birimi geçiriyorsa “Para birimi çakışması” gösterilir ve fiyatlar onay verilmeden uygulanmaz.
+- **Gerçek / örnek:** müşteri kaydına bağlı belgede öneri alıcıya, firma veya iletişim bilgilerine dokunmaz; örnek taslak yalnızca müşteriye bağlı olmayan belgede, “ÖRNEK” işaretli kurgusal adlarla gelir ve CRM’e yazılmaz. Banka, IBAN, vergi, adres ve iletişim bilgisi uydurulmaz.
 - **Seçili metin:** kısaltır, resmîleştirir veya sadeleştirir.
 - **Çeviri:** TR ↔ EN.
 
