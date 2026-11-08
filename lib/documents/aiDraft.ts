@@ -21,7 +21,7 @@
  *  - All amounts are computed by lib/documents/calc.ts, never here.
  */
 
-import { addDaysIso, fillPaymentMarkers, localId, newItem, paymentTextConflict, pctList, planComplete, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PriceBasis, BLOCK_KEYS, DOC_CURRENCIES, blockHeading } from '@/lib/documents/model';
+import { addDaysIso, conflictText, fillPaymentMarkers, localId, newItem, paymentTextConflict, planComplete, syncPaymentSentences, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PriceBasis, BLOCK_KEYS, DOC_CURRENCIES, blockHeading } from '@/lib/documents/model';
 import { parseMoney } from '@/lib/documents/calc';
 
 export interface SuggestedItem {
@@ -254,9 +254,13 @@ export function applyDraft(doc: { title: string; content: DocContent }, s: Draft
   const c = doc.content;
   const available = sectionsOf(s);
   const want = new Set(opts.select === 'all' ? available : opts.select.filter((x) => available.includes(x)));
+  // a new plan and the payment-terms text of the same suggestion go together (never one without the other)
+  const autoTerms = want.has('payment') && available.includes('block:terms') && !want.has('block:terms');
+  if (want.has('payment') && available.includes('block:terms')) want.add('block:terms');
   const applied: string[] = [];
   const skipped: Array<{ id: string; why: string }> = [];
   const notes: string[] = [];
+  if (autoTerms) notes.push('Önerinin “Ödeme koşulları” metni ödeme planıyla birlikte uygulandı (ikisi birlikte değişir).');
   const next: DocContent = { ...c };
   let title = doc.title;
 
@@ -292,6 +296,12 @@ export function applyDraft(doc: { title: string; content: DocContent }, s: Draft
   }
   // "[EKSİK: ödeme …]" next to a complete plan would contradict it: it is replaced by the plan itself —
   // in every text when the plan itself was applied, otherwise only in the texts applied now (the document's existing plan).
+  // a new plan without its own terms text: the payment sentence(s) of the existing text are rewritten from the plan
+  if (want.has('payment') && !want.has('block:terms') && planComplete(next.payment)) {
+    let synced = false;
+    next.blocks = (next.blocks ?? c.blocks).map((b) => { if (b.key !== 'terms') return b; const r = syncPaymentSentences(b.body, next.payment, c.locale); synced ||= r.changed; return r.changed ? { ...b, body: r.text } : b; });
+    if (synced) notes.push('“Ödeme koşulları” metnindeki ödeme cümlesi yeni plana göre yeniden yazıldı.');
+  }
   if (planComplete(next.payment)) {
     const appliedKeys = new Set(blockIds.map((x) => x.slice(6)));
     let filled = 0;
@@ -302,7 +312,7 @@ export function applyDraft(doc: { title: string; content: DocContent }, s: Draft
     if (filled) notes.push(`Metindeki ${filled} “[EKSİK: ödeme …]” işareti ${want.has('payment') ? 'uygulanan' : 'belgedeki'} ödeme planıyla dolduruldu.`);
   }
   const conflict = paymentTextConflict({ blocks: next.blocks ?? c.blocks, payment: next.payment ?? c.payment });
-  if (conflict && (want.has('payment') || blockIds.length)) notes.push(`Ödeme metni ile plan uyuşmuyor (metinde ${pctList(conflict.text)}, planda ${pctList(conflict.plan)}); kesinleştirmeden önce metni veya planı düzeltin.`);
+  if (conflict && (want.has('payment') || blockIds.length)) notes.push(`Ödeme metni ile plan uyuşmuyor (${conflictText(conflict)}); kesinleştirmeden önce metni veya planı düzeltin.`);
   if (want.has('deliveryTime')) { next.deliveryTime = s.deliveryTime.trim(); applied.push('deliveryTime'); }
   if (want.has('validity') && s.validityDays && c.issueDate) { next.validUntil = addDaysIso(c.issueDate, s.validityDays); applied.push('validity'); }
   if (want.has('closing')) { next.closing = s.closing.trim(); applied.push('closing'); }

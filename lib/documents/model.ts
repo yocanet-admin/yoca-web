@@ -349,26 +349,66 @@ export function fillPaymentMarkers(text: string, steps: PaymentStep[], locale: D
 
 const PAY_WORD = /ödeme|ödenir|ödenecek|peşin|avans|başlangıç|teslim|bakiye|kalan|imza|sözleşme|taksit|vade|fatura|payment|upfront|deposit|advance|balance|delivery|signature|instal/i;
 const TAX_WORD = /kdv|vat|vergi|stopaj|tax/i;
+const PCT_RE = () => /(?:%\s?(\d{1,3}(?:[.,]\d{1,2})?)|(\d{1,3}(?:[.,]\d{1,2})?)\s?%|yüzde\s+(\d{1,3}(?:[.,]\d{1,2})?))/gi;
 
+/* When a payment is due, reduced to comparable tokens. Equivalent words share a category
+   (başlangıç = imza = sözleşme = peşin = avans = ön ödeme). */
+const TIMING: Array<[string, RegExp]> = [
+  ['start', /başlangıç|baslangic|imza|sözleşme|sozlesme|peşin|pesin|avans|ön ödeme|on odeme|upfront|signature|deposit|advance|\bstart/i],
+  ['delivery', /teslim|delivery|deliver/i],
+  ['launch', /yayın|yayin|canlı|canli|launch|go-live|live\b/i],
+  ['approval', /onay|approval|approve/i],
+  ['monthly', /aylık|her ay|monthly|every month/i],
+];
+export interface Timing { cats: string[]; days: number | null }
+/** Timing tokens of a phrase ("Yayından 30 gün sonra" → launch + 30 gün); null when it says nothing about timing. */
+export function classifyTiming(phrase: string): Timing | null {
+  const t = phrase.toLocaleLowerCase('tr');
+  const cats = TIMING.filter(([, re]) => re.test(t)).map(([c]) => c);
+  const m = /(\d{1,3})\s*(gün|gun|day|hafta|week|ay\b|month)/i.exec(t);
+  const days = m ? Number(m[1]) * (/hafta|week/i.test(m[2]) ? 7 : /ay|month/i.test(m[2]) ? 30 : 1) : null;
+  return cats.length || days !== null ? { cats, days } : null;
+}
+const timingOfStep = (s: { label: string; due: string }) => (s.due.trim() && classifyTiming(s.due)) || classifyTiming(s.label);
+const timingOfPhrase = (seg: string) => { const paren = /\(([^)]*)\)/.exec(seg)?.[1]; return (paren && classifyTiming(paren)) || classifyTiming(seg); };
+
+export interface TextStep { pct: number; timing: Timing | null; phrase: string }
 /**
- * Payment percentages a text states ("%50 başlangıçta, %50 teslimde", "yüzde 30 peşin"):
- * only in a sentence that talks about payment, never one next to KDV / VAT / tax
- * ("%20 KDV"), and never above 100. A sentence without payment words ("%100 memnuniyet") is ignored.
+ * Payment steps a text states ("%50 başlangıçta, %50 teslimde", "Sözleşmede %30, teslimde %70",
+ * "yüzde 30 peşin"): only in sentences that talk about payment, never a percentage next to
+ * KDV / VAT / tax ("%20 KDV"), never above 100; "%100 memnuniyet" (no payment words) is ignored.
+ * Each step keeps the words that say when it is due (before the percentage when the sentence
+ * starts with them, otherwise after it up to the next percentage).
  */
-export function paymentPercentsInText(text: string): number[] {
-  const out: number[] = [];
+export function paymentStepsInText(text: string): TextStep[] {
+  const out: TextStep[] = [];
   for (const sentence of text.split(/(?<=[.!?;])\s+|\n+/)) {
     if (!PAY_WORD.test(sentence)) continue;
-    const re = /(?:%\s?(\d{1,3}(?:[.,]\d{1,2})?)|(\d{1,3}(?:[.,]\d{1,2})?)\s?%|yüzde\s+(\d{1,3}(?:[.,]\d{1,2})?))/gi;
+    const hits: Array<{ pct: number; start: number; end: number }> = [];
+    const re = PCT_RE();
     let m: RegExpExecArray | null;
     while ((m = re.exec(sentence))) {
       const around = sentence.slice(Math.max(0, m.index - 14), m.index + m[0].length + 14);
       if (TAX_WORD.test(around)) continue;
       const n = Number((m[1] ?? m[2] ?? m[3]).replace(',', '.'));
-      if (n > 0 && n <= 100) out.push(n);
+      if (n > 0 && n <= 100) hits.push({ pct: n, start: m.index, end: m.index + m[0].length });
     }
+    if (!hits.length) continue;
+    const lead = sentence.slice(0, hits[0].start).split(/[,:;]/).pop() ?? '';
+    const prefix = Boolean(classifyTiming(lead)); // "Başlangıçta %30, teslimde %70"
+    hits.forEach((h, i) => {
+      const seg = prefix
+        ? (sentence.slice(i ? hits[i - 1].end : 0, h.start).split(/[,:;]/).pop() ?? '')
+        : sentence.slice(h.end, i + 1 < hits.length ? hits[i + 1].start : sentence.length);
+      const paren = /\(([^)]*)\)/.exec(seg)?.[1];
+      const clean = (paren || seg.replace(/^\s*['’][a-zçğıöşü]*/i, '')).replace(/^[\s,;:]+|[\s,;:.]+$/g, '');
+      out.push({ pct: h.pct, timing: timingOfPhrase(seg), phrase: clean.slice(0, 60) });
+    });
   }
   return out;
+}
+export function paymentPercentsInText(text: string): number[] {
+  return paymentStepsInText(text).map((s) => s.pct);
 }
 
 /** Percentages of a complete plan ([] when the plan is not complete). */
@@ -376,22 +416,70 @@ export function planPercents(steps: PaymentStep[]): number[] {
   return planComplete(steps) ? steps.filter((s) => s.value.trim()).map((s) => Number(s.value.replace(',', '.'))) : [];
 }
 
+const sameTiming = (a: Timing, b: Timing) => {
+  if (a.days !== null && b.days !== null) { if (a.days !== b.days) return false; }
+  else if ((a.days === null) !== (b.days === null)) return false; // "teslimde" vs "teslimden 30 gün sonra"
+  if (a.cats.length && b.cats.length && !a.cats.some((c) => b.cats.includes(c))) return false;
+  return true;
+};
+
+export interface PaymentConflict { text: number[]; plan: number[]; stage?: { n: number; text: string; plan: string } }
 /**
- * The payment text (sections "Ödeme koşulları" and "Notlar") states percentages that a complete
- * plan does not have — a percentage that is not in the plan, or a full split (adding to 100) that
- * differs. Mentioning only some of the plan's own percentages is not a conflict.
+ * The payment text (sections "Ödeme koşulları" and "Notlar") disagrees with a complete plan:
+ *  - a percentage the plan does not have, or a full split (adding to 100) that differs; or
+ *  - a step whose timing differs ("teslimde" vs "Yayından 30 gün sonra"; "30 gün" vs "45 gün").
+ * Mentioning only some of the plan's own percentages, equivalent words (imza = başlangıç) and
+ * timing that can not be read are not conflicts.
  */
-export function paymentTextConflict(c: Pick<DocContent, 'blocks' | 'payment'>): { text: number[]; plan: number[] } | null {
+export function paymentTextConflict(c: Pick<DocContent, 'blocks' | 'payment'>): PaymentConflict | null {
   const plan = planPercents(c.payment);
   if (!plan.length) return null;
-  const text = c.blocks.filter((b) => b.key === 'terms' || b.key === 'notes').flatMap((b) => paymentPercentsInText(b.body));
-  if (!text.length) return null;
+  const steps = c.blocks.filter((b) => b.key === 'terms' || b.key === 'notes').flatMap((b) => paymentStepsInText(b.body));
+  if (!steps.length) return null;
+  const text = steps.map((s) => s.pct);
   const sorted = (a: number[]) => [...a].sort((x, y) => x - y).join('/');
   const foreign = text.some((n) => !plan.includes(n));
   const fullDiffers = Math.abs(text.reduce((a, n) => a + n, 0) - 100) < 0.001 && sorted(text) !== sorted(plan);
-  return foreign || fullDiffers ? { text, plan } : null;
+  if (foreign || fullDiffers) return { text, plan };
+  // timing: pair text steps with plan steps (by order when the counts match, otherwise by percentage)
+  const planSteps = c.payment.filter((s) => s.value.trim());
+  const used = new Set<number>();
+  for (let i = 0; i < steps.length; i += 1) {
+    let j = steps.length === planSteps.length ? i : planSteps.findIndex((p, k) => !used.has(k) && Number(p.value.replace(',', '.')) === steps[i].pct);
+    if (j < 0 || used.has(j)) continue;
+    used.add(j);
+    const pt = timingOfStep(planSteps[j]);
+    const tt = steps[i].timing;
+    if (pt && tt && !sameTiming(tt, pt)) return { text, plan, stage: { n: j + 1, text: steps[i].phrase, plan: (planSteps[j].due.trim() || planSteps[j].label.trim()) } };
+  }
+  return null;
 }
 export const pctList = (a: number[]) => a.map((n) => `%${String(n).replace('.', ',')}`).join(' / ');
+/**
+ * Rewrite the payment sentence(s) of a text from a complete plan: the first sentence that states
+ * payment percentages becomes "Ödeme planı: %40 … (…), …", further such sentences are removed.
+ * Text without payment percentages is left as it is.
+ */
+export function syncPaymentSentences(text: string, steps: PaymentStep[], locale: DocLocale = 'tr'): { text: string; changed: boolean } {
+  if (!planComplete(steps)) return { text, changed: false };
+  let done = false;
+  let changed = false;
+  const lines = text.split('\n').map((line) => line.split(/(?<=[.!?;])\s+/).map((sentence) => {
+    if (!paymentStepsInText(sentence).length) return sentence;
+    changed = true;
+    if (done) return '';
+    done = true;
+    return `${locale === 'tr' ? 'Ödeme planı' : 'Payment plan'}: ${planSentence(steps, locale)}.`;
+  }).filter(Boolean).join(' '));
+  return { text: lines.join('\n'), changed };
+}
+
+/** One Turkish sentence saying what differs. */
+export function conflictText(x: PaymentConflict): string {
+  return x.stage
+    ? `${x.stage.n}. aşama metinde “${x.stage.text}”, planda “${x.stage.plan}”`
+    : `metinde ${pctList(x.text)}, planda ${pctList(x.plan)}`;
+}
 
 /* ── File names shown to people (downloads, e-mail attachments) ──── */
 
@@ -480,7 +568,7 @@ export function missingFor(kind: DocKind, c: DocContent, issuer: Issuer, extra: 
     if (stale.length) blocking.push(`Ödeme planı dolu ama metinde hâlâ ${stale[0]} yazıyor. Metni planla uyumlu hâle getirin (Eksikler kutusundaki “İşareti ödeme planıyla doldur”).`);
   }
   const conflict = def.payment ? paymentTextConflict(c) : null;
-  if (conflict) blocking.push(`Ödeme metni ile plan uyuşmuyor: metinde ${pctList(conflict.text)}, planda ${pctList(conflict.plan)}. Metni veya planı düzeltin.`);
+  if (conflict) blocking.push(`Ödeme metni ile plan uyuşmuyor: ${conflictText(conflict)}. Metni veya planı düzeltin.`);
   const markers = allText(c).match(MISSING_MARKER) ?? [];
   for (const m of Array.from(new Set(markers)).slice(0, 10)) blocking.push(`Metinde doldurulmamış yer var: ${m}`);
   return { blocking, warnings };

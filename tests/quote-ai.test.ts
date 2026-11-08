@@ -13,7 +13,7 @@ import { cleanDraft, type RawDraft } from '../lib/ai/documents';
 import { mockStructured } from '../lib/ai/mock';
 import { applyDraft, defaultSelection, setBilling, changeCurrency, currencyMentions, hasAmounts, pricesRequested, restrictToScope, sampleRequested, sectionsOf, stripAverageClaims, type ApplyOptions, type DraftSuggestion } from '../lib/documents/aiDraft';
 import { billingErrors, computeDocument, computeLine, computeTotals, quantityText, totalsJson } from '../lib/documents/calc';
-import { DOC_CURRENCIES, OTHER_CURRENCIES, PRIMARY_CURRENCIES, paymentPercentsInText, paymentTextConflict, contentDisposition, docFileName, fillPaymentMarkers, planComplete, planSentence, missingFor, newContent, newItem, sanitizeContent, type DocContent, type DocCurrency } from '../lib/documents/model';
+import { DOC_CURRENCIES, OTHER_CURRENCIES, PRIMARY_CURRENCIES, classifyTiming, conflictText, syncPaymentSentences, paymentPercentsInText, paymentTextConflict, contentDisposition, docFileName, fillPaymentMarkers, planComplete, planSentence, missingFor, newContent, newItem, sanitizeContent, type DocContent, type DocCurrency } from '../lib/documents/model';
 import { SAMPLE_ISSUER, sampleQuote } from './fixtures-documents';
 
 const B = (n: number | string) => BigInt(n);
@@ -618,4 +618,78 @@ test('PDF: a payment text that contradicts the plan says so on page 1', async ()
   const t = pdfText(r.buffer);
   if (!t) return;
   assert.ok(t.indexOf('Ödeme metni ile plan uyuşmuyor') > -1 && t.indexOf('Ödeme metni ile plan uyuşmuyor') < t.indexOf('HİZMET'));
+});
+
+/* ── stages and payment times, explicit plan regeneration, text-only requests ── */
+
+test('timing tokens: start equivalents, delivery, launch + days, approval', () => {
+  assert.deepEqual(classifyTiming('Sözleşme imzasında'), { cats: ['start'], days: null });
+  assert.deepEqual(classifyTiming('başlangıçta'), { cats: ['start'], days: null });
+  assert.deepEqual(classifyTiming('Yayından 30 gün sonra'), { cats: ['launch'], days: 30 });
+  assert.deepEqual(classifyTiming('teslimden 2 hafta sonra'), { cats: ['delivery'], days: 14 });
+  assert.deepEqual(classifyTiming('Marka kimliği onaylandığında'), { cats: ['approval'], days: null });
+  assert.equal(classifyTiming('müşterinin uygun gördüğü zaman'), null);
+});
+
+test('conflict on stages / payment times; no conflict for equivalents, the auto-filled text, KDV, %100 or amounts', () => {
+  const p = (v: string, label: string, due: string) => ({ id: label, label, mode: 'percent' as const, value: v, due });
+  const plan = [p('50', 'Başlangıç ödemesi', 'Sözleşme imzasında'), p('50', 'Kalan ödeme', 'Yayından 30 gün sonra')];
+  const doc = (body: string, payment = plan) => ({ blocks: [{ id: 't', key: 'terms' as const, heading: '', body }], payment });
+  const x = paymentTextConflict(doc('Ödeme %50 başlangıçta, %50 teslimde alınır.'))!;
+  assert.ok(x && x.stage, 'same percentages, different timing');
+  assert.equal(conflictText(x), '2. aşama metinde “teslimde alınır”, planda “Yayından 30 gün sonra”');
+  assert.ok(paymentTextConflict(doc('Ödeme %50 imzada, %50 yayından 45 gün sonra yapılır.'))?.stage, 'different day count');
+  assert.equal(paymentTextConflict(doc('Ödeme %50 imzada, %50 yayından 30 gün sonra yapılır.')), null, 'imza = sözleşme = başlangıç; same day count');
+  assert.equal(paymentTextConflict(doc('Sözleşmede %50, yayından 30 gün sonra %50 ödenir.')), null, 'timing before the percentage');
+  assert.ok(paymentTextConflict(doc('Sözleşmede %50, teslimde %50 ödenir.'))?.stage, 'timing before the percentage, differs');
+  assert.equal(paymentTextConflict(doc(planSentence(plan))), null, 'auto-filled plan sentence');
+  assert.equal(paymentTextConflict(doc('Ödeme %50 ve %50 olarak iki aşamada alınır.')), null, 'timing not readable → no conflict');
+  assert.equal(paymentTextConflict(doc('Fiyatlara %20 KDV eklenir. %100 memnuniyet. Başlangıç ödemesi 4.620,00 USD.')), null);
+  assert.ok(paymentTextConflict(doc('Ödeme %50 başlangıçta, %50 yayında.'))?.stage, '"yayında" vs "yayından 30 gün sonra"');
+  // the editor rule (live: missingFor runs on every edit)
+  const c = quote('USD');
+  c.items = [{ ...newItem('20'), title: 'Web', unitPrice: '100' }];
+  c.payment = plan;
+  c.blocks = [...c.blocks, { id: 'tt', key: 'terms', heading: 'Ödeme koşulları', body: 'Ödeme %50 başlangıçta, %50 teslimde alınır.' }];
+  assert.ok(missingFor('quote', c, SAMPLE_ISSUER, { title: 'x' }).blocking.includes('Ödeme metni ile plan uyuşmuyor: 2. aşama metinde “teslimde alınır”, planda “Yayından 30 gün sonra”. Metni veya planı düzeltin.'));
+});
+
+test('payment sentence sync: rewritten from a complete plan; text without payment percentages unchanged', () => {
+  const p = (v: string, label: string, due: string) => ({ id: label, label, mode: 'percent' as const, value: v, due });
+  const plan = [p('40', 'Başlangıç ödemesi', 'Sözleşme imzasında'), p('60', 'Teslim ödemesi', 'Teslimde')];
+  const r = syncPaymentSentences('Ödeme %30 başlangıçta, %70 teslimde alınır. Sosyal medya aylık faturalanır.', plan);
+  assert.equal(r.text, 'Ödeme planı: %40 Başlangıç ödemesi (Sözleşme imzasında), %60 Teslim ödemesi (Teslimde). Sosyal medya aylık faturalanır.');
+  assert.equal(r.changed, true);
+  assert.equal(syncPaymentSentences('Sosyal medya aylık faturalanır.', plan).changed, false);
+});
+
+test('explicit plan regeneration with a 30/70 plan: a new plan is proposed (not dropped), applied only with its terms text, consistent', () => {
+  const regen = suggestWith({ brief: 'Ödeme planını yeniden oluştur.', scope: 'payment', existing: plan3070 });
+  assert.deepEqual(regen.payment.map((p) => p.percent), [40, 30, 30], 'scope payment keeps the model plan');
+  assert.ok(sectionsOf(regen).includes('block:terms'));
+  const c0 = { ...quote('USD'), payment: plan3070, blocks: [...quote('USD').blocks, { id: 'tt', key: 'terms' as const, heading: 'Ödeme koşulları', body: planSentence(plan3070) }] };
+  // nothing until Uygula: the suggestion object is separate from the document
+  assert.deepEqual(c0.payment, plan3070);
+  const r = applyDraft({ title: '', content: c0 }, regen, { ...OPTS, select: ['payment'] });
+  assert.deepEqual(r.applied.sort(), ['block:terms', 'payment'], 'terms text applied together with the plan');
+  assert.ok(r.notes.some((n) => /ödeme planıyla birlikte uygulandı/.test(n)));
+  assert.equal(paymentTextConflict(r.content), null, 'plan and text consistent (stages + times)');
+  // the model sent only a plan (no terms text): the existing payment sentence is rewritten from it
+  const planOnly = suggestWith({ brief: 'Ödeme planını yeniden oluştur [mock-yalniz-plan]', scope: 'payment', existing: plan3070 });
+  assert.ok(!sectionsOf(planOnly).includes('block:terms'));
+  const r2 = applyDraft({ title: '', content: c0 }, planOnly, { ...OPTS, select: ['payment'] });
+  const t2 = r2.content.blocks.find((b) => b.key === 'terms')!.body;
+  assert.ok(t2.startsWith('Ödeme planı: %40 Başlangıç ödemesi (Sözleşme imzasında), %30'), t2);
+  assert.ok(r2.notes.some((n) => /ödeme cümlesi yeni plana göre yeniden yazıldı/.test(n)));
+  assert.equal(paymentTextConflict(r2.content), null);
+});
+
+test('text-only request (terms) with a 30/70 plan: text follows 30/70, no plan suggestion', () => {
+  const t = suggestWith({ brief: 'Ödeme koşullarını yaz.', scope: 'block:terms', existing: plan3070 });
+  assert.deepEqual(sectionsOf(t), ['block:terms']);
+  assert.deepEqual(t.payment, []);
+  const body = t.blocks[0].body;
+  assert.ok(body.includes('%30 Başlangıç ödemesi (Sözleşme imzasında), %70 Teslim ödemesi (Teslimde)'), body);
+  const c0 = { ...quote('USD'), payment: plan3070 };
+  assert.equal(paymentTextConflict(applyDraft({ title: '', content: c0 }, t, OPTS).content), null);
 });

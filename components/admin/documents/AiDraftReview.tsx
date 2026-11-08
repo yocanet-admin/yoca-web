@@ -42,7 +42,9 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
   const head = useRef<HTMLHeadingElement>(null);
   useEffect(() => { head.current?.focus(); }, []);
 
-  const isSel = (id: string) => sections.includes(id) && (sel[id] ?? true);
+  // a new plan and its payment-terms text are applied together
+  const linked = (id: string) => id === 'block:terms' && sections.includes('payment') && (sel.payment ?? true);
+  const isSel = (id: string) => sections.includes(id) && ((sel[id] ?? true) || linked(id));
   const chosen = sections.filter(isSel);
   const pricedItems = s.prices && s.items.some((i) => i.unitPrice.trim());
   const needCurrency = Boolean(s.currencyConflict) && isSel('items') && pricedItems && !acceptCurrency;
@@ -59,12 +61,13 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
   const pick = (id: string, children: React.ReactNode = null) => (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <label className="flex items-center gap-2 text-[13px] font-bold text-white">
-        <input type="checkbox" checked={isSel(id)} onChange={(e) => setSel((o) => ({ ...o, [id]: e.target.checked }))} aria-describedby={proposed(id) ? `prop-${id}` : undefined} />
+        <input type="checkbox" checked={isSel(id)} disabled={linked(id)} onChange={(e) => setSel((o) => ({ ...o, [id]: e.target.checked }))} aria-describedby={proposed(id) ? `prop-${id}` : undefined} />
         {sectionLabel(id, blockLabel)}
       </label>
       <div className="flex flex-wrap gap-1.5">
         {proposed(id) && <span id={`prop-${id}`}><Badge tone="warn">Kontrol edilecek öneri</Badge></span>}
         {filledTarget(doc, id) && <Badge tone="info">Belgede dolu — işaretlerseniz yerine geçer</Badge>}
+        {linked(id) && <Badge tone="info">Ödeme planıyla birlikte uygulanır</Badge>}
         {children}
       </div>
     </div>

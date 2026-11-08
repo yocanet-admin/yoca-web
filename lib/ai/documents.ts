@@ -180,7 +180,11 @@ export function draftDocument(model: string, input: DraftInput): Promise<OpenAIR
           'If the duration of a monthly service is not given, leave term empty and add an assumption that the duration is not stated (you may suggest one, marked as a suggestion to check).\n' + pricing
         : 'Return no line items.\n') +
       (input.kind === 'quote' ? 'For a quotation also propose: introduction, scope, deliverables, assumptions, out-of-scope work, revision terms, payment terms (section "terms": how one-time and recurring fees are billed), timeline (deliveryTime), payment plan for the one-time total, validity (validityDays) and a short closing line. Commercial terms the brief does not give (revision rounds, delivery time, payment percentages, validity) may be proposed, but list each such section id in "proposed". Keep scope, items, timeline and payment plan consistent with each other.\n' +
-        (input.scope === 'all' && input.existingPlan?.some((p) => p.value.trim()) ? 'The document ALREADY HAS a payment plan (see "Existing payment plan"): do not propose another one — return "payment" empty and describe exactly that plan, with the same percentages, in the "terms" section.\n' : '') +
+        (input.existingPlan?.some((p) => p.value.trim())
+          ? input.scope === 'payment'
+            ? 'The document has a payment plan (see "Existing payment plan"); the user asked for a NEW plan: propose it, and write the "terms" section so that it states exactly the new plan (same stages, percentages and payment times).\n'
+            : 'The document ALREADY HAS a payment plan (see "Existing payment plan"): do not propose another one — return "payment" empty, and wherever you write about payment (the "terms" section) describe exactly that plan: the same stages, percentages and payment times.\n'
+          : '') +
         (input.scope === 'all' ? 'FULL DRAFT: complete every section with concrete, editable proposals. Unless the document already has a plan, always propose a payment plan for the one-time total (e.g. 50% at contract signature / 50% on delivery) and state the same plan in the "terms" section; never leave the plan or its percentages as [EKSİK]. Scope parameters the brief leaves open (number of website pages, social media platforms, monthly posts, revision rounds, delivery time, validity) are PROPOSALS: write them as explicit assumptions (e.g. "Web sitesi en çok 8 sayfa olarak varsayılmıştır.", "Sosyal medya: 2 platform, ayda 12 gönderi varsayılmıştır."), list the section ids in "proposed", and do not put them in "missing" or in [EKSİK]. Use [EKSİK: …] and "missing" only for real-world facts you must not propose: company, person, tax, bank, address or contact details and dates the client has to confirm. Exception to the fact rules below: for a quotation you may propose payment percentages, revision rounds, durations and scope limits as described here (never amounts in text).\n' : '') : '') +
       (input.kind === 'status_report' ? 'For a status report use: summary, done, in_progress, waiting (what the client must provide), next_steps. Only items the brief states.\n' : '') +
       (input.kind === 'delivery' ? 'For a delivery note list what was delivered and open issues exactly as the brief states; never claim acceptance by the client.\n' : '') +
@@ -379,7 +383,8 @@ export function cleanDraft(kind: DocKind, d: RawDraft, ctx: CleanContext): Draft
     // a step that is only a placeholder ("[EKSİK: Ödeme aşamaları ve oranları]", no percent) is not a plan
     .filter((p) => (p.label || p.percent !== null) && !(p.percent === null && MISSING_MARKER_RE().test(p.label))) : [];
   // The document already has a plan (written by the user): a whole draft never replaces it — any plan the model sent is dropped.
-  const keepPlan = ctx.scope === 'all' && Boolean(ctx.existingPlan?.some((p) => p.value.trim()));
+  // (a request for the payment section itself may propose a new plan; it is applied only with "Uygula")
+  const keepPlan = ctx.scope !== 'payment' && Boolean(ctx.existingPlan?.some((p) => p.value.trim()));
   if (keepPlan && payment.length) { payment = []; warnings.push('Belgede ödeme planı var; öneride plan değiştirilmedi (metin mevcut plana göre yazılmalı).'); }
   // Whole draft of a quotation, no plan in the document and no usable plan from the model: a standard 50 / 50 proposal (marked to check)
   let planFallback = false;
