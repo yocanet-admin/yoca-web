@@ -23,7 +23,9 @@ SDK'nın olayından alan kopyalanmaz; yalnızca şu alanlarla **yeni** bir olay 
 
 Hiç çıkmaz: ham hata mesajı, istek ve yanıt gövdesi, çerez, başlıklar (Authorization dahil), sorgu parametreleri, kullanıcı ve IP, sunucu adı, `contexts` (işletim sistemi, cihaz, saat dilimi, trace), `extra`, `tags`, `modules`, breadcrumb'lar. İstisnası olmayan olaylar (`captureMessage`, log) hiç gönderilmez.
 
-SDK ayrıca bu verileri toplamaz: `sendDefaultPii: false`, `includeLocalVariables: false`, `maxBreadcrumbs: 0`, tracing kapalı, istemci raporları kapalı; `RequestData`, `ContextLines`, `Modules`, `Console`, `LocalVariables`, `Context` entegrasyonları kapalı.
+SDK ayrıca bu verileri toplamaz: `sendDefaultPii: false`, `includeLocalVariables: false`, `maxBreadcrumbs: 0`, tracing kapalı, istemci raporları kapalı; `RequestData`, `ContextLines`, `Modules`, `Console`, `LocalVariables`, `Context` ve `ProcessSession` (oturum/sürüm sağlığı zarfı) entegrasyonları kapalı.
+
+`release` dağıtılan commit'tir (`VERCEL_GIT_COMMIT_SHA`); SDK sürümü ayrı bir alandır ve onun yerine geçmez.
 
 `maskText` ilk sürümden kaldı (yerelde gösterilen metinler için); dışarı giden olayda serbest metin olmadığından olay için gerekmez.
 
@@ -36,3 +38,11 @@ Olaylar arka planda gönderilir. Yerel denemede (8 Kasım, sentetik veri) Glitch
 `next.config.mjs` `withSentryConfig` ile sarılır: kaynak haritası yüklenmez, sürüm oluşturulmaz, derleme telemetrisi kapalı, middleware'e dokunulmaz. Tarayıcı paketi değişmez (paylaşılan First Load JS 87,5 kB). Next 14 için `experimental.instrumentationHook` açıktır.
 
 Kaynak haritası yüklenmediği için yığın konumları derlenmiş dosyalardadır (ör. `.next/server/chunks/7092.js:18`). Kaynak haritası yüklemek ayrı bir karardır (GlitchTip'e kaynak kodu gider).
+
+## Bağlantı testi (tek sentetik olay)
+
+`GLITCHTIP_SELFTEST` dağıtılan commit'in ilk 7–40 karakterine eşitse, o dağıtımın her sunucu örneği açılışta **en fazla bir** sentetik olay gönderir (`lib/observability/selftest.ts`): tür `GlitchTipSelfTest`, değer `code GLITCHTIP_SELFTEST`, yığın konumları ve sürüm. Rota, istek, veritabanı veya yanıt etkisi yoktur. Başka bir commit dağıtılınca kendiliğinden kapanır; değişken silinince tamamen kapanır. Serverless'ta birden fazla örnek açılırsa olay sayısı örnek sayısı kadar olabilir (hepsi aynı sorunda toplanır).
+
+## Hesap
+
+Mevcut hesap GlitchTip'in **ABD** sunucusunda (app.glitchtip.com), organizasyon `yoca`, Free plan. Dışarı giden olayda kişisel veri olmadığı için bölge ayrı bir hesap gerektirmedi.

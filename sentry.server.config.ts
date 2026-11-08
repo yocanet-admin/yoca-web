@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/nextjs';
 import { dropBreadcrumb, toSafeEvent } from '@/lib/observability/scrub';
+import { GlitchTipSelfTest, selftestDue } from '@/lib/observability/selftest';
 
 /**
  * Yoca — server-side error reports to GlitchTip (Sentry protocol).
@@ -10,11 +11,13 @@ import { dropBreadcrumb, toSafeEvent } from '@/lib/observability/scrub';
  * is also told not to collect anything else (no PII, no request data, no
  * source lines, no local variables, no module list, no breadcrumbs).
  * GlitchTip being slow, down or misconfigured never changes a response.
+ * `release` is the deployed commit (VERCEL_GIT_COMMIT_SHA); the SDK version is a
+ * separate field and never stands in for it.
  */
 const dsn = process.env.GLITCHTIP_DSN?.trim();
 
 // Integrations that would collect data the allow-list drops anyway.
-const DROP = new Set(['RequestData', 'ContextLines', 'Modules', 'Console', 'LocalVariables', 'Context']);
+const DROP = new Set(['RequestData', 'ContextLines', 'Modules', 'Console', 'LocalVariables', 'Context', 'ProcessSession']);
 
 if (dsn) {
   Sentry.init({
@@ -31,4 +34,12 @@ if (dsn) {
     beforeSendTransaction: () => null,
     beforeBreadcrumb: dropBreadcrumb,
   });
+
+  // One synthetic event per server instance of the deployment named in
+  // GLITCHTIP_SELFTEST (lib/observability/selftest.ts); otherwise nothing.
+  const flag = globalThis as { __yocaGlitchTipSelfTest?: boolean };
+  if (selftestDue({ GLITCHTIP_SELFTEST: process.env.GLITCHTIP_SELFTEST, VERCEL_GIT_COMMIT_SHA: process.env.VERCEL_GIT_COMMIT_SHA }, flag.__yocaGlitchTipSelfTest === true)) {
+    flag.__yocaGlitchTipSelfTest = true;
+    Sentry.captureException(new GlitchTipSelfTest());
+  }
 }
