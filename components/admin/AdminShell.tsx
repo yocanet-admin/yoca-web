@@ -8,6 +8,7 @@ import type { Session } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/adminClient';
 import AdminPrivacyNotice from '@/components/admin/AdminPrivacyNotice';
 import { clearDocBackups } from '@/lib/documents/backup';
+import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, resolveOpenGroups, toggleGroup, type OpenGroups } from '@/lib/admin/navState';
 
 /**
  * Yoca — admin shell (Client Component).
@@ -18,6 +19,10 @@ import { clearDocBackups } from '@/lib/documents/backup';
  * ("Finans sorumlusu") sees only Finans (Genel bakış, Gelirler, Giderler). The menu is not the protection:
  * the database (RLS: is_admin() / can_finance()) and the admin API routes
  * (requireAdmin) refuse a finance user everywhere else.
+ *
+ * Menu: "Kokpit" (/admin) stays visible; every group folds open/closed from its
+ * title. First visit: only the current page's group is open; later the user's
+ * own choices come back (this browser, per user). See lib/admin/navState.ts.
  */
 
 const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: string; icon: string }> }> = [
@@ -76,6 +81,11 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
 ];
 
 const NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
+// Always-visible home link (admin only); the rest of its group folds like the others.
+const HOME_ITEM = NAV_ITEMS[0];
+const ADMIN_GROUPS = NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => item.href !== HOME_ITEM.href) })).filter(
+  (group) => group.items.length > 0,
+);
 // Finance user: the Finans section only (Genel bakış, Gelirler, Giderler).
 const FINANCE_HOME = '/admin/finance';
 const FINANCE_ROOTS = ['/admin/finance', '/admin/expenses'];
@@ -147,6 +157,39 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isFinance && !financePath(pathname)) router.replace(FINANCE_HOME);
   }, [isFinance, pathname, router]);
+
+  // Menu groups: which are open (per user, this browser).
+  const groups = isFinance ? FINANCE_GROUPS : ADMIN_GROUPS;
+  const groupTitles = groups.map((group) => group.title);
+  const titlesKey = groupTitles.join('|');
+  const currentGroup = groupOfPath(groups, pathname, isActive);
+  const navKey = userId && access?.userId === userId ? navStorageKey(userId) : null;
+  const [nav, setNav] = useState<{ key: string | null; open: OpenGroups }>({ key: null, open: {} });
+  useEffect(() => {
+    if (!navKey) return;
+    let stored: OpenGroups | null = null;
+    try {
+      stored = parseOpenGroups(window.localStorage.getItem(navKey));
+    } catch {
+      /* storage blocked: first-visit behaviour */
+    }
+    setNav({ key: navKey, open: resolveOpenGroups(titlesKey.split('|'), stored, currentGroup) });
+    // currentGroup is applied by the navigation effect below afterwards
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navKey, titlesKey]);
+  useEffect(() => {
+    setNav((prev) => (prev.key ? { ...prev, open: openCurrent(prev.open, currentGroup) } : prev));
+  }, [pathname, currentGroup]);
+  useEffect(() => {
+    if (!nav.key || nav.key !== navKey) return;
+    try {
+      window.localStorage.setItem(nav.key, JSON.stringify(nav.open));
+    } catch {
+      /* storage blocked: the menu still works for this visit */
+    }
+  }, [nav, navKey]);
+  const openGroups = nav.key === navKey ? nav.open : resolveOpenGroups(groupTitles, null, currentGroup);
+  const toggle = (title: string) => setNav((prev) => ({ key: prev.key, open: toggleGroup(prev.key === navKey ? prev.open : openGroups, title) }));
 
   // The mobile menu closes on navigation and with Escape.
   useEffect(() => setMenuOpen(false), [pathname]);
@@ -285,35 +328,73 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   }
 
   // ── Authenticated layout ─────────────────────────────────────
-  const groups = isFinance ? FINANCE_GROUPS : NAV_GROUPS;
   const home = isFinance ? FINANCE_HOME : '/admin';
   const current = NAV_ITEMS.find((item) => isActive(item.href, pathname));
 
+  const linkClass = (active: boolean, variant: 'sidebar' | 'drawer') =>
+    `flex items-center gap-2.5 whitespace-nowrap rounded-sm px-3 text-[14px] font-semibold motion-safe:transition-colors ${variant === 'drawer' ? 'py-2.5' : 'py-2'} ${
+      active ? 'bg-yoca-lime text-black' : 'text-muted hover:bg-surface hover:text-white'
+    }`;
+
+  const navLink = (item: (typeof NAV_ITEMS)[number], variant: 'sidebar' | 'drawer') => {
+    const active = isActive(item.href, pathname);
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        aria-current={active ? 'page' : undefined}
+        // The drawer also closes when the current page is chosen again (no navigation).
+        onClick={variant === 'drawer' ? () => setMenuOpen(false) : undefined}
+        className={linkClass(active, variant)}
+      >
+        <span aria-hidden="true" className="text-[13px]">
+          {item.icon}
+        </span>
+        {item.label}
+      </Link>
+    );
+  };
+
   const navLinks = (variant: 'sidebar' | 'drawer') => (
-    <nav aria-label="Admin" className="grid gap-5">
-      {groups.map((group) => (
-        <div key={group.title} className="grid gap-1">
-          <p className="px-3 pb-1 text-[11px] font-bold uppercase tracking-[0.12em] text-subtle/70">{group.title}</p>
-          {group.items.map((item) => {
-            const active = isActive(item.href, pathname);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={active ? 'page' : undefined}
-                className={`flex items-center gap-2.5 whitespace-nowrap rounded-sm px-3 text-[14px] font-semibold transition-colors ${variant === 'drawer' ? 'py-2.5' : 'py-2'} ${
-                  active ? 'bg-yoca-lime text-black' : 'text-muted hover:bg-surface hover:text-white'
-                }`}
+    <nav aria-label="Admin" className="grid gap-3">
+      {!isFinance && <div className="grid">{navLink(HOME_ITEM, variant)}</div>}
+      {groups.map((group) => {
+        const open = openGroups[group.title] === true;
+        const listId = `admin-nav-${variant}-${group.title.toLocaleLowerCase('tr').replace(/[^a-z0-9]+/g, '-')}`;
+        const hidesCurrent = !open && currentGroup === group.title;
+        return (
+          <div key={group.title} className="grid gap-1">
+            <button
+              type="button"
+              onClick={() => toggle(group.title)}
+              aria-expanded={open}
+              aria-controls={listId}
+              className={`flex w-full items-center gap-2 rounded-sm px-3 text-left text-[11px] font-bold uppercase tracking-[0.12em] motion-safe:transition-colors ${
+                variant === 'drawer' ? 'min-h-11 py-2.5' : 'min-h-9 py-2'
+              } ${hidesCurrent ? 'text-soft' : 'text-subtle'} hover:bg-surface hover:text-white`}
+            >
+              <span lang="tr" className="min-w-0 flex-1 truncate">{group.title}</span>
+              {hidesCurrent && (
+                <>
+                  <span aria-hidden="true" className="h-2 w-2 flex-none rounded-full bg-yoca-lime" />
+                  <span className="sr-only">(geçerli sayfa bu grupta)</span>
+                </>
+              )}
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className={`h-3.5 w-3.5 flex-none motion-safe:transition-transform ${open ? 'rotate-180' : ''}`}
               >
-                <span aria-hidden="true" className="text-[13px]">
-                  {item.icon}
-                </span>
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-      ))}
+                <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {/* `hidden` alone would lose to the grid class: hide with the class as well */}
+            <div id={listId} hidden={!open} className={open ? 'grid gap-1' : 'hidden'}>
+              {group.items.map((item) => navLink(item, variant))}
+            </div>
+          </div>
+        );
+      })}
     </nav>
   );
 
