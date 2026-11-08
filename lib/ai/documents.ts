@@ -1,7 +1,7 @@
 import { callOpenAI, type OpenAIResult } from '@/lib/ai/openai';
 import { fence } from '@/lib/ai/sourceText';
 import { NO_AI_SLOP_RULES } from '@/lib/ai/prompts/no-ai-slop';
-import { BILLINGS, BLOCK_LABEL, DOC_CURRENCIES, KIND_DEF, KIND_LABEL, PAYMENT_MARKER, planComplete, type BlockKey, type DocCurrency, type DocKind, type DocLocale, type PaymentStep, type PriceBasis, planSentence } from '@/lib/documents/model';
+import { BILLINGS, BLOCK_LABEL, DOC_CURRENCIES, KIND_DEF, KIND_LABEL, PAYMENT_MARKER, planComplete, type BlockKey, type DocCurrency, type DocKind, type DocLocale, type PaymentStep, type PriceBasis, paymentStepsInText, planSentence } from '@/lib/documents/model';
 import { parseMoney } from '@/lib/documents/calc';
 import { currencyMentions, restrictToScope, stripAverageClaims, type DraftSuggestion, type SuggestedItem } from '@/lib/documents/aiDraft';
 
@@ -190,6 +190,7 @@ export function draftDocument(model: string, input: DraftInput): Promise<OpenAIR
       (input.kind === 'delivery' ? 'For a delivery note list what was delivered and open issues exactly as the brief states; never claim acceptance by the client.\n' : '') +
       (input.kind === 'letter' ? 'For a letter: a subject line and the body (salutation, paragraphs, no closing formula — the template adds it).\n' : '') +
       'Never state VAT / KDV rates or tax amounts: the application applies the admin\'s tax settings.\n' +
+      (def.payment ? 'Payment stages, percentages and payment times belong ONLY in the payment plan and in the "terms" section ("Notlar" only for payment notes that are not part of the plan). Do not state payment commitments (percentages, stages, due times) in any other section.\n' : '') +
       (input.sample
         ? 'SAMPLE draft: the user asked for a sample with fictional data. Put a fictional company and contact name in sampleRecipient and mark both with "ÖRNEK". Do not invent bank details, IBAN, tax office, tax number, address, phone or e-mail even for the sample; leave them out.\n'
         : `Leave sampleRecipient empty. ${input.realClient ? 'The recipient is a real client: use its name exactly as given; never change, shorten or invent its brand, company, contact or company details.' : 'Do not invent a recipient.'}\n`) +
@@ -435,6 +436,15 @@ export function cleanDraft(kind: DocKind, d: RawDraft, ctx: CleanContext): Draft
     if (has && !re.test(b) && !out.proposed.includes(id)) out.proposed.push(id);
   }
 
+  // payment commitments outside "Ödeme koşulları" / "Notlar" are not checked against the plan: flagged (never rewritten)
+  for (const b of out.blocks) {
+    if (b.key === 'terms' || b.key === 'notes') continue;
+    if (paymentStepsInText(b.body).length) {
+      const id = `block:${b.key}`;
+      if (!out.proposed.includes(id)) out.proposed.push(id);
+      out.warnings.push(`“${BLOCK_LABEL[b.key as BlockKey]?.tr ?? b.key}” bölümünde ödeme yüzdesi / aşaması var. Ödeme koşulları yalnız plan ve “Ödeme koşulları” bölümünde olmalı; bu bölüm planla otomatik karşılaştırılmaz — kontrol edin.`);
+    }
+  }
   if (planFallback && !out.proposed.includes('payment')) out.proposed.push('payment');
   if (planFallback) out.warnings.push('Yapay zekâ kullanılabilir bir ödeme planı önermedi; standart öneri eklendi: %50 başlangıçta, %50 teslimde. Kontrol edin.');
   if (filledMarkers) out.warnings.push(`Önerilen metinde ${filledMarkers} “[EKSİK: ödeme …]” işareti var; ödeme planını da uygularsanız bu işaret planla doldurulur, uygulamazsanız kalır ve belge kesinleştirilemez.`);

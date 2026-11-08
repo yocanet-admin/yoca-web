@@ -16,13 +16,14 @@ import { readDocBackup, writeDocBackup, type DocBackup } from '@/lib/documents/b
 import { getAdminClient } from '@/lib/adminClient';
 import {
   BILLING_LABEL, BLOCK_LABEL, CURRENCY_LABEL, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, QUOTE_STATES, STATUS_LABEL,
-  blockHeading, fillPaymentMarkers, localId, missingFor, newItem, planComplete, planSentence, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PaymentStep, type QuoteState,
+  blockHeading, fillPaymentMarkers, localId, missingFor, newItem, paymentCheck, planComplete, planSentence, type Billing, type Block, type BlockKey, type DocContent, type DocCurrency, type LineItem, type PaymentStep, type QuoteState,
 } from '@/lib/documents/model';
 import { computeDocument, fmtMoney, fmtPct } from '@/lib/documents/calc';
 import { applyDraft, setBilling, changeCurrency, hasAmounts, pricesRequested, sampleRequested, sectionLabel, type DraftSuggestion } from '@/lib/documents/aiDraft';
 import { AiDraftReview, type ReviewApply } from '@/components/admin/documents/AiDraftReview';
 import { RecurringSummary } from '@/components/admin/documents/Recurring';
 import { CurrencyOptions, UnitField } from '@/components/admin/documents/fields';
+import { PaymentCheckStatus } from '@/components/admin/documents/PaymentCheckStatus';
 
 /**
  * Yoca — Teklifler ve Belgeler: editor.
@@ -159,6 +160,7 @@ function EditorInner() {
     return m;
   }, [c, data, calc, kind, def, draft?.title, goneBanks]);
 
+  const payCheck = useMemo(() => paymentCheck(c ?? { blocks: [], payment: [] }), [c]);
   if (!data) return <p className="text-[13px] text-subtle">Yükleniyor…</p>;
   if (!data.ok || !doc || !draft || !c || !calc) return <Flash tone="bad" message={data.error ?? 'Belge okunamadı.'} />;
 
@@ -653,6 +655,7 @@ function EditorInner() {
                   );
                 })}
                 {calc.payment.problem && <Flash tone="warn" message={calc.payment.problem} />}
+                <PaymentCheckStatus check={payCheck} onApprove={() => set({ paymentCheckAck: payCheck.fingerprint })} onRevoke={() => set({ paymentCheckAck: '' })} />
                 <button type="button" className="admin-btn justify-self-start" onClick={() => set({ payment: [...c.payment, { id: localId('p'), label: '', mode: 'percent', value: '', due: '' }] })}>+ Ödeme adımı</button>
               </Group>
             )}

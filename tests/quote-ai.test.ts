@@ -13,7 +13,7 @@ import { cleanDraft, type RawDraft } from '../lib/ai/documents';
 import { mockStructured } from '../lib/ai/mock';
 import { applyDraft, defaultSelection, setBilling, changeCurrency, currencyMentions, hasAmounts, pricesRequested, restrictToScope, sampleRequested, sectionsOf, stripAverageClaims, type ApplyOptions, type DraftSuggestion } from '../lib/documents/aiDraft';
 import { billingErrors, computeDocument, computeLine, computeTotals, quantityText, totalsJson } from '../lib/documents/calc';
-import { DOC_CURRENCIES, OTHER_CURRENCIES, PRIMARY_CURRENCIES, classifyTiming, conflictText, syncPaymentSentences, paymentPercentsInText, paymentTextConflict, contentDisposition, docFileName, fillPaymentMarkers, planComplete, planSentence, missingFor, newContent, newItem, sanitizeContent, type DocContent, type DocCurrency } from '../lib/documents/model';
+import { DOC_CURRENCIES, OTHER_CURRENCIES, PRIMARY_CURRENCIES, classifyTiming, paymentCheck, conflictText, syncPaymentSentences, paymentPercentsInText, paymentTextConflict, contentDisposition, docFileName, fillPaymentMarkers, planComplete, planSentence, missingFor, newContent, newItem, sanitizeContent, type DocContent, type DocCurrency } from '../lib/documents/model';
 import { SAMPLE_ISSUER, sampleQuote } from './fixtures-documents';
 
 const B = (n: number | string) => BigInt(n);
@@ -565,10 +565,10 @@ test('payment percentages in text: payment sentences only, never KDV / VAT, %100
 test('conflict rule: foreign percent or a different full split conflicts; the auto-filled plan sentence and partial mentions match', () => {
   const doc = (body: string, payment = plan3070) => ({ blocks: [{ id: 't', key: 'terms' as const, heading: '', body }], payment });
   assert.equal(paymentTextConflict(doc(planSentence(plan3070))), null, 'auto-filled text matches');
-  assert.equal(paymentTextConflict(doc('Başlangıçta %30 ödenir.')), null, 'partial mention of the plan’s own percent');
+  assert.equal(paymentTextConflict(doc('Sözleşme imzasında %30 ödenir.')), null, 'partial mention of the plan’s own percent');
   assert.deepEqual(paymentTextConflict(doc('%50 başlangıçta, %50 teslimde ödenir.')), { text: [50, 50], plan: [30, 70] });
   assert.equal(paymentTextConflict(doc('%50 başlangıçta ödenir.', [step('a', '50', 'x'), step('b', '', 'y')])), null, 'no complete plan → nothing to compare');
-  assert.equal(paymentTextConflict(doc('Fiyatlara %20 KDV eklenir. Ödeme %30 başlangıçta, %70 teslimde.')), null);
+  assert.equal(paymentTextConflict(doc('Fiyatlara %20 KDV eklenir. Ödeme %30 imzada, %70 teslimde.')), null);
   // the editor blocks finalizing
   const c = quote('USD');
   c.items = [{ ...newItem('20'), title: 'Web', unitPrice: '100' }];
@@ -622,36 +622,89 @@ test('PDF: a payment text that contradicts the plan says so on page 1', async ()
 
 /* ── stages and payment times, explicit plan regeneration, text-only requests ── */
 
-test('timing tokens: start equivalents, delivery, launch + days, approval', () => {
-  assert.deepEqual(classifyTiming('Sözleşme imzasında'), { cats: ['start'], days: null });
-  assert.deepEqual(classifyTiming('başlangıçta'), { cats: ['start'], days: null });
-  assert.deepEqual(classifyTiming('Yayından 30 gün sonra'), { cats: ['launch'], days: 30 });
-  assert.deepEqual(classifyTiming('teslimden 2 hafta sonra'), { cats: ['delivery'], days: 14 });
-  assert.deepEqual(classifyTiming('Marka kimliği onaylandığında'), { cats: ['approval'], days: null });
+test('timing tokens (strict): signature ≠ kickoff, true synonyms only, ambiguous words and bare day counts unrecognized', () => {
+  assert.deepEqual(classifyTiming('Sözleşme imzasında'), { cat: 'signature', days: null });
+  assert.deepEqual(classifyTiming('imzalandığında'), { cat: 'signature', days: null });
+  assert.deepEqual(classifyTiming('başlangıçta'), { cat: 'kickoff', days: null });
+  assert.deepEqual(classifyTiming('teslim edildiğinde'), { cat: 'delivery', days: null });
+  assert.deepEqual(classifyTiming('teslimatta'), { cat: 'delivery', days: null });
+  assert.deepEqual(classifyTiming('yayına alındığında'), { cat: 'launch', days: null });
+  assert.deepEqual(classifyTiming('Yayından 30 gün sonra'), { cat: 'launch', days: 30 });
+  assert.deepEqual(classifyTiming('faturadan 2 hafta sonra'), { cat: 'invoice', days: 14 });
+  assert.equal(classifyTiming('peşin'), null);
+  assert.equal(classifyTiming('avans olarak'), null);
+  assert.equal(classifyTiming('30 gün sonra'), null, 'a day count without an anchor');
+  assert.equal(classifyTiming('Başlangıç ödemesi'), null, 'a stage name is not a timing');
   assert.equal(classifyTiming('müşterinin uygun gördüğü zaman'), null);
 });
 
-test('conflict on stages / payment times; no conflict for equivalents, the auto-filled text, KDV, %100 or amounts', () => {
+test('three results: conflict / unverified / verified, plus neutral; never conflated', () => {
   const p = (v: string, label: string, due: string) => ({ id: label, label, mode: 'percent' as const, value: v, due });
   const plan = [p('50', 'Başlangıç ödemesi', 'Sözleşme imzasında'), p('50', 'Kalan ödeme', 'Yayından 30 gün sonra')];
-  const doc = (body: string, payment = plan) => ({ blocks: [{ id: 't', key: 'terms' as const, heading: '', body }], payment });
-  const x = paymentTextConflict(doc('Ödeme %50 başlangıçta, %50 teslimde alınır.'))!;
-  assert.ok(x && x.stage, 'same percentages, different timing');
-  assert.equal(conflictText(x), '2. aşama metinde “teslimde alınır”, planda “Yayından 30 gün sonra”');
-  assert.ok(paymentTextConflict(doc('Ödeme %50 imzada, %50 yayından 45 gün sonra yapılır.'))?.stage, 'different day count');
-  assert.equal(paymentTextConflict(doc('Ödeme %50 imzada, %50 yayından 30 gün sonra yapılır.')), null, 'imza = sözleşme = başlangıç; same day count');
-  assert.equal(paymentTextConflict(doc('Sözleşmede %50, yayından 30 gün sonra %50 ödenir.')), null, 'timing before the percentage');
-  assert.ok(paymentTextConflict(doc('Sözleşmede %50, teslimde %50 ödenir.'))?.stage, 'timing before the percentage, differs');
-  assert.equal(paymentTextConflict(doc(planSentence(plan))), null, 'auto-filled plan sentence');
-  assert.equal(paymentTextConflict(doc('Ödeme %50 ve %50 olarak iki aşamada alınır.')), null, 'timing not readable → no conflict');
-  assert.equal(paymentTextConflict(doc('Fiyatlara %20 KDV eklenir. %100 memnuniyet. Başlangıç ödemesi 4.620,00 USD.')), null);
-  assert.ok(paymentTextConflict(doc('Ödeme %50 başlangıçta, %50 yayında.'))?.stage, '"yayında" vs "yayından 30 gün sonra"');
-  // the editor rule (live: missingFor runs on every edit)
+  const doc = (body: string, payment = plan, ack = '') => ({ blocks: [{ id: 't', key: 'terms' as const, heading: '', body }], payment, paymentCheckAck: ack });
+  const st = (body: string) => paymentCheck(doc(body)).state;
+  assert.equal(st('Ödeme %50 başlangıçta, %50 yayından 30 gün sonra alınır.'), 'conflict', 'kickoff vs signature: both recognized, different');
+  assert.equal(conflictText(paymentCheck(doc('Ödeme %50 başlangıçta, %50 yayından 30 gün sonra alınır.')).conflict!), '1. aşama metinde “başlangıçta”, planda “Sözleşme imzasında”');
+  assert.equal(st('Ödeme %50 imzada, %50 teslimde alınır.'), 'conflict', 'different category');
+  assert.equal(st('Ödeme %50 imzada, %50 yayından 45 gün sonra alınır.'), 'conflict', 'same anchor, different days');
+  assert.equal(st('Ödeme %50 imzalandığında, %50 yayından 30 gün sonra alınır.'), 'verified', 'true synonyms');
+  assert.equal(st(planSentence(plan)), 'verified', 'auto-filled plan sentence');
+  assert.equal(st('Ödeme %50 peşin, %50 yayından 30 gün sonra alınır.'), 'unverified', 'peşin is ambiguous');
+  assert.equal(st('Ödeme %50 imzada, %50 30 gün sonra alınır.'), 'unverified', 'no anchor on the text side');
+  assert.equal(st('Ödeme %50 ve %50 olarak iki aşamada alınır.'), 'unverified', 'timing not readable');
+  assert.equal(st('Kalan tutar yayından 30 gün sonra ödenir.'), 'unverified', 'a one-time payment sentence without a percentage');
+  assert.equal(st('Fiyatlara %20 KDV eklenir. %100 memnuniyet. Sosyal medya aylık faturalanır.'), 'neutral', 'no payment stages in the text');
+  assert.equal(st('Başlangıç ödemesi 4.620,00 USD.'), 'unverified', 'an amount instead of a percentage: never a conflict, left to review');
+  assert.equal(st('%50 başlangıçta, %50 teslimde, %50 fazladan.'), 'conflict', 'percent set differs');
+  assert.equal(paymentCheck({ blocks: [], payment: [p('50', 'x', ''), p('', 'y', '')] }).state, 'noplan');
+  // the plan side unreadable → unverified, not verified
+  assert.equal(paymentCheck(doc('Ödeme %50 imzada, %50 yayından 30 gün sonra.', [p('50', 'İlk', 'Sözleşme imzasında'), p('50', 'İkinci', 'Uygun bir zamanda')])).state, 'unverified');
+});
+
+test('approval fingerprint: valid only for the same texts + plan; finalize rule (conflict blocks; unverified blocks until approved)', async () => {
+  const p = (v: string, label: string, due: string) => ({ id: label, label, mode: 'percent' as const, value: v, due });
   const c = quote('USD');
   c.items = [{ ...newItem('20'), title: 'Web', unitPrice: '100' }];
-  c.payment = plan;
-  c.blocks = [...c.blocks, { id: 'tt', key: 'terms', heading: 'Ödeme koşulları', body: 'Ödeme %50 başlangıçta, %50 teslimde alınır.' }];
-  assert.ok(missingFor('quote', c, SAMPLE_ISSUER, { title: 'x' }).blocking.includes('Ödeme metni ile plan uyuşmuyor: 2. aşama metinde “teslimde alınır”, planda “Yayından 30 gün sonra”. Metni veya planı düzeltin.'));
+  c.payment = [p('30', 'Başlangıç ödemesi', 'Sözleşme imzasında'), p('70', 'Teslim ödemesi', 'Teslimde')];
+  c.blocks = [...c.blocks, { id: 'tt', key: 'terms', heading: 'Ödeme koşulları', body: 'Ödeme %30 peşin, %70 teslimde alınır.' }];
+  const block = (x: DocContent) => missingFor('quote', x, SAMPLE_ISSUER, { title: 'x' }).blocking.filter((m) => /ödeme koşulu otomatik doğrulanamadı|plan uyuşmuyor/i.test(m));
+  assert.equal(paymentCheck(c).state, 'unverified');
+  assert.equal(block(c).length, 1, 'unverified blocks until approved');
+  const fp = paymentCheck(c).fingerprint;
+  const approved = { ...c, paymentCheckAck: fp };
+  assert.equal(paymentCheck(approved).approved, true);
+  assert.equal(block(approved).length, 0, 'approved + unchanged → allowed');
+  // the approval survives a save round-trip (stored in the document content)
+  assert.equal(sanitizeContent(JSON.parse(JSON.stringify(approved)), 'quote').paymentCheckAck, fp);
+  const textChanged = { ...approved, blocks: approved.blocks.map((b) => (b.key === 'terms' ? { ...b, body: b.body + ' ' } : b)) };
+  assert.equal(paymentCheck(textChanged).approved, true, 'trailing whitespace only: same fingerprint (bodies are trimmed)');
+  const textChanged2 = { ...approved, blocks: approved.blocks.map((b) => (b.key === 'terms' ? { ...b, body: 'Ödeme %30 peşin, %70 teslimden sonra alınır.' } : b)) };
+  assert.equal(paymentCheck(textChanged2).approved, false, 'text changed → approval gone');
+  assert.equal(block(textChanged2).length, 1);
+  const planChanged = { ...approved, payment: approved.payment.map((x, i) => (i === 1 ? { ...x, due: 'Teslim edildiğinde' } : x)) };
+  assert.equal(paymentCheck(planChanged).approved, false, 'plan changed → approval gone');
+  assert.equal(block(planChanged).length, 1);
+  // a conflict is never approvable
+  const clash = { ...c, blocks: c.blocks.map((b) => (b.key === 'terms' ? { ...b, body: 'Ödeme %30 imzada, %70 yayında alınır.' } : b)) };
+  const clashAck = { ...clash, paymentCheckAck: paymentCheck(clash).fingerprint };
+  assert.equal(paymentCheck(clashAck).state, 'conflict');
+  assert.equal(block(clashAck).length, 1, 'conflict blocks even with an "approval"');
+  // the server finalize runs the same rule (assess → missingFor)
+  const { assess } = await import('../lib/documents/server');
+  assert.ok(assess('quote', c, SAMPLE_ISSUER, 'x').missing.blocking.some((m) => /otomatik doğrulanamadı/.test(m)));
+  assert.ok(!assess('quote', approved, SAMPLE_ISSUER, 'x').missing.blocking.some((m) => /otomatik doğrulanamadı|uyuşmuyor/.test(m)));
+  assert.ok(assess('quote', textChanged2, SAMPLE_ISSUER, 'x').missing.blocking.some((m) => /otomatik doğrulanamadı/.test(m)));
+  assert.ok(assess('quote', clashAck, SAMPLE_ISSUER, 'x').missing.blocking.some((m) => /uyuşmuyor/.test(m)));
+});
+
+test('cleanDraft: payment commitments in another section are flagged (warning + "kontrol edilecek öneri"), not rewritten', () => {
+  const raw = mockStructured('doc_draft', userMsg({ currency: 'USD', prices: true })) as RawDraft;
+  raw.blocks = raw.blocks.map((b) => (b.key === 'scope' ? { ...b, body: `${b.body}\nİşe başlamak için %50 ödeme sözleşme imzasında alınır.` } : b));
+  const s = cleanDraft('quote', raw, { currency: 'USD', prices: true, sample: false, scope: 'all', brief: REQUEST });
+  assert.ok(s.warnings.some((w) => /“Kapsam” bölümünde ödeme yüzdesi \/ aşaması var/.test(w)));
+  assert.ok(s.proposed.includes('block:scope'));
+  assert.ok(s.blocks.find((b) => b.key === 'scope')!.body.includes('%50 ödeme sözleşme imzasında'), 'not rewritten');
+  assert.ok(!suggest({ currency: 'USD' }).warnings.some((w) => /bölümünde ödeme yüzdesi/.test(w)), 'clean mock: no warning');
 });
 
 test('payment sentence sync: rewritten from a complete plan; text without payment percentages unchanged', () => {

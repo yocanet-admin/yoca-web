@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, field, label, small } from '@/components/admin/ops/ui';
 import { RecurringSummary } from '@/components/admin/documents/Recurring';
+import { PAYMENT_CHECK_SCOPE } from '@/components/admin/documents/PaymentCheckStatus';
 import { UnitField } from '@/components/admin/documents/fields';
 import { applyDraft, defaultSelection, filledTarget, sectionLabel, sectionsOf, type DraftSuggestion, type SuggestedItem } from '@/lib/documents/aiDraft';
 import { computeDocument, fmtMoney, fmtPct } from '@/lib/documents/calc';
-import { BLOCK_LABEL, BILLING_LABEL, CURRENCY_LABEL, type BlockKey, type DocContent } from '@/lib/documents/model';
+import { BLOCK_LABEL, BILLING_LABEL, CURRENCY_LABEL, paymentCheck, type BlockKey, type DocContent } from '@/lib/documents/model';
 
 /**
  * Yoca — review of an AI draft suggestion before anything is written.
@@ -266,6 +267,7 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
           </div>
           <RecurringSummary groups={calc.recurring} currency={c.currency} compact />
           {preview.skipped.map((x) => <p key={x.id} className="text-[12px] text-yellow-200">{x.why}</p>)}
+          {(() => { const pc = paymentCheck(preview.content); return pc.state === 'noplan' ? null : <p className="text-[12px] text-muted" data-testid="review-payment-check">Uygulanırsa ödeme denetimi: <b className="text-white">{pc.state === 'verified' ? 'uyum doğrulandı' : pc.state === 'neutral' ? 'metinde ödeme aşaması yok' : pc.state === 'conflict' ? 'çelişki var' : 'otomatik doğrulanamadı (inceleme ve onay gerekir)'}</b>. {PAYMENT_CHECK_SCOPE}</p>; })()}
           {preview.notes.map((x) => <p key={x} className={`text-[12px] ${/uyuşmuyor/.test(x) ? 'text-yellow-200' : 'text-subtle'}`} data-testid="review-note">Uygulanırsa: {x}</p>)}
         </aside>
       </div>
