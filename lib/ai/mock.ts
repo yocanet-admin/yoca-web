@@ -281,6 +281,19 @@ export function mockStructured(schemaName: string, input: string): unknown {
         payment: (p.payment ?? []).map((x) => ({ id: x.id, label: t(x.label), due: t(x.due) })),
       };
     }
+    case 'seo_suggestion': {
+      const subject = /Query \/ subject: (.*)/.exec(input)?.[1]?.trim() || 'konu';
+      return {
+        title: `Mock: ${subject} — Yoca`.slice(0, 60),
+        metaDescription: `Mock meta açıklama (AI_MOCK=1): ${subject} için sayfanın ne sunduğunu tek cümlede anlatan, tıklamaya davet eden kısa bir metin.`,
+        outline: [
+          { heading: `Mock: ${subject} nedir?`, points: ['Kısa tanım', 'Kimin için'] },
+          { heading: 'Mock: Yoca nasıl çalışır?', points: ['Süreç adımları', 'Teslimler'] },
+          { heading: 'Mock: Sık sorulan sorular', points: ['Süre', 'Kapsam'] },
+        ],
+        notes: ['Mock not: gerçek bir proje örneği eklenebilir mi?'],
+      };
+    }
     default:
       return {};
   }

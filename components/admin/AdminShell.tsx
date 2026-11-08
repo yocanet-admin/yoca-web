@@ -36,6 +36,7 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
       { href: '/admin/submissions', label: 'Leadler', icon: '✉' },
       { href: '/admin/clients', label: 'CRM · fırsatlar', icon: '◎' },
       { href: '/admin/traffic', label: 'Trafik', icon: '↗' },
+      { href: '/admin/seo', label: 'SEO', icon: '⌕' },
       { href: '/admin/sites', label: 'Siteler', icon: '◍' },
     ],
   },
