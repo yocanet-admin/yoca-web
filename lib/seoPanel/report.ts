@@ -1,7 +1,7 @@
 import type { GscAdapter } from '@/lib/seoPanel/gsc';
 import {
-  addDays, aggregate, comparisonQueries, dataThroughFrom, deltas, filtersKey, filtersText, missingDays, normQuery, opportunities, pathOf, presetRange,
-  TYPICAL_LAG_DAYS, DEFAULT_FILTERS, type DateRange, type Deltas, type KeywordStatus, type Metrics, type Opportunity, type Preset, type Row, type SeoFilters,
+  addDays, aggregate, classifyDays, comparisonQueries, deltas, filtersKey, filtersText, freshnessFrom, normQuery, opportunities, pathOf, presetRange,
+  DEFAULT_FILTERS, type DateRange, type Freshness, type Deltas, type KeywordStatus, type Metrics, type Opportunity, type Preset, type Row, type SeoFilters,
 } from '@/lib/seoPanel/model';
 
 /**
@@ -11,12 +11,13 @@ import {
  */
 
 export interface KeywordRow { id: string; keyword: string; language: string; country: string; target_path: string; source: string; status: KeywordStatus; note: string; created_at?: string; updated_at?: string }
-export interface Period { range: DateRange; filters: SeoFilters; totals: Metrics; daily: Array<{ date: string; clicks: number; impressions: number }>; missingDays: string[]; pendingDays: string[] }
+export interface Period { range: DateRange; filters: SeoFilters; totals: Metrics; daily: Array<{ date: string; clicks: number; impressions: number }>; zeroDays: string[]; pendingDays: string[]; unknownDays: string[] }
 export interface Report {
   source: 'live' | 'fixture';
   property: string;
-  dataThrough: string | null;
-  lagDays: number | null;
+  freshness: Freshness;
+  /** true when the range end was taken from the "tahmini" estimate (finality unknown) */
+  rangeEstimated: boolean;
   current: Period;
   previous: Period;
   filtersKey: string;
@@ -33,29 +34,23 @@ export interface Report {
 export const TOP_ROWS = 25;
 const LOOKUP_LIMIT = 30;
 
-/** The last day with FINAL data (site-wide, chosen search type), from the date dimension of the last 10 days. */
-export async function lastFinalDay(adapter: GscAdapter, today: string, searchType: SeoFilters['searchType']): Promise<string | null> {
-  const rows = await adapter.query({ range: { start: addDays(today, -10), end: today }, filters: { ...DEFAULT_FILTERS, searchType, dataState: 'final' }, dimensions: ['date'], rowLimit: 20 });
-  return dataThroughFrom(rows.filter((r) => r.impressions > 0).map((r) => r.keys?.[0] ?? '').filter(Boolean));
+/**
+ * Finality from Search Console itself: dataState "all" + date dimension over the
+ * last 10 days up to today; the response's metadata.first_incomplete_date marks
+ * the first day that is not final. Missing → unknown (never guessed as verified).
+ */
+export async function freshnessOf(adapter: GscAdapter, today: string, searchType: SeoFilters['searchType']): Promise<Freshness> {
+  const r = await adapter.queryWithMeta({ range: { start: addDays(today, -10), end: today }, filters: { ...DEFAULT_FILTERS, searchType, dataState: 'all' }, dimensions: ['date'], rowLimit: 20 });
+  return freshnessFrom(r.firstIncompleteDate, today);
 }
 
-async function period(adapter: GscAdapter, range: DateRange, filters: SeoFilters, dataThrough: string | null): Promise<Period> {
+async function period(adapter: GscAdapter, range: DateRange, filters: SeoFilters, fresh: Freshness): Promise<Period> {
   const [totalRows, dailyRows] = await Promise.all([
     adapter.query({ range, filters, dimensions: [], rowLimit: 1 }),
     adapter.query({ range, filters, dimensions: ['date'], rowLimit: 500 }),
   ]);
   const daily = dailyRows.map((r) => ({ date: r.keys?.[0] ?? '', clicks: r.clicks, impressions: r.impressions })).sort((a, b) => a.date.localeCompare(b.date));
-  const missing = missingDays(range, daily.filter((d) => d.impressions > 0).map((d) => d.date));
-  const limit = dataThrough ?? addDays(range.end, 1);
-  return {
-    range,
-    filters,
-    totals: aggregate(totalRows),
-    daily,
-    // days not final yet (after "son tam veri günü") are listed apart from days that simply had no data
-    missingDays: missing.filter((d) => d <= limit),
-    pendingDays: filters.dataState === 'final' ? missing.filter((d) => d > limit) : [],
-  };
+  return { range, filters, totals: aggregate(totalRows), daily, ...classifyDays(range, daily.filter((d) => d.impressions > 0).map((d) => d.date), fresh) };
 }
 
 /** Exact-match metrics for target keywords: first from the top queries, then (bounded) one equals-filter lookup each. */
@@ -103,15 +98,17 @@ export async function buildReport(
   opts: { today: string; filters: SeoFilters; preset?: Preset; range?: DateRange; keywords: KeywordRow[] },
 ): Promise<Report> {
   const filters = opts.filters;
-  const dataThrough = await lastFinalDay(adapter, opts.today, filters.searchType);
-  // final data (default): the preset ends on "son tam veri günü"; fresh data may include yesterday
-  const end = filters.dataState === 'all' ? addDays(opts.today, -1) : dataThrough ?? addDays(opts.today, -TYPICAL_LAG_DAYS);
+  const fresh = await freshnessOf(adapter, opts.today, filters.searchType);
+  // final data (default): presets end on the last FINAL day (verified) or, when unknown, on the labelled estimate;
+  // fresh data ("all") may include yesterday
+  const end = filters.dataState === 'all' ? addDays(opts.today, -1) : fresh.finalThrough ?? (fresh.estimate as string);
+  const rangeEstimated = !opts.range && filters.dataState === 'final' && !fresh.known;
   const range = opts.range ?? presetRange(opts.preset ?? 28, end);
   const { current, previous } = comparisonQueries(range, filters);
 
   const [cur, prev, queryRows, prevQueryRows, pageRows] = await Promise.all([
-    period(adapter, current.range, current.filters, dataThrough),
-    period(adapter, previous.range, previous.filters, dataThrough),
+    period(adapter, current.range, current.filters, fresh),
+    period(adapter, previous.range, previous.filters, fresh),
     adapter.query({ range: current.range, filters: current.filters, dimensions: ['query'], rowLimit: 1000 }),
     adapter.query({ range: previous.range, filters: previous.filters, dimensions: ['query'], rowLimit: 1000 }),
     adapter.query({ range: current.range, filters: current.filters, dimensions: ['page'], rowLimit: 1000 }),
@@ -142,8 +139,8 @@ export async function buildReport(
   return {
     source: adapter.source,
     property: adapter.property,
-    dataThrough,
-    lagDays: dataThrough ? Math.round((Date.parse(opts.today) - Date.parse(dataThrough)) / 86_400_000) : null,
+    freshness: fresh,
+    rangeEstimated,
     current: cur,
     previous: prev,
     filtersKey: filtersKey(filters),

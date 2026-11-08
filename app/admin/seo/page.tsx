@@ -72,7 +72,7 @@ export default function AdminSeo() {
     setBusy(null);
     if (!r.ok) { setFlash({ text: r.error ?? 'İşlem başarısız.', tone: 'bad' }); return false; }
     let text = ok;
-    if (r.weeks) text = `Haftalık kayıt: ${r.weeks.map((w) => `${w.week} ${w.status === 'saved' ? 'kaydedildi' : 'veri henüz kesin değil, atlandı'}`).join(' · ')}`;
+    if (r.weeks) text = `Haftalık kayıt: ${r.weeks.map((w) => `${w.week} ${w.status === 'saved' ? 'kaydedildi' : w.status === 'skipped' ? 'kesinleşme tarihi belirlenemedi, atlandı' : 'henüz kesinleşmedi, atlandı'}`).join(' · ')}`;
     setFlash({ text, tone: 'ok' });
     await load(true);
     return true;

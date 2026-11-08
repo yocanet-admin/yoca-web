@@ -109,6 +109,38 @@ export function comparisonQueries(range: DateRange, filters: SeoFilters): { curr
   return { current: { range, filters: { ...f } }, previous: { range: previousRange(range), filters: { ...f } } };
 }
 
+/* ── Data freshness (finality comes from Search Console, never from "the last day with impressions") ── */
+
+/**
+ * known: Search Console returned `metadata.first_incomplete_date` (dataState "all",
+ * date dimension, range up to today) → every day before it is FINAL (verified).
+ * unknown: the response did not carry it → "Kesinleşme tarihi belirlenemedi";
+ * `estimate` (today − 3) may be shown only labelled "tahmini".
+ */
+export interface Freshness { known: boolean; firstIncompleteDate: string | null; finalThrough: string | null; estimate: string | null }
+export function freshnessFrom(firstIncompleteDate: string | null, today: string): Freshness {
+  if (firstIncompleteDate && isIsoDate(firstIncompleteDate) && firstIncompleteDate <= today) return { known: true, firstIncompleteDate, finalThrough: addDays(firstIncompleteDate, -1), estimate: null };
+  return { known: false, firstIncompleteDate: null, finalThrough: null, estimate: addDays(today, -TYPICAL_LAG_DAYS) };
+}
+
+/**
+ * Days of a range, split three ways:
+ *  zeroDays    final days without any row (no impressions that day);
+ *  pendingDays days from the first incomplete date on (not final yet; with "all" they may have partial rows);
+ *  unknownDays days without rows while finality is unknown (no impressions OR not final — cannot tell).
+ */
+export function classifyDays(range: DateRange, datesWithData: string[], f: Freshness): { zeroDays: string[]; pendingDays: string[]; unknownDays: string[] } {
+  const missing = missingDays(range, datesWithData);
+  if (!f.known || !f.firstIncompleteDate) return { zeroDays: [], pendingDays: [], unknownDays: missing };
+  const first = f.firstIncompleteDate;
+  return { zeroDays: missing.filter((d) => d < first), pendingDays: eachDay(range).filter((d) => d >= first), unknownDays: [] };
+}
+
+/** A week may be stored only when its Sunday is confirmed final. */
+export function weekIsFinal(monday: string, f: Freshness): boolean {
+  return Boolean(f.known && f.firstIncompleteDate && addDays(monday, 6) < f.firstIncompleteDate);
+}
+
 /** The last day that has data, or null. */
 export function dataThroughFrom(dates: string[]): string | null {
   return dates.length ? dates.reduce((a, b) => (b > a ? b : a)) : null;
@@ -155,7 +187,8 @@ export function deltas(cur: Metrics, prev: Metrics): Deltas {
 export const POSITION_LABEL = 'Ortalama pozisyon';
 export const POSITION_NOTE = 'Gösterimlerin ortalamasıdır; kesin sıra değildir, sorguya, konuma ve cihaza göre değişir.';
 export const NO_DATA = 'Seçilen dönemde veri yok';
-export const DATA_LAG_NOTE = 'Search Console kesin veriyi genellikle 2–3 gün gecikmeyle verir.';
+export const DATA_LAG_NOTE = 'Kesinleşme tarihi Search Console yanıtından (ilk kesinleşmemiş gün) okunur.';
+export const FINALITY_UNKNOWN = 'Kesinleşme tarihi belirlenemedi';
 export const HISTORY_SCOPE = 'Geçmiş: tamamlanmış haftaların haftalık toplamları (site toplamı, ilk 250 sorgu, ilk 250 sayfa: tüm ülkeler, tüm cihazlar, web, kesin veri; etkin hedef kelimeler: kelimenin hedef ülkesi (boşsa tüm ülkeler), tüm cihazlar, web, kesin veri). Günlük ham veri, ilk 250 dışındaki satırlar ve anonimleştirilmiş sorgular saklanmaz. Search Console verisi 16 ay tutar.';
 
 const nf1 = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -206,6 +239,23 @@ export function validateKeyword(v: Partial<Record<keyof KeywordInput, unknown>>,
   const status: KeywordStatus = v.status === 'active' || v.status === 'paused' ? v.status : v.status === 'proposed' ? 'proposed' : 'active';
   const note = typeof v.note === 'string' ? v.note.trim().slice(0, 1000) : '';
   return { ok: true, value: { keyword, language, country, targetPath, source, status, note } };
+}
+
+/** Groups for the suggested keyword list (by target page), in display order. */
+export const SUGGESTION_GROUPS = ['Marka', 'Marka stratejisi', 'Web', 'Büyüme', 'Kreatif', 'AI otomasyon', 'Dijital ürün', 'Ürünler', 'Diğer'] as const;
+const SERVICE_GROUP: Record<string, (typeof SUGGESTION_GROUPS)[number]> = {
+  'brand-strategy-identity': 'Marka stratejisi', 'web-digital-experiences': 'Web', 'growth-performance': 'Büyüme',
+  'creative-production': 'Kreatif', 'ai-automation': 'AI otomasyon', 'digital-product-development': 'Dijital ürün',
+};
+export function suggestionGroup(path: string): (typeof SUGGESTION_GROUPS)[number] {
+  const parts = path.split('/').filter(Boolean); // ['tr', 'services', 'web-…']
+  if (parts.length <= 1) return 'Marka'; // the locale home page: brand searches
+  if (parts[1] === 'products') return 'Ürünler';
+  if (parts[1] === 'services' && parts[2] && SERVICE_GROUP[parts[2]]) return SERVICE_GROUP[parts[2]];
+  return 'Diğer';
+}
+export function groupSuggestions<T extends { target_path: string }>(rows: T[]): Array<{ group: string; rows: T[] }> {
+  return SUGGESTION_GROUPS.map((group) => ({ group, rows: rows.filter((r) => suggestionGroup(r.target_path) === group) })).filter((g) => g.rows.length > 0);
 }
 
 /** Path of a Search Console page URL ("https://yoca.net/tr/products" → "/tr/products"). */

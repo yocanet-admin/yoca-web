@@ -12,16 +12,19 @@ import path from 'node:path';
 import { createVerify, generateKeyPairSync } from 'node:crypto';
 import {
   addDays, aggregate, comparisonQueries, completedWeeks, customRange, dayCount, DEFAULT_FILTERS, deltas, filtersKey, filtersText, missingDays, mondayOf, NO_DATA,
-  normalizeFilters, opportunities, keywordFiltersText, POSITION_LABEL, POSITION_NOTE, positionText, presetRange, previousRange, sitePath, validateKeyword, weekRange, ctrText,
+  normalizeFilters, opportunities, keywordFiltersText, classifyDays, freshnessFrom, weekIsFinal, FINALITY_UNKNOWN, POSITION_LABEL, POSITION_NOTE, positionText, presetRange, previousRange, sitePath, validateKeyword, weekRange, ctrText,
 } from '../lib/seoPanel/model';
-import { fixtureAdapter, gscStatus, requestBody, fixtureEnabled, type GscAdapter, type GscQuery } from '../lib/seoPanel/gsc';
-import { fixtureEmptyDay, fixtureFetch, fixturePsi, fixtureQuery, FIXTURE_LAG_DAYS } from '../lib/seoPanel/fixture';
-import { buildReport, lastFinalDay } from '../lib/seoPanel/report';
-import { snapshotRecent, snapshotWeek, type WeeklyRow, type WeeklyStore } from '../lib/seoPanel/weekly';
-import { AUDIT_LIMITS, auditHosts, clampPages, fetchAllowed, hostAllowed, parseRobots, robotsAllows, runAudit, USER_AGENT } from '../lib/seoPanel/audit';
+import { fixtureAdapter, gscStatus, parseFirstIncomplete, requestBody, fixtureEnabled, type GscAdapter, type GscQuery } from '../lib/seoPanel/gsc';
+import { fixtureEmptyDay, fixtureFetch, fixtureFirstIncomplete, fixturePsi, fixtureQuery } from '../lib/seoPanel/fixture';
+import { buildReport, freshnessOf } from '../lib/seoPanel/report';
+import { snapshotRecent, snapshotWeek, supabaseStore, type WeeklyRow, type WeeklyStore } from '../lib/seoPanel/weekly';
+import { AUDIT_LIMITS, auditHosts, clampPages, fetchAllowed, hostAllowed, parseRobots, robotsAllows, runAudit, USER_AGENT, type AuditResult } from '../lib/seoPanel/audit';
 import { FIELD_LABEL, LAB_LABEL, NO_FIELD, parsePsi, psiUrl } from '../lib/seoPanel/pagespeed';
 import { readServiceAccount, signedAssertion, GSC_SCOPE } from '../lib/seoPanel/googleAuth';
 import { suggest, type SuggestDeps } from '../lib/seoPanel/ai';
+import { acquireRun, ALREADY_RUNNING, AUDIT_RUN_TIMEOUT_S, saveResult, type AuditDb } from '../lib/seoPanel/auditStore';
+import { heartbeat, heartbeatUrl, pingBody, seoOutcome } from '../lib/cockpit/heartbeat';
+import { formatTr, longTr, monthGrid, monthTitle, moveFocus, parseTr, validateTyped, weekday } from '../lib/admin/calendar';
 import { OpenAIError } from '../lib/ai/openai';
 import { mockStructured } from '../lib/ai/mock';
 import { defaultAiSettings } from '../lib/ai/settings';
@@ -91,50 +94,97 @@ test('defaults: final data, web, all countries and devices', () => {
   assert.deepEqual(normalizeFilters({ country: 'turkey', device: 'phone', searchType: 'x', dataState: 'fresh' }), DEFAULT_FILTERS);
 });
 
-/* ── data lag + missing days ──────────────────────────────────── */
+/* ── data freshness: finality from Search Console, zero-data vs not-final days ── */
 
-test('data lag: "son tam veri günü" = last day with final data; presets end there', async () => {
-  const a = fixtureAdapter('https://yoca.net/', TODAY);
-  const last = await lastFinalDay(a, TODAY, 'web');
-  assert.equal(last, addDays(TODAY, -FIXTURE_LAG_DAYS));
+const emptyAdapter = (firstIncompleteDate: string | null = null): GscAdapter => ({ source: 'fixture', property: 'x', query: async () => [], queryWithMeta: async () => ({ rows: [], firstIncompleteDate }) });
+
+test('finality is read from Search Console metadata (dataState "all" + date dimension), not from the last day with impressions', async () => {
+  const { adapter } = recording(fixtureAdapter('https://yoca.net/', TODAY));
+  const seen: GscQuery[] = [];
+  const spy: GscAdapter = { ...adapter, queryWithMeta: (q) => { seen.push(q); return adapter.queryWithMeta(q); } };
+  const f = await freshnessOf(spy, TODAY, 'web');
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].filters.dataState, 'all');
+  assert.deepEqual(seen[0].dimensions, ['date']);
+  assert.equal(seen[0].range.end, TODAY);
+  assert.deepEqual(f, { known: true, firstIncompleteDate: fixtureFirstIncomplete(TODAY), finalThrough: addDays(fixtureFirstIncomplete(TODAY), -1), estimate: null });
+  const r = await buildReport(spy, { today: TODAY, filters: DEFAULT_FILTERS, preset: 7, keywords: [] });
+  assert.equal(r.current.range.end, f.finalThrough, 'presets end on the verified last final day');
+  assert.equal(r.rangeEstimated, false);
+  // the live adapter reads metadata.first_incomplete_date / firstIncompleteDate; anything else = unknown
+  assert.equal(parseFirstIncomplete({ first_incomplete_date: '2026-11-06' }), '2026-11-06');
+  assert.equal(parseFirstIncomplete({ firstIncompleteDate: '2026-11-06' }), '2026-11-06');
+  assert.equal(parseFirstIncomplete({}), null);
+  assert.equal(parseFirstIncomplete({ firstIncompleteDate: '6.11.2026' }), null);
+  assert.equal(parseFirstIncomplete(undefined), null);
+  // a day with impressions but not final yet is NOT "final": with no data the last impression day says nothing
+  const sparse = await buildReport(emptyAdapter('2026-11-06'), { today: TODAY, filters: DEFAULT_FILTERS, preset: 7, keywords: [] });
+  assert.equal(sparse.freshness.finalThrough, '2026-11-05');
+  assert.deepEqual(sparse.current.zeroDays.length, 7, 'final days without rows = zero-data days');
+});
+
+test('finality unknown → "Kesinleşme tarihi belirlenemedi", estimate only labelled, nothing classified as zero or pending', async () => {
+  assert.equal(FINALITY_UNKNOWN, 'Kesinleşme tarihi belirlenemedi');
+  const a = fixtureAdapter('https://yoca.net/', TODAY, 'unknown');
   const r = await buildReport(a, { today: TODAY, filters: DEFAULT_FILTERS, preset: 7, keywords: [] });
-  assert.equal(r.dataThrough, last);
-  assert.equal(r.lagDays, FIXTURE_LAG_DAYS);
-  assert.equal(r.current.range.end, last);
-});
-
-test('data lag: no final data in the last 10 days → typical 3-day lag, nothing invented', async () => {
-  const empty: GscAdapter = { source: 'fixture', property: 'x', query: async () => [] };
-  const r = await buildReport(empty, { today: TODAY, filters: DEFAULT_FILTERS, preset: 7, keywords: [] });
-  assert.equal(r.dataThrough, null);
+  assert.equal(r.freshness.known, false);
+  assert.equal(r.freshness.finalThrough, null);
+  assert.equal(r.freshness.estimate, addDays(TODAY, -3));
+  assert.equal(r.rangeEstimated, true);
   assert.equal(r.current.range.end, addDays(TODAY, -3));
-  assert.equal(r.current.totals.position, null);
-  assert.equal(r.current.missingDays.length, 7);
+  assert.deepEqual(r.current.zeroDays, []);
+  assert.deepEqual(r.current.pendingDays, []);
+  const page = read('components/admin/seo/Performance.tsx');
+  assert.match(page, /FINALITY_UNKNOWN/);
+  assert.match(page, /tahmini<\/Badge>/);
 });
 
-test('fresh data ("all") ends yesterday; final data ends on the last final day', async () => {
+test('fresh data ("all") ends yesterday and includes not-final days (listed as pending, with partial rows)', async () => {
   const a = fixtureAdapter('https://yoca.net/', TODAY);
   const r = await buildReport(a, { today: TODAY, filters: { ...DEFAULT_FILTERS, dataState: 'all' }, preset: 7, keywords: [] });
   assert.equal(r.current.range.end, addDays(TODAY, -1));
+  assert.deepEqual(r.current.pendingDays, [fixtureFirstIncomplete(TODAY), addDays(TODAY, -1)]);
+  assert.ok(r.current.daily.some((d) => d.date === addDays(TODAY, -1) && d.impressions > 0), 'fresh rows present');
+  const fin = await buildReport(a, { today: TODAY, filters: DEFAULT_FILTERS, range: { start: addDays(TODAY, -6), end: addDays(TODAY, -1) }, keywords: [] });
+  assert.ok(!fin.current.daily.some((d) => d.date >= fixtureFirstIncomplete(TODAY)), 'final data never contains not-final days');
 });
 
-test('missing days are listed one by one; days after the last final day are "not final yet", not "no data"', async () => {
+test('zero-data days (final, no impressions) and not-final days are listed separately', async () => {
   assert.deepEqual(missingDays({ start: '2026-11-01', end: '2026-11-04' }, ['2026-11-01', '2026-11-03']), ['2026-11-02', '2026-11-04']);
+  const f = freshnessFrom('2026-11-06', TODAY);
+  assert.deepEqual(classifyDays({ start: '2026-11-03', end: '2026-11-07' }, ['2026-11-03', '2026-11-05'], f), { zeroDays: ['2026-11-04'], pendingDays: ['2026-11-06', '2026-11-07'], unknownDays: [] });
+  assert.deepEqual(classifyDays({ start: '2026-11-03', end: '2026-11-05' }, ['2026-11-03'], freshnessFrom(null, TODAY)), { zeroDays: [], pendingDays: [], unknownDays: ['2026-11-04', '2026-11-05'] });
   const a = fixtureAdapter('https://yoca.net/', TODAY);
   const r = await buildReport(a, { today: TODAY, filters: DEFAULT_FILTERS, range: { start: '2026-10-01', end: '2026-11-07' }, keywords: [] });
-  const expectedEmpty = [] as string[];
-  for (let d = '2026-10-01'; d <= '2026-11-05'; d = addDays(d, 1)) if (fixtureEmptyDay(d)) expectedEmpty.push(d);
-  assert.ok(expectedEmpty.length >= 2);
-  assert.deepEqual(r.current.missingDays, expectedEmpty);
+  const expectedZero = [] as string[];
+  for (let d = '2026-10-01'; d < fixtureFirstIncomplete(TODAY); d = addDays(d, 1)) if (fixtureEmptyDay(d)) expectedZero.push(d);
+  assert.ok(expectedZero.length >= 2);
+  assert.deepEqual(r.current.zeroDays, expectedZero);
   assert.deepEqual(r.current.pendingDays, ['2026-11-06', '2026-11-07']);
 });
 
 /* ── weekly record ────────────────────────────────────────────── */
 
-function memoryStore() {
+/** In-memory model of seo_weekly_replace: the week's whole set is swapped, or nothing changes. */
+function memoryStore(opts: { failOn?: (rows: WeeklyRow[]) => boolean } = {}) {
   const rows = new Map<string, WeeklyRow>();
-  const store: WeeklyStore = { async upsert(list) { for (const r of list) rows.set([r.site_id, r.week_start, r.dimension, r.key, r.filters].join('|'), r); } };
-  return { rows, store };
+  const calls: number[] = [];
+  const store: WeeklyStore = {
+    async replaceWeek(siteId, week, list) {
+      if (opts.failOn?.(list)) throw new Error('Haftalık kayıt yazılamadı (önceki kayıt korunur): simulated');
+      const staged = new Map(Array.from(rows.entries()).filter(([, r]) => !(r.site_id === siteId && r.week_start === week)));
+      for (const r of list) {
+        const k = [r.site_id, r.week_start, r.dimension, r.key, r.filters].join('|');
+        if (staged.has(k)) throw new Error('duplicate key');
+        staged.set(k, r);
+      }
+      rows.clear();
+      for (const [k, r] of Array.from(staged.entries())) rows.set(k, r);
+      calls.push(list.length);
+      return list.length;
+    },
+  };
+  return { rows, store, calls };
 }
 
 test('weeks start on Monday; only completed weeks', () => {
@@ -150,9 +200,10 @@ test('weekly snapshot is idempotent: the same week twice gives the same rows, ne
   const { rows, store } = memoryStore();
   const kws = [{ keyword: 'marka kimliği tasarımı', country: 'tur' }, { keyword: 'mvp geliştirme', country: 'tur' }, { keyword: 'brand identity agency istanbul', country: '' }];
   const first = await snapshotRecent(a, store, 'site-1', kws, '2026-11-12');
-  const count = rows.size;
+  const snap1 = JSON.stringify(Array.from(rows.values()).map(({ fetched_at: _f, ...r }) => r).sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))));
   const second = await snapshotRecent(a, store, 'site-1', kws, '2026-11-12');
-  assert.equal(rows.size, count);
+  const snap2 = JSON.stringify(Array.from(rows.values()).map(({ fetched_at: _f, ...r }) => r).sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))));
+  assert.equal(snap2, snap1, 'identical result on a rerun');
   assert.deepEqual(first.map((w) => w.week), ['2026-11-02', '2026-10-26']);
   assert.deepEqual(second.map((w) => w.status), ['saved', 'saved']);
   const total = Array.from(rows.values()).filter((r) => r.dimension === 'total');
@@ -160,7 +211,7 @@ test('weekly snapshot is idempotent: the same week twice gives the same rows, ne
   for (const t of total) {
     assert.equal(t.filters, 'country=all;device=all;type=web;state=final');
     assert.ok(t.days_with_data >= 0 && t.days_with_data <= 7);
-    assert.ok(t.data_through === null || (t.data_through >= t.week_start && t.data_through <= addDays(t.week_start, 6)));
+    assert.equal(t.data_through, addDays(t.week_start, 6), 'confirmed final through the Sunday');
   }
   const kw = Array.from(rows.values()).filter((r) => r.dimension === 'keyword' && r.week_start === '2026-11-02');
   assert.deepEqual(kw.map((r) => r.key).sort(), ['brand identity agency istanbul', 'marka kimliği tasarımı', 'mvp geliştirme']);
@@ -172,15 +223,57 @@ test('weekly snapshot is idempotent: the same week twice gives the same rows, ne
   assert.equal(kw.find((r) => r.key === 'mvp geliştirme')?.position, null, 'no data → position null, not 0');
 });
 
-test('weekly snapshot: a week not yet final is skipped (never stored half); top lists are capped at 250', async () => {
+test('weekly snapshot: a shrinking top list leaves no stale rows (whole week replaced)', async () => {
+  const a = fixtureAdapter('https://yoca.net/', '2026-11-12');
+  const { rows, store } = memoryStore();
+  const fresh = freshnessFrom('2026-11-10', '2026-11-12');
+  await snapshotWeek(a, store, 'site-1', '2026-11-02', [{ keyword: 'x eski kelime', country: 'tur' }], fresh);
+  const before = Array.from(rows.values()).filter((r) => r.dimension === 'query').length;
+  // the same week again, but Search Console now returns only the top 3 queries and the keyword was removed
+  const small: GscAdapter = { ...a, query: async (q) => (q.dimensions[0] === 'query' && !q.equals ? (await a.query(q)).slice(0, 3) : a.query(q)) };
+  await snapshotWeek(small, store, 'site-1', '2026-11-02', [], fresh);
+  const after = Array.from(rows.values()).filter((r) => r.week_start === '2026-11-02');
+  assert.ok(before > 3);
+  assert.equal(after.filter((r) => r.dimension === 'query').length, 3, 'dropped queries do not linger');
+  assert.equal(after.filter((r) => r.dimension === 'keyword').length, 0, 'removed keyword does not linger');
+});
+
+test('weekly snapshot: a failed write keeps the previous complete set', async () => {
+  const a = fixtureAdapter('https://yoca.net/', '2026-11-12');
+  let fail = false;
+  const { rows, store } = memoryStore({ failOn: () => fail });
+  const fresh = freshnessFrom('2026-11-10', '2026-11-12');
+  await snapshotWeek(a, store, 'site-1', '2026-11-02', [], fresh);
+  const before = JSON.stringify(Array.from(rows.entries()));
+  fail = true;
+  await assert.rejects(snapshotWeek(a, store, 'site-1', '2026-11-02', [], fresh), /önceki kayıt korunur/);
+  assert.equal(JSON.stringify(Array.from(rows.entries())), before);
+  // the Supabase store goes through ONE RPC call per week (one transaction), never row-by-row upserts
+  const rpcCalls: Array<[string, Record<string, unknown>]> = [];
+  const db = { rpc: async (fn: string, args: Record<string, unknown>) => { rpcCalls.push([fn, args]); return { data: 7, error: null }; } };
+  assert.equal(await supabaseStore(db).replaceWeek('site-1', '2026-11-02', [{ site_id: 'site-1', week_start: '2026-11-02', dimension: 'total', key: '', filters: 'f', clicks: 1, impressions: 2, ctr: 0.5, position: 1, days_with_data: 7, data_through: '2026-11-08', fetched_at: 'x' }]), 7);
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0][0], 'seo_weekly_replace');
+  assert.deepEqual(Object.keys(rpcCalls[0][1]).sort(), ['p_rows', 'p_site_id', 'p_week_start']);
+  const failing = { rpc: async () => ({ data: null, error: { message: 'check constraint' } }) };
+  await assert.rejects(supabaseStore(failing).replaceWeek('s', '2026-11-02', []), /önceki kayıt korunur/);
+});
+
+test('weekly snapshot: only weeks Search Console confirms final; unknown finality → skipped with a reason; top lists capped at 250', async () => {
   const a = fixtureAdapter('https://yoca.net/', TODAY);
   const { rows, store } = memoryStore();
-  const out = await snapshotWeek(a, store, 'site-1', '2026-11-02', [], '2026-11-05');
+  const out = await snapshotWeek(a, store, 'site-1', '2026-11-02', [], freshnessFrom('2026-11-06', TODAY));
   assert.equal(out.status, 'not_final');
+  assert.equal(rows.size, 0);
+  assert.equal(weekIsFinal('2026-10-26', freshnessFrom('2026-11-02', TODAY)), true);
+  assert.equal(weekIsFinal('2026-10-26', freshnessFrom('2026-11-01', TODAY)), false, 'the Sunday itself not final');
+  const unknown = await snapshotRecent(fixtureAdapter('https://yoca.net/', '2026-11-12', 'unknown'), store, 'site-1', [], '2026-11-12');
+  assert.deepEqual(unknown.map((w) => w.status), ['skipped', 'skipped']);
+  assert.ok(unknown.every((w) => w.status === 'skipped' && w.reason === 'finality_unknown'));
   assert.equal(rows.size, 0);
   const calls: GscQuery[] = [];
   const spy: GscAdapter = { ...a, query: (q) => { calls.push(q); return a.query(q); } };
-  await snapshotWeek(spy, store, 'site-1', '2026-10-26', [], '2026-11-05');
+  await snapshotWeek(spy, store, 'site-1', '2026-10-26', [], freshnessFrom('2026-11-06', TODAY));
   for (const c of calls.filter((x) => x.dimensions[0] === 'query' || x.dimensions[0] === 'page')) assert.ok((c.rowLimit ?? 0) <= 250);
   for (const c of calls) assert.deepEqual(c.filters, DEFAULT_FILTERS);
 });
@@ -484,4 +577,143 @@ test('Google auth: signed JWT asks for webmasters.readonly only and verifies wit
   const v = createVerify('RSA-SHA256');
   v.update(`${h}.${c}`);
   assert.ok(v.verify(publicKey, Buffer.from(sig, 'base64url')));
+});
+
+/* ── audit persistence: DB lock + checked writes ─────────────── */
+
+type Call = { op: string; table?: string; values?: unknown; id?: string };
+function fakeAuditDb(opts: { acquire?: unknown; acquireError?: string; insertErrorAt?: number; updateError?: (values: Record<string, unknown>) => string | null } = {}) {
+  const calls: Call[] = [];
+  let inserts = 0;
+  const db: AuditDb = {
+    rpc: async (fn, args) => { calls.push({ op: `rpc:${fn}`, values: args }); return { data: opts.acquire ?? null, error: opts.acquireError ? { message: opts.acquireError } : null }; },
+    from: (table) => ({
+      insert: async (rows) => { inserts += 1; calls.push({ op: 'insert', table, values: rows.length }); return { error: opts.insertErrorAt === inserts ? { message: 'insert failed' } : null }; },
+      update: (values) => ({ eq: async (_c, id) => { calls.push({ op: 'update', table, values, id }); const e = opts.updateError?.(values); return { error: e ? { message: e } : null }; } }),
+    }),
+  };
+  return { db, calls };
+}
+const result = (n: number): AuditResult => ({ status: 'done', pagesPlanned: n, pagesChecked: n, limitReason: null, summary: { ok: n }, findings: Array.from({ length: n }, (_, i) => ({ url: `https://yoca.net/p${i}`, check: 'title', severity: 'ok' as const, message: 'ok' })) });
+
+test('audit acquire: one running run per site decided by the database; null → "zaten çalışıyor" (409), timeout 3 min > maxDuration', async () => {
+  assert.ok(AUDIT_RUN_TIMEOUT_S * 1000 > 60_000 && AUDIT_RUN_TIMEOUT_S === 180);
+  const busy = await acquireRun(fakeAuditDb({ acquire: null }).db, 'site', 'fixture', 'a@b');
+  assert.deepEqual(busy, { ok: false, status: 409, error: ALREADY_RUNNING });
+  assert.match(ALREADY_RUNNING, /zaten çalışıyor/);
+  const { db, calls } = fakeAuditDb({ acquire: '0b6f3d1e-0000-4000-8000-000000000001' });
+  assert.deepEqual(await acquireRun(db, 'site', 'live', 'a@b'), { ok: true, runId: '0b6f3d1e-0000-4000-8000-000000000001' });
+  assert.equal(calls[0].op, 'rpc:seo_audit_acquire');
+  assert.equal((calls[0].values as { p_timeout_seconds: number }).p_timeout_seconds, 180);
+  assert.equal((await acquireRun(fakeAuditDb({ acquireError: 'boom' }).db, 's', 'live', 'x')).ok, false);
+  // the route has no per-instance flag any more and stores nothing outside saveResult
+  const route = code('app/api/admin/seo/audit/route.ts');
+  assert.doesNotMatch(route, /let running/);
+  assert.match(route, /acquireRun\(/);
+  const sql = read('supabase/upgrade-v27-seo.sql');
+  assert.match(sql, /create unique index if not exists seo_audit_runs_one_running on public\.seo_audit_runs \(site_id\) where status = 'running'/);
+  assert.match(sql, /on conflict \(site_id\) where status = 'running' do nothing/);
+});
+
+test('audit save: every write checked; a failed findings insert or run update → error + run marked failed', async () => {
+  const ok = fakeAuditDb();
+  assert.deepEqual(await saveResult(ok.db, 'run-1', result(650)), { ok: true });
+  assert.deepEqual(ok.calls.filter((c) => c.op === 'insert').map((c) => c.values), [300, 300, 50]);
+  assert.equal((ok.calls.at(-1)?.values as { status: string }).status, 'done');
+
+  const bad = fakeAuditDb({ insertErrorAt: 2 });
+  const r = await saveResult(bad.db, 'run-2', result(650));
+  assert.equal(r.ok, false);
+  assert.ok(!r.ok && /kaydedilemedi/.test(r.error));
+  const last = bad.calls.at(-1) as Call;
+  assert.equal(last.op, 'update');
+  assert.equal((last.values as { status: string }).status, 'failed', 'run marked failed, never left running');
+  assert.equal(bad.calls.filter((c) => c.op === 'insert').length, 2, 'stops at the first failed insert');
+
+  const upd = fakeAuditDb({ updateError: (v) => (v.status === 'done' ? 'update failed' : null) });
+  const u = await saveResult(upd.db, 'run-3', result(3));
+  assert.equal(u.ok, false);
+  assert.equal(((upd.calls.at(-1) as Call).values as { status: string }).status, 'failed');
+});
+
+/* ── Healthchecks for /api/cron/seo ──────────────────────────── */
+
+test('SEO heartbeat: success only when saved (count body); skipped → /log with reason; error → fail', () => {
+  assert.deepEqual(seoOutcome({ kind: 'saved', weeks: [{ week: '2026-11-02', status: 'saved', rows: 300 }, { week: '2026-10-26', status: 'saved', rows: 212 }] }), { phase: 'success', body: 'kaydedildi: 512 satır, 2 hafta (2026-11-02, 2026-10-26)' });
+  assert.equal(seoOutcome({ kind: 'saved', weeks: [{ week: '2026-11-02', status: 'not_final' }] }).phase, 'log');
+  for (const reason of ['not_configured', 'migration_pending', 'no_service_role', 'not_final', 'finality_unknown'] as const) {
+    const o = seoOutcome({ kind: 'skipped', reason });
+    assert.equal(o.phase, 'log', reason);
+    assert.match(o.body, /^atlandı: /);
+  }
+  assert.deepEqual(seoOutcome({ kind: 'error', message: 'Search Console verisi alınamadı' }), { phase: 'fail', body: 'hata: Search Console verisi alınamadı' });
+  assert.equal(heartbeatUrl('https://hc-ping.com/abc', 'log'), 'https://hc-ping.com/abc/log');
+  assert.equal(pingBody('kaydedildi: 5 satır <script>"x"</script>'), 'kaydedildi: 5 satır script x /script');
+  assert.equal(pingBody('x'.repeat(500))?.length, 120);
+});
+
+test('SEO heartbeat: body only for the SEO job (POST text/plain); other jobs stay content-free; unset env sends nothing', async () => {
+  const sent: Array<{ url: string; init: RequestInit }> = [];
+  const f = (async (url: string, init: RequestInit) => { sent.push({ url, init }); return new Response('OK'); }) as unknown as typeof fetch;
+  const prev = { seo: process.env.HEALTHCHECKS_URL_SEO, ops: process.env.HEALTHCHECKS_URL_OPS };
+  try {
+    delete process.env.HEALTHCHECKS_URL_SEO;
+    assert.equal(await heartbeat('seo', 'success', f, 'kaydedildi: 1 satır'), 'skipped');
+    process.env.HEALTHCHECKS_URL_SEO = 'http://127.0.0.1:8000/ping/seo-test';
+    process.env.HEALTHCHECKS_URL_OPS = 'http://127.0.0.1:8000/ping/ops-test';
+    await heartbeat('seo', 'log', f, 'atlandı: kesinleşme tarihi belirlenemedi');
+    await heartbeat('ops', 'success', f, 'ignored body');
+    assert.equal(sent[0].url, 'http://127.0.0.1:8000/ping/seo-test/log');
+    assert.equal(sent[0].init.method, 'POST');
+    assert.equal(sent[0].init.body, 'atlandı: kesinleşme tarihi belirlenemedi');
+    assert.equal(sent[1].init.method, 'GET');
+    assert.equal(sent[1].init.body, undefined);
+  } finally {
+    if (prev.seo === undefined) delete process.env.HEALTHCHECKS_URL_SEO; else process.env.HEALTHCHECKS_URL_SEO = prev.seo;
+    if (prev.ops === undefined) delete process.env.HEALTHCHECKS_URL_OPS; else process.env.HEALTHCHECKS_URL_OPS = prev.ops;
+  }
+  const cron = code('app/api/cron/seo/route.ts');
+  assert.match(cron, /const auth = cronAuth\(request\);\n\s+if \(!auth\.ok\) return[^\n]*\n\s+await heartbeat\('seo', 'start'\);/, 'unauthorized calls send no ping');
+  assert.doesNotMatch(cron, /sendMail|sendTelegram|notify/);
+});
+
+/* ── Turkish calendar (pure) ──────────────────────────────────── */
+
+test('calendar: dd.MM.yyyy format / parse / validation; Monday-first 6-week grid', () => {
+  assert.equal(formatTr('2026-11-05'), '05.11.2026');
+  assert.equal(parseTr('05.11.2026'), '2026-11-05');
+  assert.equal(parseTr('5.11.2026'), '2026-11-05');
+  assert.equal(parseTr('31.02.2026'), null);
+  assert.equal(parseTr('2026-11-05'), null);
+  assert.equal(longTr('2026-11-05'), '5 Kasım 2026 Perşembe');
+  assert.deepEqual(validateTyped('09.11.2026', { max: '2026-11-08' }), { ok: false, error: 'En geç 08.11.2026 seçilebilir.' });
+  assert.deepEqual(validateTyped('01.10.2026', { min: '2026-10-05', max: '2026-11-08' }), { ok: false, error: 'En erken 05.10.2026 seçilebilir.' });
+  assert.equal(validateTyped('abc', {}).ok, false);
+  const g = monthGrid('2026-11-15');
+  assert.equal(g.length, 6);
+  assert.equal(g[0][0].date, '2026-10-26', 'Monday before 1 Nov 2026 (a Sunday)');
+  assert.equal(weekday(g[0][0].date), 0);
+  assert.equal(g[0][6].date, '2026-11-01');
+  assert.equal(monthTitle('2026-11-15'), 'Kasım 2026');
+});
+
+test('calendar keyboard: arrows ±1/±7, PageUp/PageDown ±month, Home/End week start/end, clamped to min/max', () => {
+  const b = { min: '2026-10-01', max: '2026-11-08' };
+  assert.equal(moveFocus('2026-11-05', 'ArrowLeft', b), '2026-11-04');
+  assert.equal(moveFocus('2026-11-05', 'ArrowRight', b), '2026-11-06');
+  assert.equal(moveFocus('2026-11-05', 'ArrowUp', b), '2026-10-29');
+  assert.equal(moveFocus('2026-11-05', 'ArrowDown', b), '2026-11-08', 'clamped to max (today)');
+  assert.equal(moveFocus('2026-11-05', 'PageUp', b), '2026-10-05');
+  assert.equal(moveFocus('2026-10-31', 'PageDown', {}), '2026-11-30', 'month end kept valid');
+  assert.equal(moveFocus('2026-11-05', 'Home', b), '2026-11-02', 'Monday');
+  assert.equal(moveFocus('2026-11-05', 'End', {}), '2026-11-08', 'Sunday');
+  assert.equal(moveFocus('2026-10-02', 'PageUp', b), '2026-10-01', 'clamped to min (range start)');
+  assert.equal(moveFocus('2026-11-05', 'x', b), null);
+  const src = code('components/admin/DateField.tsx');
+  assert.doesNotMatch(src, /type="date"/);
+  assert.match(src, /role="dialog"/);
+  assert.match(src, /role="grid"/);
+  assert.match(src, /aria-selected=\{selected\}/);
+  assert.match(src, /aria-current=\{isToday \? 'date' : undefined\}/);
+  assert.doesNotMatch(read('components/admin/seo/Performance.tsx'), /type="date"/);
 });

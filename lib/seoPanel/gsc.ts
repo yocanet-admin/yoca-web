@@ -1,5 +1,5 @@
 import { accessToken, GoogleAuthError, GSC_ENV, readServiceAccount, type FetchLike } from '@/lib/seoPanel/googleAuth';
-import { fixtureQuery } from '@/lib/seoPanel/fixture';
+import { fixtureMeta, fixtureQuery } from '@/lib/seoPanel/fixture';
 import type { DateRange, Row, SeoFilters } from '@/lib/seoPanel/model';
 
 /**
@@ -14,7 +14,13 @@ import type { DateRange, Row, SeoFilters } from '@/lib/seoPanel/model';
 
 export type Dimension = 'date' | 'query' | 'page' | 'country' | 'device';
 export interface GscQuery { range: DateRange; filters: SeoFilters; dimensions: Dimension[]; rowLimit?: number; equals?: Array<{ dimension: 'query' | 'page'; expression: string }> }
-export interface GscAdapter { source: 'live' | 'fixture'; property: string; query(q: GscQuery): Promise<Row[]> }
+export interface GscAdapter {
+  source: 'live' | 'fixture';
+  property: string;
+  query(q: GscQuery): Promise<Row[]>;
+  /** Rows + Search Console's `metadata.first_incomplete_date` (null when the response does not carry it). */
+  queryWithMeta(q: GscQuery): Promise<{ rows: Row[]; firstIncompleteDate: string | null }>;
+}
 
 export const FIXTURE_ENV = 'SEO_FIXTURE';
 export const SETUP_STEPS = [
@@ -73,10 +79,7 @@ export class GscError extends Error {
 }
 
 export function liveAdapter(property: string, fetchImpl: FetchLike = fetch): GscAdapter {
-  return {
-    source: 'live',
-    property,
-    async query(q) {
+  const queryWithMeta: GscAdapter['queryWithMeta'] = async (q) => {
       const sa = readServiceAccount();
       if (!sa.ok) throw new GscError('Search Console bağlantısı kurulmadı.', 503);
       let token: string;
@@ -87,21 +90,33 @@ export function liveAdapter(property: string, fetchImpl: FetchLike = fetch): Gsc
       }
       const url = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(property)}/searchAnalytics/query`;
       const res = await fetchImpl(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody(q)), signal: AbortSignal.timeout(20_000) });
-      const json = (await res.json().catch(() => ({}))) as { rows?: Row[]; error?: { message?: string } };
+      const json = (await res.json().catch(() => ({}))) as { rows?: Row[]; metadata?: { firstIncompleteDate?: string; first_incomplete_date?: string } };
       if (res.status === 403) throw new GscError(`Servis hesabının ${property} mülküne erişimi yok: e-postasını Search Console’da kullanıcı olarak ekleyin.`, 502);
       if (!res.ok) throw new GscError(`Search Console yanıtı başarısız (${res.status}).`, 502);
-      return (json.rows ?? []).map((r) => ({ keys: r.keys ?? [], clicks: r.clicks ?? 0, impressions: r.impressions ?? 0, ctr: r.ctr ?? 0, position: r.position ?? null }));
-    },
+      const rows = (json.rows ?? []).map((r) => ({ keys: r.keys ?? [], clicks: r.clicks ?? 0, impressions: r.impressions ?? 0, ctr: r.ctr ?? 0, position: r.position ?? null }));
+      return { rows, firstIncompleteDate: parseFirstIncomplete(json.metadata) };
   };
+  return { source: 'live', property, queryWithMeta, query: async (q) => (await queryWithMeta(q)).rows };
 }
 
-export function fixtureAdapter(property: string, today: string): GscAdapter {
-  return { source: 'fixture', property, query: async (q) => fixtureQuery(q, today) };
+/** `metadata.first_incomplete_date` (JSON may spell it camelCase); anything not a YYYY-MM-DD date → null (unknown). */
+export function parseFirstIncomplete(meta: { firstIncompleteDate?: unknown; first_incomplete_date?: unknown } | null | undefined): string | null {
+  const v = meta?.firstIncompleteDate ?? meta?.first_incomplete_date;
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+}
+
+export function fixtureAdapter(property: string, today: string, finality: 'known' | 'unknown' = 'known'): GscAdapter {
+  return {
+    source: 'fixture',
+    property,
+    query: async (q) => fixtureQuery(q, today),
+    queryWithMeta: async (q) => ({ rows: fixtureQuery(q, today), firstIncompleteDate: parseFirstIncomplete(fixtureMeta(q, today, finality)) }),
+  };
 }
 
 /** The adapter for the current environment, or null when not configured. */
 export function adapterFor(status: GscStatus, today: string): GscAdapter | null {
-  if (status.mode === 'fixture') return fixtureAdapter(status.property, today);
+  if (status.mode === 'fixture') return fixtureAdapter(status.property, today, process.env.SEO_FIXTURE_FINALITY === 'unknown' ? 'unknown' : 'known');
   if (status.mode === 'live') return liveAdapter(status.property);
   return null;
 }

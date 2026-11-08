@@ -7,7 +7,9 @@
  */
 import { addDays, aggregate, type DateRange, type Row, type SeoFilters, eachDay } from '@/lib/seoPanel/model';
 
+/** Final data ends 3 days before "today"; the 2 days after it are fresh (not final) data; today has none. */
 export const FIXTURE_LAG_DAYS = 3;
+export const fixtureFirstIncomplete = (today: string) => addDays(today, -(FIXTURE_LAG_DAYS - 1));
 
 const QUERIES: Array<{ q: string; page: string; impr: number; ctr: number; pos: number }> = [
   { q: 'yoca', page: '/tr', impr: 22, ctr: 0.42, pos: 1.6 },
@@ -36,8 +38,11 @@ const noise = (seed: number) => {
 
 interface Fact { date: string; query: string; page: string; country: string; device: string; clicks: number; impressions: number; position: number }
 
-function factsFor(date: string, today: string): Fact[] {
-  if (date > addDays(today, -FIXTURE_LAG_DAYS) || fixtureEmptyDay(date)) return [];
+function factsFor(date: string, today: string, state: SeoFilters['dataState']): Fact[] {
+  if (date >= today || fixtureEmptyDay(date)) return [];
+  const fresh = date >= fixtureFirstIncomplete(today);
+  if (fresh && state !== 'all') return []; // not final yet: only with dataState "all"
+  const partial = fresh ? 0.5 : 1;
   const n = dayNo(date);
   const growth = 1 + Math.max(0, n - dayNo('2026-08-18')) / 120; // slow growth since the first data day
   if (date < '2026-08-18') return [];
@@ -46,7 +51,7 @@ function factsFor(date: string, today: string): Fact[] {
     COUNTRIES.forEach(([country, cs], ci) => {
       DEVICES.forEach(([device, ds], di) => {
         const r = noise(n * 31 + qi * 7 + ci * 3 + di);
-        const impressions = Math.round(row.impr * growth * cs * ds * (0.6 + r * 0.9) * 0.5);
+        const impressions = Math.round(row.impr * growth * cs * ds * (0.6 + r * 0.9) * 0.5 * partial);
         if (!impressions) return;
         const clicks = Math.min(impressions, Math.round(impressions * row.ctr * (0.7 + noise(n + qi) * 0.6)));
         out.push({ date, query: row.q, page: `https://yoca.net${row.page}`, country, device, clicks, impressions, position: Math.max(1, row.pos + (r - 0.5) * 2) });
@@ -63,7 +68,7 @@ export function fixtureQuery(q: FixtureQuery, today: string): Row[] {
   if (q.filters.searchType !== 'web') return []; // the fixture only has web search
   const groups = new Map<string, Fact[]>();
   for (const date of eachDay(q.range)) {
-    for (const f of factsFor(date, today)) {
+    for (const f of factsFor(date, today, q.filters.dataState)) {
       if (q.filters.country && f.country !== q.filters.country) continue;
       if (q.filters.device && f.device !== q.filters.device) continue;
       if (q.equals?.some((e) => (e.dimension === 'query' ? f.query !== e.expression.toLocaleLowerCase('tr') : f.page !== e.expression))) continue;
@@ -80,6 +85,17 @@ export function fixtureQuery(q: FixtureQuery, today: string): Row[] {
   });
   rows.sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions);
   return rows.slice(0, q.rowLimit ?? 1000);
+}
+
+/**
+ * Search Console's response metadata (searchanalytics.query): `first_incomplete_date`
+ * is returned only with dataState "all", the date dimension, and a range that
+ * contains incomplete data. `finality: 'unknown'` simulates a response without it.
+ */
+export function fixtureMeta(q: FixtureQuery, today: string, finality: 'known' | 'unknown' = 'known'): { firstIncompleteDate?: string } {
+  if (finality === 'unknown' || q.filters.dataState !== 'all' || !q.dimensions.includes('date')) return {};
+  const first = fixtureFirstIncomplete(today);
+  return q.range.end >= first ? { firstIncompleteDate: first } : {};
 }
 
 /* ── Technical audit fixture: a tiny synthetic site served by an injected fetch ── */
@@ -129,10 +145,11 @@ export function fixtureSite(): Record<string, { status: number; body?: string; l
 }
 
 /** fetch() over fixtureSite(): honours `redirect: 'manual'` like the real one. */
-export function fixtureFetch(): (url: string, init?: RequestInit) => Promise<Response> {
+export function fixtureFetch(delayMs = 0): (url: string, init?: RequestInit) => Promise<Response> {
   const site = fixtureSite();
   return async (url: string, init?: RequestInit) => {
     if ((init?.method ?? 'GET') !== 'GET') throw new Error('fixture: GET only');
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
     const hit = site[url];
     if (!hit) return new Response('not found', { status: 404 });
     const headers: Record<string, string> = { 'content-type': hit.type ?? 'text/html; charset=utf-8' };

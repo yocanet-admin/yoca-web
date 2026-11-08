@@ -26,6 +26,10 @@
 --   seo_ai_suggestions  AI suggestions requested by an admin (display only;
 --                       nothing is published or written to the site)
 --
+--   seo_audit_acquire()   one running audit per site across all instances
+--                         (partial unique index + stale-run expiry)
+--   seo_weekly_replace()  replaces one week's record set in one transaction
+--
 -- Requires v9 (audit_row), v10 Part A (is_admin), v8 (clients).
 -- Idempotent; safe to re-run. Undo: supabase/rollback-v27-seo.sql
 -- ═══════════════════════════════════════════════════════════════
@@ -161,6 +165,68 @@ begin
   end loop;
 end;
 $$;
+
+-- ── Technical audit: at most ONE running run per site, across all server instances ──
+-- A run still "running" after the timeout (longer than the route's maxDuration) is
+-- expired by the next acquire: marked failed with the reason, and a new run may start.
+update public.seo_audit_runs set status = 'failed', finished_at = now(), limit_reason = 'Zaman aşımı: tarama süresinde bitmedi (sonuç kaydedilmedi).'
+where status = 'running' and started_at < now() - interval '3 minutes';
+create unique index if not exists seo_audit_runs_one_running on public.seo_audit_runs (site_id) where status = 'running';
+
+-- Atomic acquire: expire stale runs, then insert the new run. Returns the new run id,
+-- or NULL when another run is still running (the unique index decides; a concurrent
+-- second call waits for the first and then gets NULL). SECURITY INVOKER: RLS applies.
+create or replace function public.seo_audit_acquire(p_site_id uuid, p_source text, p_triggered_by text, p_timeout_seconds integer default 180)
+returns uuid
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_timeout integer := greatest(coalesce(p_timeout_seconds, 180), 60);
+begin
+  update public.seo_audit_runs
+     set status = 'failed', finished_at = now(),
+         limit_reason = format('Zaman aşımı: tarama %s sn içinde bitmedi (sonuç kaydedilmedi).', v_timeout)
+   where site_id = p_site_id and status = 'running' and started_at < now() - make_interval(secs => v_timeout);
+  insert into public.seo_audit_runs (site_id, status, source, triggered_by)
+  values (p_site_id, 'running', p_source, p_triggered_by)
+  on conflict (site_id) where status = 'running' do nothing
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- ── Weekly record: replace one week's whole set atomically ──
+-- Deletes every stored row of (site, week) and inserts the new set in ONE
+-- transaction: rows that dropped out of the top 250 do not linger, and if any
+-- row fails (constraint, type, …) nothing changes and the previous set stays.
+create or replace function public.seo_weekly_replace(p_site_id uuid, p_week_start date, p_rows jsonb)
+returns integer
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_count integer;
+begin
+  if p_rows is null or jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) = 0 then
+    raise exception 'seo_weekly_replace: boş veya geçersiz satır listesi';
+  end if;
+  delete from public.seo_weekly where site_id = p_site_id and week_start = p_week_start;
+  insert into public.seo_weekly (site_id, week_start, dimension, key, filters, clicks, impressions, ctr, position, days_with_data, data_through, fetched_at)
+  select p_site_id, p_week_start, r.dimension, coalesce(r.key, ''), r.filters, coalesce(r.clicks, 0), coalesce(r.impressions, 0), coalesce(r.ctr, 0), r.position, r.days_with_data, r.data_through, coalesce(r.fetched_at, now())
+  from jsonb_to_recordset(p_rows) as r(dimension text, key text, filters text, clicks integer, impressions integer, ctr numeric, position numeric, days_with_data smallint, data_through date, fetched_at timestamptz);
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+revoke all on function public.seo_audit_acquire(uuid, text, text, integer) from public, anon;
+revoke all on function public.seo_weekly_replace(uuid, date, jsonb) from public, anon;
+grant execute on function public.seo_audit_acquire(uuid, text, text, integer) to authenticated, service_role;
+grant execute on function public.seo_weekly_replace(uuid, date, jsonb) to authenticated, service_role;
 
 drop trigger if exists audit_seo_keywords on public.seo_keywords;
 create trigger audit_seo_keywords after insert or update or delete on public.seo_keywords for each row execute function public.audit_row();

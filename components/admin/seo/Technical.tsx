@@ -44,7 +44,17 @@ export function Audit({ audit, onRun, busy, hosts }: { audit: { run: AuditRun; f
           </div>
           {audit.run.limit_reason && <p className="text-[12px] text-amber-200">{audit.run.limit_reason}</p>}
           <label className="flex items-center gap-2 text-[12px] text-muted"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Bilgi ve “tamam” satırlarını da göster</label>
-          <div className="-mx-1 overflow-x-auto">
+          {/* phones / tablets: one card per finding (severity, check, page, finding), no horizontal scrolling */}
+          <ul className="grid gap-2 md:hidden" data-testid="seo-finding-cards">
+            {shown.slice(0, 300).map((f, i) => (
+              <li key={i} className="grid gap-1 rounded-sm border border-line bg-surface-deep/60 p-3 text-[13px]" data-testid="seo-finding-card">
+                <div className="flex flex-wrap items-center gap-2"><StatusBadge kind={SEV[f.severity].kind}>{SEV[f.severity].label}</StatusBadge><span className="font-semibold text-soft">{CHECK[f.check_key] ?? f.check_key}</span></div>
+                <p className="break-all font-mono text-[12px] text-subtle">{path(f.url)}</p>
+                <p className="break-words text-soft">{f.message}</p>
+              </li>
+            ))}
+          </ul>
+          <div className="-mx-1 hidden overflow-x-auto md:block">
             <table className="w-full min-w-[640px] text-left text-[13px]" data-testid="seo-findings">
               <thead><tr className="border-b border-line text-[11px] uppercase tracking-[0.06em] text-subtle"><th className="px-1 py-2">Önem</th><th className="px-1 py-2">Kontrol</th><th className="px-1 py-2">Sayfa</th><th className="px-1 py-2">Bulgu</th></tr></thead>
               <tbody>

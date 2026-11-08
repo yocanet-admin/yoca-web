@@ -3,9 +3,10 @@
 import { useState } from 'react';
 import { Card, DailyBars, Notice, StatTile } from '@/components/admin/cockpit/Widgets';
 import { Badge, field, small } from '@/components/admin/ops/ui';
+import { DateField } from '@/components/admin/DateField';
 import { fmtDay, fmtNumber } from '@/lib/cockpit/client';
 import {
-  COUNTRY_OPTIONS, countryLabel, ctrText, DATA_LAG_NOTE, DATA_STATE_LABEL, DEVICE_LABEL, DEVICES, eachDay, HISTORY_SCOPE, NO_DATA, POSITION_LABEL, POSITION_NOTE,
+  COUNTRY_OPTIONS, countryLabel, ctrText, DATA_LAG_NOTE, FINALITY_UNKNOWN, DATA_STATE_LABEL, DEVICE_LABEL, DEVICES, eachDay, HISTORY_SCOPE, NO_DATA, POSITION_LABEL, POSITION_NOTE,
   positionText, PRESETS, SEARCH_TYPE_LABEL, SEARCH_TYPES, type Preset, type SeoFilters,
 } from '@/lib/seoPanel/model';
 import type { Report } from '@/lib/seoPanel/report';
@@ -32,12 +33,13 @@ export function Filters({ query, onChange, today }: { query: Query; onChange: (q
           </button>
         ))}
         <span className="mx-1 hidden h-5 w-px bg-line sm:inline-block" />
-        <label className="flex min-w-0 flex-wrap items-center gap-1.5 text-[12px] text-muted">Özel
-          <input type="date" className={`${field} !w-[8.5rem] !py-1 text-[12px]`} value={custom.start} max={today} onChange={(e) => setCustom({ ...custom, start: e.target.value })} aria-label="Başlangıç" />
-          <span>–</span>
-          <input type="date" className={`${field} !w-[8.5rem] !py-1 text-[12px]`} value={custom.end} max={today} onChange={(e) => setCustom({ ...custom, end: e.target.value })} aria-label="Bitiş" />
-        </label>
-        <button type="button" className={small} disabled={!custom.start || !custom.end} onClick={() => onChange({ ...query, preset: null, start: custom.start, end: custom.end })}>Uygula</button>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[12px] text-muted" role="group" aria-label="Özel tarih aralığı">
+          <span>Özel</span>
+          <DateField label="Başlangıç tarihi" value={custom.start} today={today} max={custom.end || today} onChange={(v) => setCustom({ ...custom, start: v })} />
+          <span aria-hidden="true">–</span>
+          <DateField label="Bitiş tarihi" value={custom.end} today={today} min={custom.start || null} max={today} onChange={(v) => setCustom({ ...custom, end: v })} />
+          <button type="button" className={small} disabled={!custom.start || !custom.end || custom.start > custom.end} onClick={() => onChange({ ...query, preset: null, start: custom.start, end: custom.end })}>Uygula</button>
+        </div>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <label className="grid min-w-0 gap-1 text-[12px] font-semibold text-muted">Ülke
@@ -69,18 +71,34 @@ export function Filters({ query, onChange, today }: { query: Query; onChange: (q
 
 export function DataLag({ report }: { report: Report }) {
   const c = report.current;
+  const p = report.previous;
+  const f = report.freshness;
+  const list = (days: string[]) => (days.length ? days.map(fmtDay).join(', ') : 'yok');
   return (
     <div className="grid gap-1.5 rounded-md border border-line bg-surface p-4 text-[13px] leading-relaxed text-soft" data-testid="seo-lag">
+      {f.known && f.finalThrough && f.firstIncompleteDate ? (
+        <p>
+          <strong className="text-white">Son kesin veri günü:</strong> {dayYear(f.finalThrough)} <span className="text-subtle">(ilk kesinleşmemiş gün {dayYear(f.firstIncompleteDate)}; Search Console yanıtından doğrulandı)</span>. {DATA_LAG_NOTE}
+        </p>
+      ) : (
+        <p data-testid="seo-finality-unknown">
+          <strong className="text-amber-200">{FINALITY_UNKNOWN}.</strong> Search Console yanıtı ilk kesinleşmemiş günü bildirmedi.{f.estimate && <> Tahmini son kesin gün: {dayYear(f.estimate)} <Badge tone="warn">tahmini</Badge> (doğrulanmadı; tipik 3 günlük gecikmeye göre).</>}
+          {report.rangeEstimated && <> Dönemin bitişi bu tahmine göre seçildi.</>}
+        </p>
+      )}
       <p>
-        <strong className="text-white">Son tam veri günü:</strong>{' '}
-        {report.dataThrough ? `${dayYear(report.dataThrough)}${report.lagDays !== null ? ` (${report.lagDays} gün önce)` : ''}` : 'son 10 günde kesin veri yok'}. {DATA_LAG_NOTE}
+        <strong className="text-white">Gösterim olmayan günler ({c.zeroDays.length}):</strong> {list(c.zeroDays)}
+        <span className="text-subtle"> — kesinleşmiş, o gün hiç gösterim yok.</span>
       </p>
-      <p>
-        <strong className="text-white">Veri olmayan günler ({c.missingDays.length}):</strong>{' '}
-        {c.missingDays.length ? c.missingDays.map(fmtDay).join(', ') : 'yok'}
-        {c.pendingDays.length > 0 && <> · <strong className="text-white">Henüz kesinleşmemiş ({c.pendingDays.length}):</strong> {c.pendingDays.map(fmtDay).join(', ')}</>}
-        {report.previous.missingDays.length > 0 && <span className="text-subtle"> · önceki dönemde {report.previous.missingDays.length} gün veri yok ({report.previous.missingDays.map(fmtDay).join(', ')})</span>}
-      </p>
+      {c.pendingDays.length > 0 && (
+        <p><strong className="text-white">Henüz kesinleşmemiş günler ({c.pendingDays.length}):</strong> {list(c.pendingDays)} <span className="text-subtle">— değerler {report.current.filters.dataState === 'all' ? 'değişebilir (taze veri)' : 'kesin veriye dahil değil'}.</span></p>
+      )}
+      {c.unknownDays.length > 0 && (
+        <p><strong className="text-white">Veri olmayan günler, durumu belirsiz ({c.unknownDays.length}):</strong> {list(c.unknownDays)} <span className="text-subtle">— gösterim olmayan veya henüz kesinleşmemiş gün olabilir.</span></p>
+      )}
+      {(p.zeroDays.length > 0 || p.unknownDays.length > 0) && (
+        <p className="text-subtle">Önceki dönem: {p.zeroDays.length ? `gösterim olmayan ${p.zeroDays.length} gün (${list(p.zeroDays)})` : ''}{p.unknownDays.length ? `${p.zeroDays.length ? ' · ' : ''}durumu belirsiz ${p.unknownDays.length} gün` : ''}</p>
+      )}
     </div>
   );
 }
@@ -158,11 +176,11 @@ export function Daily({ report }: { report: Report }) {
 export function Weekly({ weekly, onSave, busy, canSave }: { weekly: WeeklyTotal[]; onSave: () => void; busy: boolean; canSave: boolean }) {
   return (
     <Card title="Haftalık kayıt" action={<button type="button" className="admin-btn !py-1.5 text-[12px]" disabled={busy || !canSave} onClick={onSave}>{busy ? 'Kaydediliyor…' : 'Şimdi kaydet'}</button>}>
-      <p className="mb-3 max-w-[90ch] text-[12px] leading-relaxed text-subtle" data-testid="seo-history-scope">{HISTORY_SCOPE} Haftalar pazartesi başlar; yalnızca tamamlanmış ve verisi kesinleşmiş haftalar kaydedilir. Aynı hafta tekrar kaydedilirse üzerine yazılır (çift kayıt olmaz). Haftalık otomatik kayıt: perşembe 04:10 UTC.</p>
+      <p className="mb-3 max-w-[90ch] text-[12px] leading-relaxed text-subtle" data-testid="seo-history-scope">{HISTORY_SCOPE} Haftalar pazartesi başlar; yalnızca tamamlanmış ve Search Console’un kesinleştiğini bildirdiği haftalar kaydedilir; kesinleşme belirlenemezse hafta atlanır. Aynı hafta tekrar kaydedilirse haftanın tüm kaydı tek işlemde yenilenir (çift veya artık satır kalmaz; yazma başarısız olursa önceki kayıt korunur). Haftalık otomatik kayıt: perşembe 04:10 UTC.</p>
       {weekly.length === 0 ? <p className="text-[13px] text-subtle">Henüz haftalık kayıt yok.</p> : (
         <div className="-mx-1 overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-[13px]">
-            <thead><tr className="border-b border-line text-[11px] uppercase tracking-[0.06em] text-subtle">{['Hafta', 'Tıklama', 'Gösterim', 'TO', POSITION_LABEL, 'Veri olan gün', 'Son veri günü', 'Satırlar'].map((h, i) => <th key={h} className={`px-1 py-2 font-bold ${i ? 'text-right' : ''}`}>{h}</th>)}</tr></thead>
+            <thead><tr className="border-b border-line text-[11px] uppercase tracking-[0.06em] text-subtle">{['Hafta', 'Tıklama', 'Gösterim', 'TO', POSITION_LABEL, 'Gösterim olan gün', 'Kesinleşme', 'Satırlar'].map((h, i) => <th key={h} className={`px-1 py-2 font-bold ${i ? 'text-right' : ''}`}>{h}</th>)}</tr></thead>
             <tbody>
               {weekly.map((w) => (
                 <tr key={w.week_start} className="border-b border-line/50">
@@ -172,7 +190,7 @@ export function Weekly({ weekly, onSave, busy, canSave }: { weekly: WeeklyTotal[
                   <td className="px-1 py-1.5 text-right tabular-nums">{ctrText(Number(w.ctr), w.impressions)}</td>
                   <td className="px-1 py-1.5 text-right tabular-nums">{positionText(w.position === null ? null : Number(w.position))}</td>
                   <td className="px-1 py-1.5 text-right tabular-nums">{w.days_with_data}/7</td>
-                  <td className="px-1 py-1.5 text-right">{w.data_through ? fmtDay(w.data_through) : '—'}</td>
+                  <td className="px-1 py-1.5 text-right">{w.data_through ? `${fmtDay(w.data_through)}'e kadar doğrulandı` : '—'}</td>
                   <td className="px-1 py-1.5 text-right text-subtle">{w.counts.query ?? 0} sorgu · {w.counts.page ?? 0} sayfa · {w.counts.keyword ?? 0} kelime</td>
                 </tr>
               ))}

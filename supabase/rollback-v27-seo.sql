@@ -1,7 +1,7 @@
 -- ═══════════════════════════════════════════════════════════════
 -- Yoca — rollback of upgrade v27 (Kokpit SEO, Faz 0)
 --
--- Drops ONLY the v27 tables (and their triggers / policies with them).
+-- Drops ONLY the v27 functions and tables (triggers / policies / indexes go with them).
 -- Nothing else is touched; the audit_log rows written for seo_keywords /
 -- seo_sites stay (history is never deleted). The application keeps working
 -- without these tables: the SEO page shows "migration bekleniyor".
@@ -11,6 +11,8 @@
 
 begin;
 
+drop function if exists public.seo_weekly_replace(uuid, date, jsonb);
+drop function if exists public.seo_audit_acquire(uuid, text, text, integer);
 drop table if exists public.seo_ai_suggestions;
 drop table if exists public.seo_pagespeed;
 drop table if exists public.seo_audit_findings;
