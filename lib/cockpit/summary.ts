@@ -147,10 +147,15 @@ export async function buildMorningSummary(now = Date.now()): Promise<MorningSumm
             icon: '📈',
             title: 'Trafik',
             lines: [
-              { tone: 'muted' as Tone, title: traffic.yesterday ? `Dün ${traffic.yesterday.visitors} ziyaretçi` : 'Dün: veri yok', detail: traffic.yesterday ? `${traffic.yesterday.pageviews} sayfa görüntüleme` : undefined },
+              // Vercel counts whole UTC days: "Dün" is the UTC day with yesterday's date (03:00–03:00 Istanbul); calculation unchanged
+              {
+                tone: 'muted' as Tone,
+                title: traffic.yesterday ? `Dün (UTC) ${traffic.yesterday.visitors} ziyaretçi` : 'Dün (UTC): veri yok',
+                detail: [traffic.yesterday ? `${traffic.yesterday.pageviews} sayfa görüntüleme` : '', 'UTC günü: Türkiye saatiyle 03:00–03:00'].filter(Boolean).join(' · '),
+              },
               {
                 tone: (traffic.week >= traffic.prev ? 'green' : 'amber') as Tone,
-                title: `Son 7 gün ${traffic.week} ziyaretçi`,
+                title: `Son 7 gün (UTC, bugün dahil) ${traffic.week} ziyaretçi`,
                 detail: `önceki 7 gün ${traffic.prev}${traffic.prev ? ` · ${traffic.week >= traffic.prev ? '+' : ''}${Math.round(((traffic.week - traffic.prev) / traffic.prev) * 100)}%` : ''}`,
               },
             ],

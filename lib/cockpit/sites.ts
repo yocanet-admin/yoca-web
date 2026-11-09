@@ -22,6 +22,8 @@ export interface HealthResponse {
   error?: string;
   sitesFromDatabase: boolean;
   vercelConfigured: boolean;
+  /** Vercel region the checks ran in (e.g. "iad1"); null outside Vercel. */
+  monitorRegion?: string | null;
   checks: SiteCheck[];
   deployments: Array<{ id: string; state: string; target: string | null; createdAt: number; message: string; branch: string; url: string }> | null;
 }
@@ -77,4 +79,6 @@ export async function removeSite(id: string): Promise<boolean> {
   return !error;
 }
 
-export { siteIssues, type Severity } from '@/lib/cockpit/issues';
+export { siteIssues, checkIsStale, checkLabel, CHECK_STALE_MS, PROBLEM_LABEL, type Severity, type SiteProblem } from '@/lib/cockpit/issues';
+
+export { browserProbeText, probeFromBrowser, type BrowserProbe } from '@/lib/cockpit/browserProbe';

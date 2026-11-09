@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cronAuth } from '@/lib/cockpit/cron';
 import { sitesOutcome, withHeartbeat } from '@/lib/cockpit/heartbeat';
+import { checkLabel } from '@/lib/cockpit/issues';
+import { siteTransition } from '@/lib/cockpit/siteAlerts';
 import { checkSites, type MonitoredSite, type SiteCheck } from '@/lib/cockpit/monitor';
 import { getCronState, saveCronState } from '@/lib/cockpit/settings';
 import { escapeHtml, notifyAdmins } from '@/lib/notify';
@@ -26,13 +28,13 @@ interface SiteRow extends MonitoredSite {
   signature_alerted: boolean;
 }
 
-const BAD: Array<SiteCheck['state']> = ['down', 'suspended'];
 const MIN_GAP_MS = 5 * 60_000;
 
 function problem(check: SiteCheck): string {
   if (check.state === 'suspended') return 'hosting askıya alınmış / park sayfası görünüyor';
-  if (check.error) return `erişilemiyor (${check.error})`;
-  return `erişilemiyor (HTTP ${check.httpStatus ?? '—'})`;
+  const reason = check.error ?? `HTTP ${check.httpStatus ?? '—'}`;
+  if (check.state === 'unknown') return `${checkLabel(check).toLocaleLowerCase('tr')} (${reason}) · izleme noktası: Vercel ${process.env.VERCEL_REGION || 'iad1'}; site başka yerden açılıyor olabilir`;
+  return `${checkLabel(check).toLocaleLowerCase('tr')} (${reason})`;
 }
 
 /**
@@ -90,56 +92,45 @@ export async function GET(request: NextRequest) {
     const checks = await checkSites(rows, { domain: false });
     type Item = { name: string; url: string; detail: string };
     const down: Item[] = [];
+    const unchecked: Item[] = [];
     const recovered: Item[] = [];
     const unsigned: Item[] = [];
 
     await Promise.all(
       rows.map(async (row, i) => {
         const check = checks[i];
-        const bad = BAD.includes(check.state);
-        const patch: Partial<SiteRow> & { last_state: string; last_checked_at: string } = {
-          last_state: check.state,
-          last_checked_at: check.checkedAt,
-          fail_count: bad ? (row.fail_count ?? 0) + 1 : 0,
-        };
-        if (bad && patch.fail_count! >= 2 && !row.alerted) {
-          patch.alerted = true;
-          down.push({ name: row.name, url: row.url, detail: problem(check) });
-        }
-        if (!bad && row.alerted) {
-          patch.alerted = false;
-          recovered.push({ name: row.name, url: row.url, detail: `tekrar çalışıyor${check.ms !== null ? ` · ${(check.ms / 1000).toFixed(1)} sn` : ''}` });
-        }
-        const missing = row.expects_signature && check.signature === false && !bad;
-        if (missing && !row.signature_alerted) {
-          patch.signature_alerted = true;
-          unsigned.push({ name: row.name, url: row.url, detail: '“Built by YOCA” imzası sitede görünmüyor' });
-        }
-        if (check.signature === true && row.signature_alerted) patch.signature_alerted = false;
+        const { patch, alert, recovered: back, unsigned: noSignature } = siteTransition(row, check);
+        if (alert) (alert === 'unchecked' ? unchecked : down).push({ name: row.name, url: row.url, detail: problem(check) });
+        if (back) recovered.push({ name: row.name, url: row.url, detail: `tekrar çalışıyor${check.ms !== null ? ` · ${(check.ms / 1000).toFixed(1)} sn` : ''}` });
+        if (noSignature) unsigned.push({ name: row.name, url: row.url, detail: '“Built by YOCA” imzası sitede görünmüyor' });
         await supabase.from('monitored_sites').update(patch).eq('id', row.id);
       }),
     );
 
     let sent = null;
-    if (down.length || recovered.length || unsigned.length) {
+    if (down.length || unchecked.length || recovered.length || unsigned.length) {
       const when = istanbulTime();
       const groups: Array<{ items: Item[]; tone: Tone; heading: string; icon: string }> = [
-        { items: down, tone: 'red', heading: 'Erişilemiyor', icon: '🔴' },
+        { items: down, tone: 'red', heading: 'Site sorunu', icon: '🔴' },
+        { items: unchecked, tone: 'amber', heading: 'Kontrol tamamlanamadı / engellendi', icon: '🟠' },
         { items: recovered, tone: 'green', heading: 'Düzeldi', icon: '🟢' },
         { items: unsigned, tone: 'amber', heading: 'İmza eksik', icon: '🟠' },
       ].filter((g) => g.items.length) as Array<{ items: Item[]; tone: Tone; heading: string; icon: string }>;
       const subject = down.length
         ? `Site sorunu: ${down.map((d) => d.name).join(', ')}`
-        : recovered.length
+        : unchecked.length
+          ? `Site kontrolü tamamlanamadı: ${unchecked.map((d) => d.name).join(', ')}`
+          : recovered.length
           ? `Tekrar çalışıyor: ${recovered.map((d) => d.name).join(', ')}`
           : `İmza uyarısı: ${unsigned.map((d) => d.name).join(', ')}`;
-      const lead = down.length ? 'Site sorunu' : recovered.length ? 'Site tekrar çalışıyor' : 'İmza uyarısı';
+      const lead = down.length ? 'Site sorunu' : unchecked.length ? 'Site kontrolü tamamlanamadı' : recovered.length ? 'Site tekrar çalışıyor' : 'İmza uyarısı';
+      const leadTone = down.length ? 'red' : unchecked.length ? 'amber' : recovered.length ? 'green' : 'amber';
       const email = emailLayout({
         preheader: subject,
         label: lead,
         body:
-          kicker(lead, down.length ? 'red' : recovered.length ? 'green' : 'amber') +
-          title(down.length ? `${down.length} site erişilemiyor` : recovered.length ? `${recovered.length} site tekrar ayakta` : 'İmza bulunamadı') +
+          kicker(lead, leadTone) +
+          title(down.length ? `${down.length} sitede sorun var` : unchecked.length ? `${unchecked.length} sitenin kontrolü tamamlanamadı` : recovered.length ? `${recovered.length} site tekrar ayakta` : 'İmza bulunamadı') +
           groups
             .map((g) => section(g.heading, statusList(g.items.map((it) => ({ tone: g.tone, title: it.name, detail: `${it.detail} · ${it.url.replace(/^https?:\/\//, '')}`, href: it.url })))))
             .join('') +
@@ -147,13 +138,13 @@ export async function GET(request: NextRequest) {
           buttons([{ label: 'Siteleri aç', href: `${SITE}/admin/sites`, primary: true }]),
       });
       const telegram =
-        `${tgHead(down.length ? '🔴' : recovered.length ? '🟢' : '🟠', lead, when)}\n\n` +
+        `${tgHead(down.length ? '🔴' : unchecked.length ? '🟠' : recovered.length ? '🟢' : '🟠', lead, when)}\n\n` +
         groups
           .map((g) => g.items.map((it) => `${g.icon} <b>${escapeHtml(it.name)}</b>\n     ${escapeHtml(it.detail)}\n     <a href="${escapeHtml(it.url)}">${escapeHtml(it.url.replace(/^https?:\/\//, ''))}</a>`).join('\n\n'))
           .join('\n\n');
       sent = await notifyAdmins({ kind: 'site', subject, email, telegram, keyboard: [[{ text: 'Siteleri aç →', url: `${SITE}/admin/sites` }]] });
     }
 
-    return { response: NextResponse.json({ ok: true, published, checked: rows.length, down: down.length, recovered: recovered.length, unsigned: unsigned.length, sent }), outcome: sitesOutcome({ dbOk: true, published, sent }) };
+    return { response: NextResponse.json({ ok: true, published, checked: rows.length, down: down.length, unchecked: unchecked.length, recovered: recovered.length, unsigned: unsigned.length, sent }), outcome: sitesOutcome({ dbOk: true, published, sent }) };
   });
 }

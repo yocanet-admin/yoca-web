@@ -54,7 +54,24 @@ interface AggregateResponse<T> {
 }
 
 export interface TrafficReport {
+  /** since/until are UTC calendar dates; `until` is exclusive (tomorrow, so today is included). */
   range: { days: number; since: string; until: string };
+  /**
+   * Vercel Web Analytics counts in whole UTC days: `visitors` per period come from
+   * the source (never summed by us). The query API has no time-zone parameter
+   * (documented parameters: projectId, by, since, until, limit, filter, teamId/slug —
+   * https://vercel.com/docs/rest-api/web-analytics/aggregates-page-views and
+   * …/counts-page-views; since/until "will be adjusted according to the desired time
+   * granularity"). Checked 9 Nov 2026: since=…T21:00Z or …T21:00+03:00 comes back as
+   * query.since …T00:00:00Z, and day buckets start at 00:00Z. Unique visitors for an
+   * Istanbul day would need hourly uniques summed (double counting), so "today" is the
+   * current UTC day (03:00 Istanbul onward) and labelled so.
+   */
+  dayBoundary: 'UTC';
+  /** The current UTC day's bucket as returned by Vercel; null when the response has no row for it. */
+  today: ({ date: string } & Visits) | null;
+  /** When this report was fetched from Vercel (ISO). */
+  fetchedAt: string;
   totals: Visits;
   previous: Visits;
   daily: Array<{ date: string } & Visits>;
@@ -155,13 +172,19 @@ export async function trafficReport(days: number, siteDomains: string[] = []): P
       .map((row) => ({ label: row[key] || '—', pageviews: row.pageviews ?? 0, visitors: row.visitors ?? 0 }))
       .sort((a, b) => b[sortBy] - a[sortBy]);
 
+  const dailyRows = (daily.data ?? [])
+    .map((row) => ({ date: row.timestamp.slice(0, 10), pageviews: row.pageviews ?? 0, visitors: row.visitors ?? 0 }))
+    .filter((row) => row.date < until);
+  const todayUtc = day(0);
+
   return {
     range: { days, since, until },
+    dayBoundary: 'UTC',
+    today: dailyRows.find((row) => row.date === todayUtc) ?? null,
+    fetchedAt: new Date().toISOString(),
     totals: totals.data ?? { pageviews: 0, visitors: 0 },
     previous: previous.data ?? { pageviews: 0, visitors: 0 },
-    daily: (daily.data ?? [])
-      .map((row) => ({ date: row.timestamp.slice(0, 10), pageviews: row.pageviews ?? 0, visitors: row.visitors ?? 0 }))
-      .filter((row) => row.date < until),
+    daily: dailyRows,
     pages: rows(pages, 'requestPath', 'pageviews'),
     referrers: rows(referrers, 'referrerHostname'),
     countries: rows(countries, 'country'),

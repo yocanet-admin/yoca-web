@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Card, Notice, StatusBadge } from '@/components/admin/cockpit/Widgets';
 import { adminApi, fmtDate } from '@/lib/cockpit/client';
-import { addSite, loadSiteRows, normalizeSiteUrl, removeSite, siteIssues, updateSite, type HealthResponse, type SiteEdit, type SiteRow } from '@/lib/cockpit/sites';
+import { addSite, checkIsStale, checkLabel, loadSiteRows, normalizeSiteUrl, browserProbeText, probeFromBrowser, removeSite, siteIssues, updateSite, type BrowserProbe, type HealthResponse, type SiteEdit, type SiteRow } from '@/lib/cockpit/sites';
 import type { SiteCheck } from '@/lib/cockpit/monitor';
 
 /**
@@ -16,8 +16,9 @@ import type { SiteCheck } from '@/lib/cockpit/monitor';
 const STATE: Record<SiteCheck['state'], { kind: 'good' | 'warning' | 'critical'; label: string }> = {
   up: { kind: 'good', label: 'Çalışıyor' },
   slow: { kind: 'warning', label: 'Yavaş' },
-  down: { kind: 'critical', label: 'Erişilemiyor' },
+  down: { kind: 'critical', label: 'Site erişilemiyor' },
   suspended: { kind: 'critical', label: 'Askıda' },
+  unknown: { kind: 'warning', label: 'Kontrol tamamlanamadı' },
 };
 
 function days(value: number | null): string {
@@ -34,6 +35,13 @@ export default function AdminSites() {
   const [draft, setDraft] = useState({ name: '', url: '', expects_signature: true });
   const [formError, setFormError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  // re-evaluates "Sonuç güncel değil" while the page stays open
+  const [now, setNow] = useState(() => Date.now());
+  const [probes, setProbes] = useState<Record<string, BrowserProbe>>({});
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const say = (text: string) => {
     setFlash(text);
@@ -64,6 +72,23 @@ export default function AdminSites() {
   }, []);
 
   const checks = health?.checks ?? [];
+
+  // For every site the server could not confirm, also try from this browser (a second vantage point).
+  useEffect(() => {
+    const pending = (health?.checks ?? []).filter((c) => c.state !== 'up' && c.state !== 'slow');
+    if (!pending.length) return;
+    let alive = true;
+    setProbes((prev) => ({ ...prev, ...Object.fromEntries(pending.map((c) => [c.url, { state: 'checking' } as BrowserProbe])) }));
+    pending.forEach((c) =>
+      probeFromBrowser(c.url).then((result) => {
+        if (alive) setProbes((prev) => ({ ...prev, [c.url]: result }));
+      }),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [health]);
+  const region = health?.monitorRegion ? `Vercel ${health.monitorRegion}` : 'Vercel sunucusu';
   const failed = health && !health.ok ? health.error ?? 'Site kontrolü yapılamadı.' : null;
   const renewals = checks
     .flatMap((c) => [
@@ -106,14 +131,17 @@ export default function AdminSites() {
 
       <div className={`grid gap-3 transition-opacity ${busy && health ? 'opacity-60' : ''}`}>
         {checks.map((c) => {
-          const issues = siteIssues(c);
+          // the state itself is the badge and the "İzleme noktası" line; list only the other issues (SSL, domain, signature …)
+          const issues = siteIssues(c).filter((issue) => !issue.text.startsWith(checkLabel(c)));
+          const stale = checkIsStale(c.checkedAt, now);
           return (
             <article key={c.url} className="rounded-md border border-line bg-surface-deep/80 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="flex items-center gap-2.5 text-[15px] font-extrabold">
                     {c.name}
-                    <StatusBadge kind={STATE[c.state].kind}>{STATE[c.state].label}</StatusBadge>
+                    <StatusBadge kind={STATE[c.state].kind}>{checkLabel(c)}</StatusBadge>
+                    {stale && <StatusBadge kind="neutral">Sonuç güncel değil</StatusBadge>}
                   </p>
                   <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-[12px] text-subtle hover:text-white">
                     {c.url.replace(/^https?:\/\//, '')} ↗
@@ -147,11 +175,36 @@ export default function AdminSites() {
                   ))}
                 </ul>
               )}
+              <dl className="mt-3 grid gap-1 text-[12px] text-subtle">
+                <div className="flex flex-wrap gap-x-2">
+                  <dt>İzleme noktası ({region}):</dt>
+                  <dd className="text-soft">
+                    {checkLabel(c)}
+                    {c.error ? ` — ${c.error}` : c.httpStatus !== null ? ` · HTTP ${c.httpStatus}` : ''} · {fmtDate(c.checkedAt)}
+                    {stale ? ' · 30 dakikadan eski, “Şimdi kontrol et” ile yenileyin' : ''}
+                  </dd>
+                </div>
+                {probes[c.url] && c.state !== 'up' && c.state !== 'slow' && (
+                  <div className="flex flex-wrap gap-x-2">
+                    <dt title="fetch no-cors: yalnız isteğin tamamlanıp tamamlanmadığı görülür; durum kodu ve içerik okunamaz. İzleme uyarısını etkilemez.">Bu tarayıcıdan (yalnız bilgi):</dt>
+                    <dd className="text-soft">
+                      {browserProbeText(probes[c.url])}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+              {(c.state === 'unknown' || c.problem === 'restricted') && (
+                <p className="mt-1 text-[12px] text-subtle">Bu sonuç sitenin herkes için kapalı olduğunu göstermez: kontrol {region} üzerinden yapılıyor. Tarayıcıdan açılıyorsa sorun bağlantı yolunda ya da hosting güvenlik duvarında olabilir.</p>
+              )}
             </article>
           );
         })}
         {!health && <div className="h-40 animate-pulse rounded-md bg-surface" />}
-        {checks[0] && <p className="text-[12px] text-subtle">Son kontrol: {fmtDate(checks[0].checkedAt)} · sonuçlar 10 dakika saklanır.</p>}
+        {checks[0] && (
+          <p className="text-[12px] text-subtle">
+            Sonuçlar 10 dakika saklanır. “Kontrol tamamlanamadı”: izleme isteği bitmedi (zaman aşımı, bağlantı hatası). “Erişim kısıtlı”: sunucu 401/403/429 ile kontrolü reddetti. “Sunucu hatası” (5xx), “İzlenen adres bulunamadı” (404), “Güvenli bağlantı sorunu” (sertifika) ve “Alan adı bulunamadı” (DNS NXDOMAIN) sitenin kendisiyle ilgili kanıttır.
+          </p>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
