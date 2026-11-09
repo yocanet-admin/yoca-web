@@ -49,7 +49,9 @@ function days(value: number | null): string {
 }
 
 const tr = (iso: string | null) => (iso ? `${fmtDate(iso)} (TR)` : '—');
-const hm = (iso: string) => new Date(iso).toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit' });
+// a real moment (check start / result) to the second, so it is never read as the planned slot
+const trSec = (iso: string) =>
+  `${new Date(iso).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })} (TR)`;
 
 // the cron slot that will do the check (schedule.ts plannedSlot), not a computed "about" time
 function nextLine(site: SiteStatus): string {
@@ -248,10 +250,18 @@ export default function AdminSites() {
                 <div className="flex flex-wrap gap-x-2">
                   <dt>Son deneme ({region}):</dt>
                   <dd className="text-soft">
-                    {site.lastAttemptAt ? tr(site.lastAttemptAt) : 'yok'}
-                    {site.lastSlotAt ? ` · ${hm(site.lastSlotAt)} cron dilimi` : site.lastStartedAt ? ' · elle' : ''}
+                    {/* the REAL start of the last check; the planned cron slot is its own line below */}
+                    {site.lastStartedAt
+                      ? `${trSec(site.lastStartedAt)} başladı`
+                      : site.lastAttemptAt
+                        ? `${trSec(site.lastAttemptAt)} (sonuç zamanı; başlangıç kaydı yok)`
+                        : 'yok'}
                     {c && !answered ? ` · ${checkLabel(c)}${c.error ? ` — ${c.error}` : c.httpStatus !== null ? ` · HTTP ${c.httpStatus}` : ''}` : ''}
                   </dd>
+                </div>
+                <div className="flex flex-wrap gap-x-2">
+                  <dt>Son denemenin cron dilimi:</dt>
+                  <dd className="text-soft">{site.lastSlotAt ? tr(site.lastSlotAt) : site.lastStartedAt ? 'yok — elle kontrol' : '—'}</dd>
                 </div>
                 <div className="flex flex-wrap gap-x-2">
                   <dt>Son başarılı kontrol:</dt>

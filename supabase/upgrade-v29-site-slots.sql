@@ -26,12 +26,15 @@
 --                                      the rule allows:
 --                                        pending confirmation → the first slot at least
 --                                          7.5 min after the failed check
---                                        15 min, last check by the cron (the faulty
---                                          15 → 30 min values) → the slot after the
+--                                        15 min, last check CERTAINLY by the cron (no
+--                                          manual check recorded, or it was > 10 min
+--                                          before the last check) — the faulty
+--                                          15 → 30 min values → the slot after the
 --                                          check's slot (the fix)
 --                                        everything else — daily / weekly / hourly / 6 h,
---                                          and any value after a manual check → rounded
---                                          UP to the next slot (a full interval stays full)
+--                                          any value after a manual check, and any 15-min
+--                                          value that cannot be told apart for sure →
+--                                          rounded UP (a full interval stays full)
 --
 -- Requires v28. Idempotent; safe to re-run (only touches values not on a slot).
 -- Order: apply and verify BEFORE merging the release that writes the new columns.
@@ -125,10 +128,13 @@ with legacy as (
          s.confirm_pending,
          m.check_interval,
          m.last_checked_at,
-         -- the last check was a manual one when it ended within the 2-minute lease of last_manual_at
-         (s.last_manual_at is not null and m.last_checked_at is not null
-            and m.last_checked_at >= s.last_manual_at
-            and m.last_checked_at - s.last_manual_at <= interval '120 seconds') as was_manual
+         -- CERTAINLY a cron check only when no manual check is recorded, or the last
+         -- check came more than 10 minutes after the last manual one (a manual check
+         -- ends within its route's 60 s limit). Anything closer — either way, in case
+         -- of clock skew or a manual check that never stored its result — is treated
+         -- like a manual check and rounded UP.
+         not (s.last_manual_at is null
+              or (m.last_checked_at is not null and m.last_checked_at - s.last_manual_at > interval '10 minutes')) as was_manual
     from public.site_check_state s
     join public.monitored_sites m on m.id = s.site_id
    where s.next_check_at is not null

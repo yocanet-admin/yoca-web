@@ -126,6 +126,10 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
     ['L haftalık cron', '7d', '-15 min +49 s', false, false, '+7 days -15 min +49 s', '+7 days'],
     ['L saatlik cron', '1h', '-15 min +49 s', false, false, '+45 min +49 s', '+1 hour'],
     ['L 15dk elle', '15m', '-8 min', true, false, '+7 min', '+15 min'],
+    // manual timestamp AFTER the check (clock skew, or a manual check that never stored a result): not certain → up
+    ['L 15dk belirsiz', '15m', '-8 min', 'after', false, '+7 min', '+15 min'],
+    // a manual check 20 min before, then a cron check: certainly cron → fixed
+    ['L 15dk elle sonra cron', '15m', '-15 min +6 s', 'old', false, '+6 s', '+0 s'],
     ['L günlük elle', '24h', '-8 min', true, false, '+24 hours -8 min', '+24 hours'],
     ['L doğrulama', '7d', '-1 min', false, true, '+14 min', '+15 min'],
     ['L zaten dilimde', '6h', '-15 min +49 s', false, false, '+6 hours', '+6 hours'],
@@ -133,13 +137,14 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   const off = (o) => o.split(/\s+(?=[+-])/).map((x) => `interval '${x.replace(/^[+]/, '')}'`).join(' + ').replace(/interval '-/g, "- interval '").replace(/\+ - /g, '- ');
   for (const [name, iv, last, manual, confirm, next] of legacy) {
     psql(`insert into monitored_sites (name, url, expects_signature, order_index, check_interval, is_active, last_checked_at) values ('${name}', 'http://127.0.0.1:18101/legacy', false, 50, '${iv}', false, ${FL} + ${off(last)})`);
-    psql(`insert into site_check_state (site_id, next_check_at, confirm_pending, last_manual_at) select id, ${FL} + ${off(next)}, ${confirm}, ${manual ? `${FL} + ${off(last)} - interval '4 seconds'` : 'null'} from monitored_sites where name = '${name}' on conflict (site_id) do update set next_check_at = excluded.next_check_at, confirm_pending = excluded.confirm_pending, last_manual_at = excluded.last_manual_at`);
+    const manualAt = manual === 'after' ? `${FL} + ${off(last)} + interval '30 seconds'` : manual === 'old' ? `${FL} + ${off(last)} - interval '20 minutes'` : manual ? `${FL} + ${off(last)} - interval '4 seconds'` : 'null';
+    psql(`insert into site_check_state (site_id, next_check_at, confirm_pending, last_manual_at) select id, ${FL} + ${off(next)}, ${confirm}, ${manualAt} from monitored_sites where name = '${name}' on conflict (site_id) do update set next_check_at = excluded.next_check_at, confirm_pending = excluded.confirm_pending, last_manual_at = excluded.last_manual_at`);
   }
   execFileSync('psql', ['-h', process.env.ITEST_DIR || '/var/tmp/yoca-itest', '-p', process.env.ITEST_PORT || '54339', '-U', 'postgres', '-d', process.env.ITEST_DB || 'itest', '-q', '-v', 'ON_ERROR_STOP=1', '-f', `${ROOT}/supabase/upgrade-v29-site-slots.sql`], { stdio: 'ignore' });
   for (const [name, iv, , manual, confirm, next, want] of legacy) {
     const ok = psql(`select s.next_check_at = ${FL} + ${off(want)} from site_check_state s join monitored_sites m on m.id = s.site_id where m.name = '${name}'`) === 't';
     const got = psql(`select to_char(s.next_check_at at time zone 'UTC', 'DD HH24:MI:SS') from site_check_state s join monitored_sites m on m.id = s.site_id where m.name = '${name}'`);
-    const fixes = iv === '15m' && !manual && !confirm;
+    const fixes = iv === '15m' && (!manual || manual === 'old') && !confirm;
     const neverEarlier = fixes || confirm || psql(`select s.next_check_at >= ${FL} + ${off(next)} from site_check_state s join monitored_sites m on m.id = s.site_id where m.name = '${name}'`) === 't';
     check(`v29 conversion · ${name}: ${fixes ? 'faulty 15-min value fixed' : confirm ? 'confirmation → first slot ≥ 7.5 min after the check' : 'rounded UP, not earlier than stored'}`, ok && neverEarlier, `${got} (want this slot ${want})`);
   }
@@ -295,6 +300,14 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   const shown = await page.evaluate(async ([t]) => { const r = await fetch('/api/admin/health', { headers: { Authorization: `Bearer ${t}` } }); const j = await r.json(); return (j.sites || []).map((x) => [x.name, x.plannedAt, x.nextCheckAt]); }, [token]);
   const hs = shown.find((x) => x[0] === 'TEST haftalık hata');
   check('panel: shown next time = the targeted cron slot', hs && hs[1] === iso(confirmSlot(t9)), JSON.stringify(hs));
+  // "Son deneme" = the real start (to the second); the planned cron slot is a separate line
+  const lines = await page.evaluate(() => {
+    const card = [...document.querySelectorAll('article')].find((a) => a.innerText.startsWith('TEST haftalık hata'));
+    const get = (label) => [...card.querySelectorAll('dt')].find((d) => d.textContent.startsWith(label))?.nextElementSibling?.textContent ?? null;
+    return { attempt: get('Son deneme ('), slot: get('Son denemenin cron dilimi') };
+  });
+  const dbTimes = psql(`select to_char(s.last_started_at at time zone 'Europe/Istanbul', 'HH24:MI:SS') || '|' || to_char(s.last_slot_at at time zone 'Europe/Istanbul', 'HH24:MI') from site_check_state s join monitored_sites m on m.id = s.site_id where m.name = 'TEST haftalık hata'`).split('|');
+  check('panel: "Son deneme" shows the real start, the cron slot is its own line', !!lines.attempt && lines.attempt.includes(dbTimes[0]) && lines.attempt.includes('başladı') && !!lines.slot && lines.slot.includes(dbTimes[1]) && !lines.attempt.includes('dilim'), JSON.stringify({ lines, dbTimes }));
   await page.reload();
   const card = page.locator('section, article, div').filter({ has: page.getByText('TEST haftalık hata', { exact: true }) }).filter({ has: page.getByText('Sonraki planlanan kontrol:') }).last();
   await card.waitFor({ timeout: 30000 });
