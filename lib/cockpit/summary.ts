@@ -1,5 +1,6 @@
-import { checkSites, DEFAULT_SITES, type MonitoredSite } from '@/lib/cockpit/monitor';
 import { siteIssues } from '@/lib/cockpit/issues';
+import { resultFreshness } from '@/lib/cockpit/schedule';
+import { loadSiteStatuses, type SiteStatus } from '@/lib/cockpit/siteStatus';
 import { istanbulDate } from '@/lib/cockpit/settings';
 import { trafficReport, vercelConfigured } from '@/lib/cockpit/vercel';
 import { escapeHtml } from '@/lib/notify';
@@ -67,15 +68,14 @@ export async function buildMorningSummary(now = Date.now()): Promise<MorningSumm
   const today = istanbulDate(0, now);
   const dayAgo = new Date(now - 86_400_000).toISOString();
 
-  const [contacts, checkups, tasks, spam, sitesRes] = supabase
+  const [contacts, checkups, tasks, spam] = supabase
     ? await Promise.all([
         supabase.from('contact_submissions').select('*').order('created_at', { ascending: false }).limit(500),
         supabase.from('checkup_submissions').select('*').order('created_at', { ascending: false }).limit(500),
         supabase.from('activities').select('id,body,due_on,client_id,clients(name)').eq('kind', 'task').eq('done', false).lte('due_on', today).order('due_on'),
         supabase.from('spam_log').select('id', { count: 'exact', head: true }).gte('created_at', dayAgo),
-        supabase.from('monitored_sites').select('id,name,url,expects_signature,hosting_renews_on').eq('is_active', true).order('order_index'),
       ])
-    : [null, null, null, null, null];
+    : [null, null, null, null];
 
   const leads = [
     ...(((contacts?.data as Row[]) ?? []).map((r) => toLead(r, 'contact'))),
@@ -91,9 +91,14 @@ export async function buildMorningSummary(now = Date.now()): Promise<MorningSumm
     client: String(((t.clients as Row | null)?.name as string) ?? ''),
   }));
 
-  const sites = (sitesRes?.data as MonitoredSite[] | undefined)?.length ? (sitesRes!.data as MonitoredSite[]) : DEFAULT_SITES;
-  const checks = await checkSites(sites);
-  const issues = checks.flatMap((c) => siteIssues(c).filter((i) => i.severity !== 'good').map((i) => ({ site: c.name, ...i })));
+  // the STORED results (each site keeps its own frequency): the summary sends no request to client sites
+  const statuses: SiteStatus[] = supabase ? await loadSiteStatuses(supabase, now).catch(() => []) : [];
+  const checks = statuses.map((st) => st.check).filter((c): c is NonNullable<SiteStatus['check']> => Boolean(c));
+  const issues = statuses.flatMap((st) => {
+    const out = st.check ? siteIssues(st.check).filter((i) => i.severity !== 'good').map((i) => ({ site: st.name, ...i })) : [];
+    if (resultFreshness({ interval: st.interval, lastAttemptAt: st.lastAttemptAt, nextCheckAt: st.nextCheckAt, now }) === 'overdue') out.push({ site: st.name, severity: 'warning' as const, text: 'Sonuç güncel değil (planlanan kontrol gecikti)' });
+    return out;
+  });
 
   let traffic: { yesterday: { visitors: number; pageviews: number } | null; week: number; prev: number } | null = null;
   if (vercelConfigured()) {

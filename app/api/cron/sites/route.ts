@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cronAuth } from '@/lib/cockpit/cron';
 import { sitesOutcome, withHeartbeat } from '@/lib/cockpit/heartbeat';
-import { checkLabel } from '@/lib/cockpit/issues';
-import { siteTransition } from '@/lib/cockpit/siteAlerts';
-import { checkSites, type MonitoredSite, type SiteCheck } from '@/lib/cockpit/monitor';
+import { LEASE_S } from '@/lib/cockpit/schedule';
+import { runSiteChecks } from '@/lib/cockpit/siteRunner';
+import { loadRunRows, SiteScheduleMissing } from '@/lib/cockpit/siteStatus';
 import { getCronState, saveCronState } from '@/lib/cockpit/settings';
-import { escapeHtml, notifyAdmins } from '@/lib/notify';
-import { SITE, buttons, emailLayout, istanbulTime, kicker, section, statusList, tgHead, title, type Tone } from '@/lib/notifyTemplates';
 import { getSupabaseAdmin } from '@/lib/supabase';
 
 /**
  * Yoca cockpit — client site watch (Vercel Cron, every 15 minutes).
- * One alert per incident: a site must fail two checks in a row before
- * "down / suspended" goes out, and one "back up" message follows when it
- * recovers. A removed "Built by YOCA" signature is reported once.
+ * Each site has its own frequency (15 min … weekly, or manual only); a run
+ * checks ONLY the sites whose next check is due, claimed atomically in the
+ * database so a site is never checked by two runs at once (v28).
+ * Alerts (siteAlerts.ts / schedule.ts): after a first failure one confirmation
+ * check follows 15 minutes later; a second failure in a row alerts, once per
+ * incident; a recovery message only follows a check where the site answered.
  * Reports start/success/fail to Healthchecks (lib/cockpit/heartbeat.ts).
  */
 
@@ -21,21 +22,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-interface SiteRow extends MonitoredSite {
-  id: string;
-  fail_count: number;
-  alerted: boolean;
-  signature_alerted: boolean;
-}
-
 const MIN_GAP_MS = 5 * 60_000;
-
-function problem(check: SiteCheck): string {
-  if (check.state === 'suspended') return 'hosting askıya alınmış / park sayfası görünüyor';
-  const reason = check.error ?? `HTTP ${check.httpStatus ?? '—'}`;
-  if (check.state === 'unknown') return `${checkLabel(check).toLocaleLowerCase('tr')} (${reason}) · izleme noktası: Vercel ${process.env.VERCEL_REGION || 'iad1'}; site başka yerden açılıyor olabilir`;
-  return `${checkLabel(check).toLocaleLowerCase('tr')} (${reason})`;
-}
 
 /**
  * SCHEDULED → PUBLISHED for articles whose publish_at has passed. The public
@@ -80,71 +67,24 @@ export async function GET(request: NextRequest) {
 
     const supabase = getSupabaseAdmin();
     if (!supabase) return { response: NextResponse.json({ ok: false, error: 'supabase not configured' }, { status: 503 }), outcome: sitesOutcome({ dbOk: false, published, sent: null }) };
-    const { data, error } = await supabase
-      .from('monitored_sites')
-      .select('id,name,url,expects_signature,hosting_renews_on,fail_count,alerted,signature_alerted')
-      .eq('is_active', true)
-      .order('order_index');
-    if (error || !data) return { response: NextResponse.json({ ok: false, error: 'run supabase/upgrade-v9-cockpit-phase2.sql' }, { status: 500 }), outcome: sitesOutcome({ dbOk: false, published, sent: null }) };
     await saveCronState({ sites_last_at: new Date().toISOString() });
 
-    const rows = data as SiteRow[];
-    const checks = await checkSites(rows, { domain: false });
-    type Item = { name: string; url: string; detail: string };
-    const down: Item[] = [];
-    const unchecked: Item[] = [];
-    const recovered: Item[] = [];
-    const unsigned: Item[] = [];
-
-    await Promise.all(
-      rows.map(async (row, i) => {
-        const check = checks[i];
-        const { patch, alert, recovered: back, unsigned: noSignature } = siteTransition(row, check);
-        if (alert) (alert === 'unchecked' ? unchecked : down).push({ name: row.name, url: row.url, detail: problem(check) });
-        if (back) recovered.push({ name: row.name, url: row.url, detail: `tekrar çalışıyor${check.ms !== null ? ` · ${(check.ms / 1000).toFixed(1)} sn` : ''}` });
-        if (noSignature) unsigned.push({ name: row.name, url: row.url, detail: '“Built by YOCA” imzası sitede görünmüyor' });
-        await supabase.from('monitored_sites').update(patch).eq('id', row.id);
-      }),
-    );
-
-    let sent = null;
-    if (down.length || unchecked.length || recovered.length || unsigned.length) {
-      const when = istanbulTime();
-      const groups: Array<{ items: Item[]; tone: Tone; heading: string; icon: string }> = [
-        { items: down, tone: 'red', heading: 'Site sorunu', icon: '🔴' },
-        { items: unchecked, tone: 'amber', heading: 'Kontrol tamamlanamadı / engellendi', icon: '🟠' },
-        { items: recovered, tone: 'green', heading: 'Düzeldi', icon: '🟢' },
-        { items: unsigned, tone: 'amber', heading: 'İmza eksik', icon: '🟠' },
-      ].filter((g) => g.items.length) as Array<{ items: Item[]; tone: Tone; heading: string; icon: string }>;
-      const subject = down.length
-        ? `Site sorunu: ${down.map((d) => d.name).join(', ')}`
-        : unchecked.length
-          ? `Site kontrolü tamamlanamadı: ${unchecked.map((d) => d.name).join(', ')}`
-          : recovered.length
-          ? `Tekrar çalışıyor: ${recovered.map((d) => d.name).join(', ')}`
-          : `İmza uyarısı: ${unsigned.map((d) => d.name).join(', ')}`;
-      const lead = down.length ? 'Site sorunu' : unchecked.length ? 'Site kontrolü tamamlanamadı' : recovered.length ? 'Site tekrar çalışıyor' : 'İmza uyarısı';
-      const leadTone = down.length ? 'red' : unchecked.length ? 'amber' : recovered.length ? 'green' : 'amber';
-      const email = emailLayout({
-        preheader: subject,
-        label: lead,
-        body:
-          kicker(lead, leadTone) +
-          title(down.length ? `${down.length} sitede sorun var` : unchecked.length ? `${unchecked.length} sitenin kontrolü tamamlanamadı` : recovered.length ? `${recovered.length} site tekrar ayakta` : 'İmza bulunamadı') +
-          groups
-            .map((g) => section(g.heading, statusList(g.items.map((it) => ({ tone: g.tone, title: it.name, detail: `${it.detail} · ${it.url.replace(/^https?:\/\//, '')}`, href: it.url })))))
-            .join('') +
-          `<p style="margin:14px 0 18px 0;font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#6E6E6E;">Kontrol: ${escapeHtml(when)} · iki kontrol üst üste başarısız olunca haber verilir.</p>` +
-          buttons([{ label: 'Siteleri aç', href: `${SITE}/admin/sites`, primary: true }]),
-      });
-      const telegram =
-        `${tgHead(down.length ? '🔴' : unchecked.length ? '🟠' : recovered.length ? '🟢' : '🟠', lead, when)}\n\n` +
-        groups
-          .map((g) => g.items.map((it) => `${g.icon} <b>${escapeHtml(it.name)}</b>\n     ${escapeHtml(it.detail)}\n     <a href="${escapeHtml(it.url)}">${escapeHtml(it.url.replace(/^https?:\/\//, ''))}</a>`).join('\n\n'))
-          .join('\n\n');
-      sent = await notifyAdmins({ kind: 'site', subject, email, telegram, keyboard: [[{ text: 'Siteleri aç →', url: `${SITE}/admin/sites` }]] });
+    // only the due sites, each held by this run (lease) until its result is written
+    const claim = await supabase.rpc('site_checks_claim_due', { p_lease_seconds: LEASE_S });
+    if (claim.error) {
+      const pending = /site_checks_claim_due|site_check_state|does not exist|schema cache|Could not find/i.test(claim.error.message);
+      return { response: NextResponse.json({ ok: false, error: pending ? 'run supabase/upgrade-v28-site-schedule.sql' : claim.error.message.slice(0, 160) }, { status: 500 }), outcome: sitesOutcome({ dbOk: false, published, sent: null }) };
     }
-
-    return { response: NextResponse.json({ ok: true, published, checked: rows.length, down: down.length, unchecked: unchecked.length, recovered: recovered.length, unsigned: unsigned.length, sent }), outcome: sitesOutcome({ dbOk: true, published, sent }) };
+    const ids = (Array.isArray(claim.data) ? (claim.data as Array<{ claimed_id: string }>) : []).map((r) => r.claimed_id);
+    try {
+      const rows = await loadRunRows(supabase, ids);
+      const run = await runSiteChecks(supabase, rows);
+      const { results: _r, ...summary } = run;
+      return { response: NextResponse.json({ ok: true, published, due: ids.length, ...summary }), outcome: sitesOutcome({ dbOk: true, published, sent: run.sent }) };
+    } catch (error) {
+      if (ids.length) await supabase.from('site_check_state').update({ lease_until: null }).in('site_id', ids);
+      const message = error instanceof SiteScheduleMissing ? error.message : (error as Error).message?.slice(0, 160) || 'site kontrolü başarısız';
+      return { response: NextResponse.json({ ok: false, error: message }, { status: 500 }), outcome: sitesOutcome({ dbOk: false, published, sent: null }) };
+    }
   });
 }

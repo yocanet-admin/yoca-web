@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyFetchError, classifyHttpStatus, dnsFailure, type SiteCheck } from '../lib/cockpit/monitor';
-import { checkIsStale, checkLabel, siteIssues } from '../lib/cockpit/issues';
+import { checkLabel, siteIssues } from '../lib/cockpit/issues';
 import { siteTransition } from '../lib/cockpit/siteAlerts';
 
 const fetchFailed = (code: string) => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(code), { code }) });
@@ -67,14 +67,6 @@ test('issues: incomplete/restricted are warnings with the reason; never "up"; no
   const five = siteIssues(check({ state: 'down', problem: 'server_error', error: 'HTTP 503', httpStatus: 503, signature: null }));
   assert.deepEqual(five[0], { severity: 'critical', text: 'Sunucu hatası — HTTP 503' });
   assert.equal(siteIssues(check({ state: 'unknown', problem: 'check_incomplete', error: 'x', signature: false })).some((i) => /imza/i.test(i.text)), false);
-});
-
-test('stale: a result older than 30 minutes (or without a time) is "Sonuç güncel değil"', () => {
-  const now = Date.parse('2026-11-09T14:00:00Z');
-  assert.equal(checkIsStale('2026-11-09T13:45:00Z', now), false);
-  assert.equal(checkIsStale('2026-11-09T13:29:00Z', now), true);
-  assert.equal(checkIsStale(null, now), true);
-  assert.equal(checkIsStale('garbage', now), true);
 });
 
 const row = (over = {}) => ({ fail_count: 0, alerted: false, signature_alerted: false, expects_signature: true, ...over });

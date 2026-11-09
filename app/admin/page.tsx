@@ -8,7 +8,8 @@ import { TokenHelp } from '@/components/admin/cockpit/TokenHelp';
 import { LEAD_LABEL, LEAD_PILL, OPEN_STATUSES, adminApi, delta, fmtDate, fmtNumber, istanbulToday, timeAgo } from '@/lib/cockpit/client';
 import { loadLeads, type Lead } from '@/lib/cockpit/leads';
 import { loadCrm, money, pipelineByCurrency, type CrmData } from '@/lib/cockpit/crm';
-import { checkIsStale, siteIssues, type HealthResponse, type Severity } from '@/lib/cockpit/sites';
+import { siteIssues, type HealthResponse, type Severity, type SiteStatus } from '@/lib/cockpit/sites';
+import { resultFreshness } from '@/lib/cockpit/schedule';
 import type { TrafficReport } from '@/lib/cockpit/vercel';
 import { VISITOR_TODAY_LABEL, VISITOR_WEEK_LABEL, visitorCard } from '@/lib/cockpit/visitorCard';
 import { mergeWorkSources } from '@/lib/workData';
@@ -93,11 +94,15 @@ export default function Cockpit() {
   const lateTasks = openTasks.filter((a) => a.due_on && a.due_on < today());
   const pipeline = pipelineByCurrency(crm?.deals ?? []);
   const visitors = visitorCard(week);
-  const checks = health?.checks ?? [];
-  // an old result does not count as "working"
-  const sitesUp = checks.filter((c) => (c.state === 'up' || c.state === 'slow') && !checkIsStale(c.checkedAt, now)).length;
-  const sitesUnchecked = checks.filter((c) => c.state === 'unknown').length;
-  const sitesStale = checks.filter((c) => checkIsStale(c.checkedAt, now)).length;
+  // stored results with each site's own frequency (reading them sends no request to the sites)
+  const siteList = health?.sites ?? [];
+  const overdue = (s: SiteStatus) => resultFreshness({ interval: s.interval, lastAttemptAt: s.lastAttemptAt, nextCheckAt: s.nextCheckAt, now }) === 'overdue';
+  const checks = siteList.map((s) => s.check).filter((c): c is NonNullable<SiteStatus['check']> => Boolean(c));
+  // a result whose planned check is late does not count as "working"; a site whose check has not come yet is not a failure
+  const sitesUp = siteList.filter((s) => s.check && (s.check.state === 'up' || s.check.state === 'slow') && !overdue(s)).length;
+  const sitesUnchecked = siteList.filter((s) => s.check?.state === 'unknown').length;
+  const sitesStale = siteList.filter(overdue).length;
+  const sitesNever = siteList.filter((s) => !s.check).length;
   const latestProd = health?.deployments?.find((d) => d.target === 'production') ?? null;
   const healthError = health && !health.ok ? health.error ?? 'Site kontrolü alınamadı.' : null;
 
@@ -167,7 +172,7 @@ export default function Cockpit() {
         <StatTile label="Yeni lead · 7 gün" value={leads ? String(leads7) : null} deltaPct={leads ? delta(leads7, leadsPrev7) : null} deltaLabel="önceki 7 gün" hint={leads && !delta(leads7, leadsPrev7) ? `önceki 7 gün: ${leadsPrev7}` : undefined} href="/admin/submissions" />
         <StatTile label="Açık lead" value={leads ? String(openLeads.length) : null} hint={waiting.length ? `${waiting.length} yanıt bekliyor` : 'bekleyen yok'} tone={waiting.length ? 'alert' : 'default'} href="/admin/submissions" />
         <StatTile label="Açık fırsat" value={crm ? (pipeline.length ? money(pipeline[0].value, pipeline[0].currency) : '–') : null} hint={crm && !crm.ready ? 'CRM kurulmadı' : pipeline.length > 1 ? `+ ${pipeline.slice(1).map((p) => money(p.value, p.currency)).join(' + ')}` : undefined} href="/admin/clients" />
-        <StatTile label="Siteler" value={health ? `${sitesUp}/${checks.length}` : null} hint={['çalışıyor', sitesUnchecked ? `${sitesUnchecked} kontrol tamamlanamadı` : '', sitesStale ? `${sitesStale} sonuç güncel değil` : ''].filter(Boolean).join(' · ')} tone={health && sitesUp < checks.length ? 'alert' : 'default'} href="/admin/sites" />
+        <StatTile label="Siteler" value={health ? `${sitesUp}/${siteList.length}` : null} hint={['çalışıyor', sitesUnchecked ? `${sitesUnchecked} kontrol tamamlanamadı` : '', sitesStale ? `${sitesStale} sonuç güncel değil` : '', sitesNever ? `${sitesNever} henüz kontrol edilmedi` : ''].filter(Boolean).join(' · ')} tone={health && sitesUp + sitesNever < siteList.length ? 'alert' : 'default'} href="/admin/sites" />
         <StatTile label="Engellenen spam · 7 gün" value={content ? (content.spam7 === null ? '–' : String(content.spam7)) : null} hint="kayda geçmeden atıldı" />
       </div>
 
@@ -254,17 +259,19 @@ export default function Cockpit() {
                 Tekrar dene
               </button>
             </p>
-          ) : checks.length === 0 ? (
+          ) : siteList.length === 0 ? (
             <p className="text-[13px] text-subtle">İzlenen site yok. <Link href="/admin/sites" className="underline">Siteler</Link>’den ekleyin.</p>
           ) : (
             <ul className="grid gap-2">
-              {checks.map((c) => {
-                const issues = siteIssues(c);
-                const worst = issues[0];
+              {siteList.map((s) => {
+                const c = s.check;
+                const worst = c ? siteIssues(c)[0] : undefined;
                 return (
-                  <li key={c.url} className="flex items-center justify-between gap-3 text-[13px]">
-                    <span className="font-bold">{c.name}</span>
-                    {checkIsStale(c.checkedAt, now) ? (
+                  <li key={s.id} className="flex items-center justify-between gap-3 text-[13px]">
+                    <span className="font-bold">{s.name}</span>
+                    {!c ? (
+                      <StatusBadge kind="neutral">Henüz kontrol edilmedi</StatusBadge>
+                    ) : overdue(s) ? (
                       <StatusBadge kind="neutral">Sonuç güncel değil</StatusBadge>
                     ) : worst ? (
                       <StatusBadge kind={worst.severity}>{worst.text.length > 28 ? `${worst.text.slice(0, 27)}…` : worst.text}</StatusBadge>
