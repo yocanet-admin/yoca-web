@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { daysUntil, type MonitoredSite, type SiteCheck } from '@/lib/cockpit/monitor';
-import { isInterval, type CheckInterval } from '@/lib/cockpit/schedule';
+import { isInterval, plannedSlot, type CheckInterval } from '@/lib/cockpit/schedule';
 
 /**
  * Yoca cockpit — what the panel, the cockpit and the morning summary show for
@@ -22,8 +22,10 @@ export interface SiteStatus {
   lastAttemptAt: string | null;
   /** Last check where the site answered normally (up / slow). */
   lastSuccessAt: string | null;
-  /** Next automatic check; null = at the next cron (or never for "manual"). */
+  /** Stored next automatic check (a cron slot); null = at the next cron (or never for "manual"). */
   nextCheckAt: string | null;
+  /** The cron slot that will actually check the site (shown in the panel); null for "manual". */
+  plannedAt: string | null;
   /** The next check is the single confirmation after a first failure. */
   confirmPending: boolean;
   /** A run is checking this site right now. */
@@ -88,6 +90,7 @@ export async function loadSiteStatuses(supabase: SupabaseClient, now = Date.now(
     const check: SiteCheck | null = stored
       ? { ...stored, name: String(row.name), url: String(row.url), expectsSignature: Boolean(row.expects_signature), hostingRenewsOn: (row.hosting_renews_on as string | null) ?? null, domainExpires, domainDaysLeft: daysUntil(domainExpires), sslDaysLeft: daysUntil(stored.sslExpires) }
       : null;
+    const interval: CheckInterval = isInterval(row.check_interval) ? row.check_interval : '15m';
     return {
       id: String(row.id),
       name: String(row.name),
@@ -95,12 +98,13 @@ export async function loadSiteStatuses(supabase: SupabaseClient, now = Date.now(
       expectsSignature: Boolean(row.expects_signature),
       hostingRenewsOn: (row.hosting_renews_on as string | null) ?? null,
       orderIndex: Number(row.order_index ?? 0),
-      interval: isInterval(row.check_interval) ? row.check_interval : '15m',
+      interval,
       failCount: Number(row.fail_count ?? 0),
       alerted: Boolean(row.alerted),
       lastAttemptAt: (row.last_checked_at as string | null) ?? null,
       lastSuccessAt: s?.last_success_at ?? null,
       nextCheckAt: s?.next_check_at ?? null,
+      plannedAt: plannedSlot({ interval, nextCheckAt: s?.next_check_at ?? null, now }),
       confirmPending: Boolean(s?.confirm_pending),
       checking: Boolean(s?.lease_until && Date.parse(s.lease_until) > now),
       lastManualAt: s?.last_manual_at ?? null,

@@ -33,8 +33,15 @@ function problem(check: SiteCheck): string {
   return `${checkLabel(check).toLocaleLowerCase('tr')} (${reason})`;
 }
 
-export async function runSiteChecks(supabase: SupabaseClient, rows: SiteRunRow[], options: { now?: () => number; notify?: typeof notifyAdmins } = {}): Promise<RunSummary & { results: Array<{ id: string; check: SiteCheck }> }> {
+export async function runSiteChecks(
+  supabase: SupabaseClient,
+  rows: SiteRunRow[],
+  options: { now?: () => number; notify?: typeof notifyAdmins; startedAt?: number; manual?: boolean } = {},
+): Promise<RunSummary & { results: Array<{ id: string; check: SiteCheck }> }> {
   const now = options.now ?? Date.now;
+  // the schedule is planned from when the run STARTED (its cron slot), never from when a check ended
+  const startedAt = options.startedAt ?? now();
+  const manual = Boolean(options.manual);
   const send = options.notify ?? notifyAdmins;
   type Item = { name: string; url: string; detail: string };
   const down: Item[] = [];
@@ -60,7 +67,7 @@ export async function runSiteChecks(supabase: SupabaseClient, rows: SiteRunRow[]
       if (noSignature) unsigned.push({ name: row.name, url: row.url, detail: '“Built by YOCA” imzası sitede görünmüyor' });
 
       const finished = now();
-      const schedule = nextSchedule({ interval: row.check_interval, failed: FAILED_STATES.includes(check.state), prevFailCount: row.fail_count, alerted: row.alerted, now: finished });
+      const schedule = nextSchedule({ interval: row.check_interval, failed: FAILED_STATES.includes(check.state), prevFailCount: row.fail_count, alerted: row.alerted, startedAt, manual });
       const answered = check.state === 'up' || check.state === 'slow';
       const state: Record<string, unknown> = {
         last_result: check,
@@ -85,7 +92,7 @@ export async function runSiteChecks(supabase: SupabaseClient, rows: SiteRunRow[]
         const interval = (current.data as { check_interval?: unknown } | null)?.check_interval;
         if (current.error) dbErrors.push(`${row.name}: güncel sıklık okunamadı`);
         else if (isInterval(interval) && interval !== row.check_interval) {
-          const replanned = nextSchedule({ interval, failed, prevFailCount: row.fail_count, alerted: row.alerted, now: finished });
+          const replanned = nextSchedule({ interval, failed, prevFailCount: row.fail_count, alerted: row.alerted, startedAt, manual });
           const fix = await supabase.from('site_check_state').update({ ...replanned, updated_at: new Date(now()).toISOString() }).eq('site_id', row.id);
           if (fix.error) dbErrors.push(`${row.name}: yeni sıklıkla planlanamadı`);
         }

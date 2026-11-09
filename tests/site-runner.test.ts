@@ -115,3 +115,31 @@ test('runner: "manual only" failure plans nothing; a frequency changed during th
     srv.close();
   }
 });
+
+test('runner: plans from the run start (cron slot), not from when the check ended; manual checks use a full interval', async () => {
+  const srv = http.createServer((req, res) => { res.writeHead(req.url === '/fail' ? 503 : 200, { 'content-type': 'text/html' }); res.end('ok'); }).listen(0, '127.0.0.1');
+  await new Promise((r) => srv.once('listening', r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const notify = (async () => ({ email: 'skipped', telegram: 'skipped' })) as never;
+  const slot = Date.parse('2026-11-09T21:00:00Z');
+  const ended = () => slot + 3 * 60_000 + 40_000; // the check "ended" 3 min 40 s into the slot
+  const state = (db: ReturnType<typeof fakeDb>, id: string) => db.writes.filter((w) => w.table === 'site_check_state' && w.id === id).reduce((acc, w) => ({ ...acc, ...w.values }), {} as Record<string, unknown>);
+  try {
+    const db = fakeDb({ current: { q: '15m', d: '24h', c: '7d' } });
+    await runSiteChecks(
+      db.client,
+      [row({ id: 'q', url: `${base}/ok`, check_interval: '15m' }), row({ id: 'd', url: `${base}/ok`, check_interval: '24h' }), row({ id: 'c', url: `${base}/fail`, check_interval: '7d' })],
+      { now: ended, startedAt: slot + 2_000, notify },
+    );
+    assert.equal(state(db, 'q').next_check_at, '2026-11-09T21:15:00.000Z', '15 min site: the very next cron run');
+    assert.equal(state(db, 'd').next_check_at, '2026-11-10T21:00:00.000Z', 'daily: same slot tomorrow');
+    assert.equal(state(db, 'c').next_check_at, '2026-11-09T21:15:00.000Z');
+    assert.equal(state(db, 'c').confirm_pending, true, 'confirmation at the next cron run');
+
+    const m = fakeDb({ current: { m: '24h' } });
+    await runSiteChecks(m.client, [row({ id: 'm', url: `${base}/ok`, check_interval: '24h' })], { now: () => slot + 7 * 60_000 + 5_000, startedAt: slot + 7 * 60_000, manual: true, notify });
+    assert.equal(state(m, 'm').next_check_at, '2026-11-10T21:15:00.000Z', 'manual at 21:07: not before 21:07 tomorrow → the 21:15 slot');
+  } finally {
+    srv.close();
+  }
+});

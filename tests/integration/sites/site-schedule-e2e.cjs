@@ -12,6 +12,13 @@ require('node:fs').mkdirSync(OUT, { recursive: true });
 const psql = (q) => execFileSync('psql', ['-h', process.env.ITEST_DIR || '/var/tmp/yoca-itest', '-p', process.env.ITEST_PORT || '54339', '-U', 'postgres', '-d', process.env.ITEST_DB || 'itest', '-Atc', q], { encoding: 'utf8' }).trim();
 const captured = () => Number(execFileSync('bash', ['-c', 'wc -l < /var/tmp/yoca-itest-gw/captured.jsonl 2>/dev/null || echo 0'], { encoding: 'utf8' }).trim());
 const results = [];
+// the cron's 15-minute slots (same rules as lib/cockpit/schedule.ts)
+const SLOT = 15 * 60_000; const M = 60_000; const H = 60 * M; const D = 24 * H;
+const floorS = (t) => Math.floor(t / SLOT) * SLOT;
+const ceilS = (t) => Math.ceil(t / SLOT) * SLOT;
+const plannedNext = (step, t, manual = false) => { if (manual) return ceilS(t + step); let x = floorS(t) + step; while (x - t < step / 2) x += SLOT; return x; };
+const confirmSlot = (t) => { let x = ceilS(t); while (x - t < SLOT / 2) x += SLOT; return x; };
+const iso = (ms) => (ms === null ? null : new Date(ms).toISOString());
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail && !ok ? `  — ${detail}` : ''}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -33,8 +40,8 @@ const cronRaw = async () => { const r = await fetch('http://localhost:3190/api/c
 const cron = async () => (await cronRaw()).body;
 const unthrottle = () => psql("update cockpit_settings set value = value - 'sites_last_at' where key = 'state'");
 const st = (name) => {
-  const [fail, alerted, confirm, nextMin, lastState, success] = psql(`select m.fail_count, m.alerted, s.confirm_pending, round(extract(epoch from (s.next_check_at - now())) / 60), m.last_state, s.last_success_at is not null from monitored_sites m join site_check_state s on s.site_id = m.id where m.name = '${name}'`).split('|');
-  return { fail: Number(fail), alerted: alerted === 't', confirm: confirm === 't', nextMin: nextMin === '' ? null : Number(nextMin), lastState, success: success === 't' };
+  const [fail, alerted, confirm, nextMin, lastState, success, nextMs] = psql(`select m.fail_count, m.alerted, s.confirm_pending, round(extract(epoch from (s.next_check_at - now())) / 60), m.last_state, s.last_success_at is not null, round(extract(epoch from s.next_check_at) * 1000) from monitored_sites m join site_check_state s on s.site_id = m.id where m.name = '${name}'`).split('|');
+  return { fail: Number(fail), alerted: alerted === 't', confirm: confirm === 't', nextMin: nextMin === '' ? null : Number(nextMin), lastState, success: success === 't', next: nextMs === '' ? null : iso(Number(nextMs)) };
 };
 const id = (name) => psql(`select id from monitored_sites where name = '${name}'`);
 
@@ -63,33 +70,47 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   check('a held site is not claimed again', psql('select count(*) from site_checks_claim_due(120)') === '0');
   psql('update site_check_state set lease_until = null');
 
-  // 0b) frequency change, planned in the database (site_check_reschedule)
+  // 0b) frequency change, planned in the database (site_check_reschedule, v29 slot rules)
   const plan = id('TEST plan');
   const setPlan = (sql) => psql(`update site_check_state set ${sql} where site_id = '${plan}'`);
+  const setLast = (sql) => psql(`update monitored_sites set ${sql} where id = '${plan}'`);
   const resched = (interval) => { psql(`update monitored_sites set check_interval = '${interval}' where id = '${plan}'`); return psql(`select site_check_reschedule('${plan}')`); };
-  const planState = () => { const [n, c, m] = psql(`select coalesce(round(extract(epoch from (next_check_at - now())) / 60)::text, 'null'), confirm_pending, coalesce(round(extract(epoch from (now() - (select last_checked_at from monitored_sites where id = '${plan}'))) / 60)::text, '') from site_check_state where site_id = '${plan}'`).split('|'); return { next: n === 'null' ? null : Number(n), confirm: c === 't' }; };
-  psql(`update monitored_sites set last_checked_at = now() - interval '5 minutes', fail_count = 0, alerted = false where id = '${plan}'`);
-  setPlan("next_check_at = now() + interval '10 minutes', confirm_pending = false, lease_until = null");
-  let r = resched('7d'); let ps = planState();
-  check('15 min → weekly: next = last check + 7 days (the old 15-min plan stops)', r === 'ok' && ps.next >= 7 * 24 * 60 - 6 && ps.next <= 7 * 24 * 60 - 4 && !ps.confirm, JSON.stringify({ r, ps }));
-  r = resched('15m'); ps = planState();
-  check('weekly → 15 min after 5 min: next in ~10 min', r === 'ok' && ps.next >= 9 && ps.next <= 10, JSON.stringify(ps));
-  psql(`update monitored_sites set last_checked_at = now() - interval '3 days' where id = '${plan}'`);
-  r = resched('24h'); ps = planState();
-  check('already overdue for the new frequency: due now', ps.next === 0, JSON.stringify(ps));
-  psql(`update monitored_sites set last_checked_at = now() - interval '2 minutes', fail_count = 1, alerted = false where id = '${plan}'`);
-  setPlan("next_check_at = now() + interval '13 minutes', confirm_pending = true");
-  r = resched('7d'); ps = planState();
-  check('pending confirmation + weekly: the single confirmation is kept', r === 'ok' && ps.confirm && ps.next >= 12 && ps.next <= 13, JSON.stringify(ps));
-  r = resched('manual'); ps = planState();
-  check('pending confirmation + "manual only": confirmation cancelled, alarm history kept', r === 'ok' && ps.next === null && !ps.confirm && psql(`select fail_count || '|' || alerted from monitored_sites where id = '${plan}'`) === '1|false', JSON.stringify(ps));
-  setPlan("next_check_at = now() + interval '1 hour', confirm_pending = false, lease_until = now() + interval '60 seconds'");
-  r = resched('6h'); ps = planState();
-  check('during a running check: "checking", the run plans with the new frequency (nothing written now)', r === 'checking' && ps.next >= 59 && ps.next <= 60, JSON.stringify({ r, ps }));
+  const FL = "to_timestamp(floor(extract(epoch from now()) / 900) * 900)"; // this slot
+  const CE = "to_timestamp(ceil(extract(epoch from now()) / 900) * 900)"; // next cron slot
+  // next_check_at equals the expected SQL expression (and confirm flag)
+  const planIs = (expr, confirm = false) => psql(`select coalesce(next_check_at = (${expr}), next_check_at is null and (${expr}) is null) and confirm_pending = ${confirm} from site_check_state where site_id = '${plan}'`) === 't';
+  const planNow = () => psql(`select coalesce(to_char(next_check_at at time zone 'UTC', 'DD HH24:MI:SS'), 'null') || ' ' || confirm_pending from site_check_state where site_id = '${plan}'`);
+  // last checked by the cron run of the previous slot, 49 s in
+  setLast(`last_checked_at = ${FL} - interval '15 minutes' + interval '49 seconds', fail_count = 0, alerted = false`);
+  setPlan(`next_check_at = ${FL}, confirm_pending = false, lease_until = null, last_manual_at = null`);
+  let r = resched('7d');
+  check('15 min → weekly: the same cron slot one week after the last check (the old 15-min plan stops)', r === 'ok' && planIs(`${FL} - interval '15 minutes' + interval '7 days'`), planNow());
+  r = resched('24h');
+  check('weekly → daily: the same slot one day later, not earlier', r === 'ok' && planIs(`${FL} - interval '15 minutes' + interval '24 hours'`), planNow());
+  r = resched('15m');
+  check('→ 15 min: its slot is already here → the next cron slot (no catch-up burst)', r === 'ok' && planIs(CE), planNow());
+  // the last check was a manual one (ended right after last_manual_at): a full interval, then the next slot
+  setLast(`last_checked_at = ${FL} - interval '8 minutes'`);
+  setPlan(`last_manual_at = ${FL} - interval '8 minutes' - interval '4 seconds'`);
+  r = resched('24h');
+  check('after a manual check → daily: first slot a full 24 h later (never early)', r === 'ok' && planIs(`to_timestamp(ceil(extract(epoch from ${FL} - interval '8 minutes' + interval '24 hours') / 900) * 900)`), planNow());
+  setPlan('last_manual_at = null');
+  setLast("last_checked_at = now() - interval '3 days'");
+  r = resched('24h');
+  check('overdue for the new frequency: the next cron slot, once', planIs(CE), planNow());
+  setLast(`last_checked_at = ${FL} - interval '2 minutes', fail_count = 1, alerted = false`);
+  setPlan(`next_check_at = ${FL} + interval '15 minutes' + interval '37 seconds', confirm_pending = true`);
+  r = resched('7d');
+  check('pending confirmation + weekly: the single confirmation is kept, on its slot', r === 'ok' && planIs(`${FL} + interval '15 minutes'`, true), planNow());
+  r = resched('manual');
+  check('pending confirmation + "manual only": confirmation cancelled, alarm history kept', r === 'ok' && planIs('null::timestamptz') && psql(`select fail_count || '|' || alerted from monitored_sites where id = '${plan}'`) === '1|false', planNow());
+  setPlan(`next_check_at = ${FL} + interval '1 hour', confirm_pending = false, lease_until = now() + interval '60 seconds'`);
+  r = resched('6h');
+  check('during a running check: "checking", nothing written (the run plans with the new frequency)', r === 'checking' && planIs(`${FL} + interval '1 hour'`), planNow());
   setPlan('lease_until = null');
-  psql(`update monitored_sites set last_checked_at = null where id = '${plan}'`);
-  r = resched('1h'); ps = planState();
-  check('never checked: due at the next cron', ps.next === null && !ps.confirm, JSON.stringify(ps));
+  setLast('last_checked_at = null');
+  r = resched('1h');
+  check('never checked: due at the next cron', planIs('null::timestamptz'), planNow());
 
   // the direct changes above are audit-logged as "sistem"; from here on only the admin's change may appear
   psql("delete from audit_log where entity = 'monitored_sites'");
@@ -97,13 +118,14 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   const cap0 = captured();
 
   // 1) two cron runs at the same time: every due site checked exactly once; the manual-only site never
+  const t1 = Date.now();
   const [a, b] = await Promise.all([cron(), cron()]);
   check('two simultaneous runs: each due site checked once', hits['/ok'] === 1 && hits['/fail'] === 1 && hits['/weekly'] === 1, JSON.stringify({ hits, a, b }));
   check('"manual only" sites not checked automatically', !hits['/manual'] && !hits['/fail-manual'] && !hits['/plan']);
   check('Healthchecks: start + success for a normal run', pings.includes('/hc-sites/start') && lastPing() === '/hc-sites', JSON.stringify(pings));
   let f = st('TEST haftalık hata');
-  check('weekly site, first failure: fail 1, no alert, ONE confirmation in ~15 min', f.fail === 1 && !f.alerted && f.confirm && f.nextMin >= 14 && f.nextMin <= 15, JSON.stringify(f));
-  check('15-min site: next in ~15 min; weekly site: next in ~7 days', st('TEST 15dk').nextMin >= 14 && st('TEST haftalık').nextMin >= 7 * 24 * 60 - 1);
+  check('weekly site, first failure: fail 1, no alert, ONE confirmation at the next cron slot', f.fail === 1 && !f.alerted && f.confirm && f.next === iso(confirmSlot(t1)), JSON.stringify({ f, want: iso(confirmSlot(t1)) }));
+  check('planned from the run slot: 15-min site → next slot, weekly → same slot next week', st('TEST 15dk').next === iso(plannedNext(15 * M, t1)) && st('TEST haftalık').next === iso(plannedNext(7 * D, t1)), JSON.stringify({ q: st('TEST 15dk').next, w: st('TEST haftalık').next, t1: iso(t1) }));
   check('first failure: no message', captured() === cap0);
 
   // 2) nothing due → no request at all
@@ -119,17 +141,20 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   const odd = await cronRaw();
   check('unexpected claim answer: run fails (HTTP 500) and Healthchecks gets "fail"', odd.status === 500 && odd.body?.ok === false && /beklenmeyen/.test(odd.body?.error ?? '') && lastPing() === '/hc-sites/fail', JSON.stringify({ odd, ping: lastPing() }));
   psql('drop function public.site_checks_claim_due(integer)');
-  execFileSync('psql', ['-h', process.env.ITEST_DIR || '/var/tmp/yoca-itest', '-p', process.env.ITEST_PORT || '54339', '-U', 'postgres', '-d', process.env.ITEST_DB || 'itest', '-q', '-v', 'ON_ERROR_STOP=1', '-f', `${ROOT}/supabase/upgrade-v28-site-schedule.sql`], { stdio: 'ignore' });
+  for (const file of ['upgrade-v28-site-schedule.sql', 'upgrade-v29-site-slots.sql']) {
+    execFileSync('psql', ['-h', process.env.ITEST_DIR || '/var/tmp/yoca-itest', '-p', process.env.ITEST_PORT || '54339', '-U', 'postgres', '-d', process.env.ITEST_DB || 'itest', '-q', '-v', 'ON_ERROR_STOP=1', '-f', `${ROOT}/supabase/${file}`], { stdio: 'ignore' });
+  }
   unthrottle();
   const restored = await cronRaw();
-  check('function restored (v28 re-run): empty list again a success', restored.status === 200 && restored.body?.due === 0 && lastPing() === '/hc-sites', JSON.stringify(restored));
+  check('functions restored (v28 + v29 re-run): empty list again a success', restored.status === 200 && restored.body?.due === 0 && lastPing() === '/hc-sites', JSON.stringify(restored));
 
   // 3) the confirmation fails → exactly one alert
   psql(`update site_check_state set next_check_at = now() - interval '1 minute' where site_id = '${id('TEST haftalık hata')}'`);
   unthrottle();
+  const t3 = Date.now();
   await cron();
   f = st('TEST haftalık hata');
-  check('confirmation failed: alert once, back to the weekly interval', f.fail === 2 && f.alerted && !f.confirm && f.nextMin >= 7 * 24 * 60 - 1 && captured() === cap0 + 1, JSON.stringify({ f, cap: captured() - cap0 }));
+  check('confirmation failed: alert once, back to the weekly interval from this slot', f.fail === 2 && f.alerted && !f.confirm && f.next === iso(plannedNext(7 * D, t3)) && captured() === cap0 + 1, JSON.stringify({ f, cap: captured() - cap0 }));
 
   // 4) still failing at the next weekly check: no new alert, no confirmation loop
   psql(`update site_check_state set next_check_at = now() - interval '1 minute' where site_id = '${id('TEST haftalık hata')}'`);
@@ -137,6 +162,16 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   await cron();
   f = st('TEST haftalık hata');
   check('alerted site failing again: no new message, no confirmation', f.fail === 3 && f.alerted && !f.confirm && captured() === cap0 + 1, JSON.stringify(f));
+
+  // 4b) missed / late cron: a weekly site overdue for 3 days is checked ONCE, then planned from this slot; an immediate second run does nothing
+  psql(`update site_check_state set next_check_at = now() - interval '3 days' where site_id = '${id('TEST haftalık')}'`);
+  const weeklyHits = hits['/weekly'];
+  unthrottle();
+  const t4 = Date.now();
+  await cron();
+  unthrottle();
+  await cron();
+  check('missed cron: one check, no catch-up burst, next = this slot + 7 days', hits['/weekly'] === weeklyHits + 1 && st('TEST haftalık').next === iso(plannedNext(7 * D, t4)), JSON.stringify({ hits: hits['/weekly'] - weeklyHits, next: st('TEST haftalık').next }));
 
   // ── admin session ──
   const browser = await chromium.launch();
@@ -186,18 +221,19 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   // 7c) frequency change through the panel API: the old 15-min plan stops; during a running check it is applied by the run
   const ch15 = await post('/api/admin/sites/schedule', { id: id('TEST 15dk'), interval: '7d' });
   const s15 = st('TEST 15dk');
-  check('15 min → weekly (API): next ≈ last check + 7 days', ch15.status === 200 && ch15.body.applied === 'now' && s15.nextMin >= 7 * 24 * 60 - 10, JSON.stringify({ ch15, s15 }));
+  check('15 min → weekly (API): the cron slot of the last check + 7 days', ch15.status === 200 && ch15.body.applied === 'now' && s15.next === iso(floorS(t1) + 7 * D) && ch15.body.next_check_at && Date.parse(ch15.body.next_check_at) === floorS(t1) + 7 * D, JSON.stringify({ ch15, s15, want: iso(floorS(t1) + 7 * D) }));
   psql(`update site_check_state set lease_until = now() + interval '60 seconds' where site_id = '${id('TEST haftalık')}'`);
-  const before7 = st('TEST haftalık').nextMin;
+  const before7 = st('TEST haftalık').next;
   const chRun = await post('/api/admin/sites/schedule', { id: id('TEST haftalık'), interval: '24h' });
-  check('change during a running check (API): "after_check", schedule untouched until the run stores its result', chRun.status === 200 && chRun.body.applied === 'after_check' && st('TEST haftalık').nextMin === before7, JSON.stringify({ chRun, before7 }));
+  check('change during a running check (API): "after_check", schedule untouched until the run stores its result', chRun.status === 200 && chRun.body.applied === 'after_check' && st('TEST haftalık').next === before7, JSON.stringify({ chRun, before7 }));
   psql(`update site_check_state set lease_until = null where site_id = '${id('TEST haftalık')}'`);
 
   // 8) recovery only from a real answer (manual check counts as a real check)
   failStatus = 200;
+  const tR = Date.now();
   const rec = await post('/api/admin/sites/check', { id: id('TEST haftalık hata') });
   f = st('TEST haftalık hata');
-  check('site answers again (manual check): one "düzeldi", fail count reset, next = +24 h', rec.status === 200 && f.fail === 0 && !f.alerted && captured() === cap0 + 2 && f.nextMin >= 24 * 60 - 1, JSON.stringify({ rec: rec.status, f, cap: captured() - cap0 }));
+  check('site answers again (manual check): one "düzeldi", fail count reset, next = first slot a full 24 h later', rec.status === 200 && f.fail === 0 && !f.alerted && captured() === cap0 + 2 && Date.parse(f.next) >= tR + 24 * H && Date.parse(f.next) - (tR + 24 * H) < SLOT + 5000 && Date.parse(f.next) % SLOT === 0, JSON.stringify({ rec: rec.status, f, cap: captured() - cap0 }));
 
   // screens
   await page.reload();
@@ -214,9 +250,16 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   failStatus = 503;
   psql(`update site_check_state set next_check_at = now() - interval '1 minute' where site_id = '${id('TEST haftalık hata')}'`);
   unthrottle();
+  const t9 = Date.now();
   await cron();
   f = st('TEST haftalık hata');
-  check('24-hour site, new first failure: confirmation in ~15 min, no message', f.fail === 1 && f.confirm && f.nextMin >= 14 && f.nextMin <= 15 && captured() === cap0 + 2, JSON.stringify(f));
+  check('24-hour site, new first failure: ONE confirmation at the next cron slot, no message', f.fail === 1 && f.confirm && f.next === iso(confirmSlot(t9)) && captured() === cap0 + 2, JSON.stringify(f));
+  // the panel shows exactly that slot
+  await page.reload();
+  await page.getByText('Sonraki planlanan kontrol:').first().waitFor({ timeout: 30000 });
+  const shown = await page.evaluate(async ([t]) => { const r = await fetch('/api/admin/health', { headers: { Authorization: `Bearer ${t}` } }); const j = await r.json(); return (j.sites || []).map((x) => [x.name, x.plannedAt, x.nextCheckAt]); }, [token]);
+  const hs = shown.find((x) => x[0] === 'TEST haftalık hata');
+  check('panel: shown next time = the targeted cron slot', hs && hs[1] === iso(confirmSlot(t9)), JSON.stringify(hs));
   await page.reload();
   const card = page.locator('section, article, div').filter({ has: page.getByText('TEST haftalık hata', { exact: true }) }).filter({ has: page.getByText('Sonraki planlanan kontrol:') }).last();
   await card.waitFor({ timeout: 30000 });
@@ -231,6 +274,7 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   unthrottle();
   await cron();
   check('…the cron no longer checks it', hits['/fail'] === failHits, `${failHits} → ${hits['/fail']}`);
+  check('every stored next check is a cron slot boundary (test-forced times on the manual-only site excluded)', psql("select count(*) from site_check_state s join monitored_sites m on m.id = s.site_id where m.check_interval <> 'manual' and s.next_check_at is not null and extract(epoch from s.next_check_at)::bigint % 900 <> 0") === '0', psql("select string_agg(m.name || ' ' || s.next_check_at::text, ', ') from site_check_state s join monitored_sites m on m.id = s.site_id where m.check_interval <> 'manual' and extract(epoch from s.next_check_at)::bigint % 900 <> 0"));
   check('no page errors', errors.length === 0, errors.join(' | '));
   await browser.close();
   stub.close();
