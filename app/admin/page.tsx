@@ -8,8 +8,9 @@ import { TokenHelp } from '@/components/admin/cockpit/TokenHelp';
 import { LEAD_LABEL, LEAD_PILL, OPEN_STATUSES, adminApi, delta, fmtDate, fmtNumber, istanbulToday, timeAgo } from '@/lib/cockpit/client';
 import { loadLeads, type Lead } from '@/lib/cockpit/leads';
 import { loadCrm, money, pipelineByCurrency, type CrmData } from '@/lib/cockpit/crm';
-import { siteIssues, type HealthResponse, type Severity } from '@/lib/cockpit/sites';
+import { checkIsStale, siteIssues, type HealthResponse, type Severity } from '@/lib/cockpit/sites';
 import type { TrafficReport } from '@/lib/cockpit/vercel';
+import { visitorCard } from '@/lib/cockpit/visitorCard';
 import { mergeWorkSources } from '@/lib/workData';
 
 /**
@@ -91,9 +92,12 @@ export default function Cockpit() {
   const openTasks = (crm?.activities ?? []).filter((a) => a.kind === 'task' && !a.done).sort((a, b) => (a.due_on ?? '9999').localeCompare(b.due_on ?? '9999'));
   const lateTasks = openTasks.filter((a) => a.due_on && a.due_on < today());
   const pipeline = pipelineByCurrency(crm?.deals ?? []);
-  const report = week?.report;
+  const visitors = visitorCard(week);
   const checks = health?.checks ?? [];
-  const sitesUp = checks.filter((c) => c.state === 'up' || c.state === 'slow').length;
+  // an old result does not count as "working"
+  const sitesUp = checks.filter((c) => (c.state === 'up' || c.state === 'slow') && !checkIsStale(c.checkedAt, now)).length;
+  const sitesUnchecked = checks.filter((c) => c.state === 'unknown').length;
+  const sitesStale = checks.filter((c) => checkIsStale(c.checkedAt, now)).length;
   const latestProd = health?.deployments?.find((d) => d.target === 'production') ?? null;
   const healthError = health && !health.ok ? health.error ?? 'Site kontrolü alınamadı.' : null;
 
@@ -159,11 +163,11 @@ export default function Cockpit() {
 
       {/* The week in numbers */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <StatTile label="Ziyaretçi · 7 gün" value={week ? (report ? fmtNumber(report.totals.visitors) : '–') : null} deltaPct={report ? delta(report.totals.visitors, report.previous.visitors) : null} deltaLabel="önceki 7 gün" href="/admin/traffic" />
+        <StatTile label="Ziyaretçi · bugün" value={visitors.value} hint={visitors.todayNote || undefined} sub={{ label: 'Son 7 gün', value: visitors.week, note: visitors.weekNote }} href="/admin/traffic" />
         <StatTile label="Yeni lead · 7 gün" value={leads ? String(leads7) : null} deltaPct={leads ? delta(leads7, leadsPrev7) : null} deltaLabel="önceki 7 gün" hint={leads && !delta(leads7, leadsPrev7) ? `önceki 7 gün: ${leadsPrev7}` : undefined} href="/admin/submissions" />
         <StatTile label="Açık lead" value={leads ? String(openLeads.length) : null} hint={waiting.length ? `${waiting.length} yanıt bekliyor` : 'bekleyen yok'} tone={waiting.length ? 'alert' : 'default'} href="/admin/submissions" />
         <StatTile label="Açık fırsat" value={crm ? (pipeline.length ? money(pipeline[0].value, pipeline[0].currency) : '–') : null} hint={crm && !crm.ready ? 'CRM kurulmadı' : pipeline.length > 1 ? `+ ${pipeline.slice(1).map((p) => money(p.value, p.currency)).join(' + ')}` : undefined} href="/admin/clients" />
-        <StatTile label="Siteler" value={health ? `${sitesUp}/${checks.length}` : null} hint="çalışıyor" tone={health && sitesUp < checks.length ? 'alert' : 'default'} href="/admin/sites" />
+        <StatTile label="Siteler" value={health ? `${sitesUp}/${checks.length}` : null} hint={['çalışıyor', sitesUnchecked ? `${sitesUnchecked} kontrol tamamlanamadı` : '', sitesStale ? `${sitesStale} sonuç güncel değil` : ''].filter(Boolean).join(' · ')} tone={health && sitesUp < checks.length ? 'alert' : 'default'} href="/admin/sites" />
         <StatTile label="Engellenen spam · 7 gün" value={content ? (content.spam7 === null ? '–' : String(content.spam7)) : null} hint="kayda geçmeden atıldı" />
       </div>
 
@@ -260,7 +264,9 @@ export default function Cockpit() {
                 return (
                   <li key={c.url} className="flex items-center justify-between gap-3 text-[13px]">
                     <span className="font-bold">{c.name}</span>
-                    {worst ? (
+                    {checkIsStale(c.checkedAt, now) ? (
+                      <StatusBadge kind="neutral">Sonuç güncel değil</StatusBadge>
+                    ) : worst ? (
                       <StatusBadge kind={worst.severity}>{worst.text.length > 28 ? `${worst.text.slice(0, 27)}…` : worst.text}</StatusBadge>
                     ) : (
                       <StatusBadge kind="good">Çalışıyor{c.ms !== null ? ` · ${(c.ms / 1000).toFixed(1)} sn` : ''}</StatusBadge>

@@ -45,6 +45,8 @@ export async function GET(request: NextRequest) {
     ok: true,
     sitesFromDatabase: fromDatabase,
     vercelConfigured: vercelConfigured(),
+    // where the checks run (Vercel function region); a failure is a failure seen from here
+    monitorRegion: process.env.VERCEL_REGION || null,
     checks,
     deployments,
   });

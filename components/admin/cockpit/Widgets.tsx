@@ -40,6 +40,7 @@ export function StatTile({
   deltaPct,
   deltaLabel,
   hint,
+  sub,
   href,
   tone = 'default',
 }: {
@@ -48,6 +49,8 @@ export function StatTile({
   deltaPct?: number | null;
   deltaLabel?: string;
   hint?: string;
+  /** A smaller secondary figure under the main one (e.g. "Son 7 gün"). */
+  sub?: { label: string; value: string | null; note?: string };
   href?: string;
   tone?: 'default' | 'alert';
 }) {
@@ -67,6 +70,15 @@ export function StatTile({
         {deltaPct !== undefined && deltaPct !== null && deltaLabel && <span>{deltaLabel}</span>}
         {hint && <span>{hint}</span>}
       </p>
+      {sub && (
+        <div className="mt-3 border-t border-line pt-2.5">
+          <p className="flex flex-wrap items-baseline gap-x-2">
+            <span className="text-[12px] font-semibold text-muted">{sub.label}</span>
+            <span className="text-[17px] font-extrabold tabular-nums text-white">{sub.value ?? '–'}</span>
+          </p>
+          {sub.note && <p className="mt-0.5 text-[11px] leading-snug text-subtle">{sub.note}</p>}
+        </div>
+      )}
     </>
   );
   const cls = 'block rounded-md border border-line bg-surface-deep/80 p-5 transition-colors';
