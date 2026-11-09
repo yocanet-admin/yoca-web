@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { visitorCard } from '../lib/cockpit/visitorCard';
+import { VISITOR_TODAY_LABEL, VISITOR_WEEK_LABEL, visitorCard } from '../lib/cockpit/visitorCard';
 import type { TrafficReport } from '../lib/cockpit/vercel';
 
 const report = (over: Partial<TrafficReport> = {}): TrafficReport => ({
@@ -23,15 +23,15 @@ test('main value is today; 7-day figure is the source total, includes today, UTC
   const card = visitorCard({ ok: true, configured: true, report: report() });
   assert.equal(card.state, 'ok');
   assert.equal(card.value, '6');
-  assert.match(card.todayNote, /^UTC günü · 9 Kas 03:00 \(TR\)'dan beri · sürüyor$/);
+  assert.equal(card.todayNote, "9 Kas · Türkiye saatiyle 03:00'te sıfırlanır · gün sürüyor");
   assert.equal(card.week, '45', 'uses totals.visitors, not a sum of days');
-  assert.equal(card.weekNote, 'bugün dahil · 3 Kas–9 Kas · UTC günleri');
+  assert.equal(card.weekNote, 'UTC günleri · 3 Kas–9 Kas · Vercel dönem toplamı');
 });
 
 test('real zero vs no row vs error vs not configured vs loading stay distinct', () => {
   const zero = visitorCard({ ok: true, report: report({ today: { date: '2026-11-09', visitors: 0, pageviews: 0 } }) });
   assert.deepEqual([zero.state, zero.value], ['zero', '0']);
-  assert.match(zero.todayNote, /^henüz ziyaret yok, veri gecikebilir · UTC günü/);
+  assert.match(zero.todayNote, /^henüz ziyaret yok, veri gecikebilir · 9 Kas · Türkiye saatiyle 03:00'te sıfırlanır/);
   const missing = visitorCard({ ok: true, report: report({ today: null }) });
   assert.deepEqual([missing.state, missing.value], ['no_data', '–']);
   assert.equal(missing.week, '45');
@@ -47,4 +47,9 @@ test('large numbers use Turkish grouping', () => {
   const card = visitorCard({ ok: true, report: report({ today: { date: '2026-11-09', visitors: 1234, pageviews: 0 }, totals: { visitors: 12345, pageviews: 0 } }) });
   assert.equal(card.value, '1.234');
   assert.equal(card.week, '12.345');
+});
+
+test('labels carry the UTC boundary', () => {
+  assert.equal(VISITOR_TODAY_LABEL, 'Ziyaretçi · Bugün · UTC');
+  assert.equal(VISITOR_WEEK_LABEL, 'Son 7 gün · bugün dahil');
 });

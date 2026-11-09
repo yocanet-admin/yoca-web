@@ -10,7 +10,7 @@ import { loadLeads, type Lead } from '@/lib/cockpit/leads';
 import { loadCrm, money, pipelineByCurrency, type CrmData } from '@/lib/cockpit/crm';
 import { checkIsStale, siteIssues, type HealthResponse, type Severity } from '@/lib/cockpit/sites';
 import type { TrafficReport } from '@/lib/cockpit/vercel';
-import { visitorCard } from '@/lib/cockpit/visitorCard';
+import { VISITOR_TODAY_LABEL, VISITOR_WEEK_LABEL, visitorCard } from '@/lib/cockpit/visitorCard';
 import { mergeWorkSources } from '@/lib/workData';
 
 /**
@@ -163,7 +163,7 @@ export default function Cockpit() {
 
       {/* The week in numbers */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <StatTile label="Ziyaretçi · bugün" value={visitors.value} hint={visitors.todayNote || undefined} sub={{ label: 'Son 7 gün', value: visitors.week, note: visitors.weekNote }} href="/admin/traffic" />
+        <StatTile label={VISITOR_TODAY_LABEL} value={visitors.value} hint={visitors.todayNote || undefined} sub={{ label: VISITOR_WEEK_LABEL, value: visitors.week, note: visitors.weekNote }} href="/admin/traffic" />
         <StatTile label="Yeni lead · 7 gün" value={leads ? String(leads7) : null} deltaPct={leads ? delta(leads7, leadsPrev7) : null} deltaLabel="önceki 7 gün" hint={leads && !delta(leads7, leadsPrev7) ? `önceki 7 gün: ${leadsPrev7}` : undefined} href="/admin/submissions" />
         <StatTile label="Açık lead" value={leads ? String(openLeads.length) : null} hint={waiting.length ? `${waiting.length} yanıt bekliyor` : 'bekleyen yok'} tone={waiting.length ? 'alert' : 'default'} href="/admin/submissions" />
         <StatTile label="Açık fırsat" value={crm ? (pipeline.length ? money(pipeline[0].value, pipeline[0].currency) : '–') : null} hint={crm && !crm.ready ? 'CRM kurulmadı' : pipeline.length > 1 ? `+ ${pipeline.slice(1).map((p) => money(p.value, p.currency)).join(' + ')}` : undefined} href="/admin/clients" />

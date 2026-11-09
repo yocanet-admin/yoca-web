@@ -81,23 +81,4 @@ export async function removeSite(id: string): Promise<boolean> {
 
 export { siteIssues, checkIsStale, checkLabel, CHECK_STALE_MS, PROBLEM_LABEL, type Severity, type SiteProblem } from '@/lib/cockpit/issues';
 
-export type BrowserProbe = { state: 'checking' } | { state: 'answered'; at: string; ms: number } | { state: 'failed'; at: string; reason: string };
-
-/**
- * Second vantage point for a site the server monitor could not confirm: can THIS
- * browser reach it? A no-cors request only tells "the server answered" (status is
- * hidden), so it is shown as evidence next to the monitor result, never as "up".
- */
-export async function probeFromBrowser(url: string, timeoutMs = 10_000): Promise<BrowserProbe> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const started = Date.now();
-  try {
-    await fetch(url, { mode: 'no-cors', cache: 'no-store', credentials: 'omit', redirect: 'follow', signal: controller.signal });
-    return { state: 'answered', at: new Date().toISOString(), ms: Date.now() - started };
-  } catch (error) {
-    return { state: 'failed', at: new Date().toISOString(), reason: (error as Error)?.name === 'AbortError' ? `zaman aşımı (${timeoutMs / 1000} sn)` : 'bağlantı kurulamadı' };
-  } finally {
-    clearTimeout(timer);
-  }
-}
+export { browserProbeText, probeFromBrowser, type BrowserProbe } from '@/lib/cockpit/browserProbe';

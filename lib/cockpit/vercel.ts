@@ -58,8 +58,14 @@ export interface TrafficReport {
   range: { days: number; since: string; until: string };
   /**
    * Vercel Web Analytics counts in whole UTC days: `visitors` per period come from
-   * the source (never summed by us), and the query API snaps day-level ranges to
-   * UTC midnight. "Today" is therefore the current UTC day (03:00 Istanbul onward).
+   * the source (never summed by us). The query API has no time-zone parameter
+   * (documented parameters: projectId, by, since, until, limit, filter, teamId/slug —
+   * https://vercel.com/docs/rest-api/web-analytics/aggregates-page-views and
+   * …/counts-page-views; since/until "will be adjusted according to the desired time
+   * granularity"). Checked 9 Nov 2026: since=…T21:00Z or …T21:00+03:00 comes back as
+   * query.since …T00:00:00Z, and day buckets start at 00:00Z. Unique visitors for an
+   * Istanbul day would need hourly uniques summed (double counting), so "today" is the
+   * current UTC day (03:00 Istanbul onward) and labelled so.
    */
   dayBoundary: 'UTC';
   /** The current UTC day's bucket as returned by Vercel; null when the response has no row for it. */

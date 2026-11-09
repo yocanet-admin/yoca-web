@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Card, Notice, StatusBadge } from '@/components/admin/cockpit/Widgets';
 import { adminApi, fmtDate } from '@/lib/cockpit/client';
-import { addSite, checkIsStale, checkLabel, loadSiteRows, normalizeSiteUrl, probeFromBrowser, removeSite, siteIssues, updateSite, type BrowserProbe, type HealthResponse, type SiteEdit, type SiteRow } from '@/lib/cockpit/sites';
+import { addSite, checkIsStale, checkLabel, loadSiteRows, normalizeSiteUrl, browserProbeText, probeFromBrowser, removeSite, siteIssues, updateSite, type BrowserProbe, type HealthResponse, type SiteEdit, type SiteRow } from '@/lib/cockpit/sites';
 import type { SiteCheck } from '@/lib/cockpit/monitor';
 
 /**
@@ -186,13 +186,9 @@ export default function AdminSites() {
                 </div>
                 {probes[c.url] && c.state !== 'up' && c.state !== 'slow' && (
                   <div className="flex flex-wrap gap-x-2">
-                    <dt>Bu tarayıcıdan:</dt>
+                    <dt title="fetch no-cors: yalnız isteğin tamamlanıp tamamlanmadığı görülür; durum kodu ve içerik okunamaz. İzleme uyarısını etkilemez.">Bu tarayıcıdan (yalnız bilgi):</dt>
                     <dd className="text-soft">
-                      {probes[c.url].state === 'checking'
-                        ? 'deneniyor…'
-                        : probes[c.url].state === 'answered'
-                          ? `sunucu yanıt verdi (${((probes[c.url] as { ms: number }).ms / 1000).toFixed(1)} sn) · durum kodu tarayıcıdan okunamaz, sağlıklı sayılmaz`
-                          : `yanıt yok — ${(probes[c.url] as { reason: string }).reason}`}
+                      {browserProbeText(probes[c.url])}
                     </dd>
                   </div>
                 )}

@@ -42,8 +42,12 @@ const dayLabel = (iso: string) => {
 const fmt = (n: number) => new Intl.NumberFormat('tr-TR').format(n);
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
+/** Tile labels: the day boundary is part of the title, not a footnote. */
+export const VISITOR_TODAY_LABEL = 'Ziyaretçi · Bugün · UTC';
+export const VISITOR_WEEK_LABEL = 'Son 7 gün · bugün dahil';
+
 export function visitorCard(response: Response): VisitorCard {
-  const weekNote = 'bugün dahil · UTC günleri';
+  const weekNote = 'UTC günleri';
   if (!response) return { state: 'loading', value: null, todayNote: '', week: null, weekNote };
   if (response.configured === false) return { state: 'not_configured', value: '–', todayNote: 'Vercel anahtarı eklenmedi', week: null, weekNote };
   const report = response.report;
@@ -52,10 +56,10 @@ export function visitorCard(response: Response): VisitorCard {
   const lastDay = addDays(report.range.until, -1);
   const span = `${dayLabel(report.range.since)}–${dayLabel(lastDay)}`;
   const week = fmt(report.totals.visitors);
-  const fullWeekNote = `bugün dahil · ${span} · UTC günleri`;
+  const fullWeekNote = `UTC günleri · ${span} · Vercel dönem toplamı`;
   const today = report.today;
   if (!today) return { state: 'no_data', value: '–', todayNote: `${dayLabel(lastDay)} için Vercel satır döndürmedi`, week, weekNote: fullWeekNote };
-  const since = `UTC günü · ${dayLabel(today.date)} 03:00 (TR)'dan beri · sürüyor`;
+  const since = `${dayLabel(today.date)} · Türkiye saatiyle 03:00'te sıfırlanır · gün sürüyor`;
   if (today.visitors === 0) return { state: 'zero', value: '0', todayNote: `henüz ziyaret yok, veri gecikebilir · ${since}`, week, weekNote: fullWeekNote };
   return { state: 'ok', value: fmt(today.visitors), todayNote: since, week, weekNote: fullWeekNote };
 }
