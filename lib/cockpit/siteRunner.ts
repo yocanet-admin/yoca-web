@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { checkLabel } from '@/lib/cockpit/issues';
 import { checkSites, daysUntil, type SiteCheck } from '@/lib/cockpit/monitor';
-import { domainDue, nextSchedule } from '@/lib/cockpit/schedule';
+import { domainDue, isInterval, nextSchedule } from '@/lib/cockpit/schedule';
 import { FAILED_STATES, siteTransition } from '@/lib/cockpit/siteAlerts';
 import type { SiteRunRow } from '@/lib/cockpit/siteStatus';
 import { escapeHtml, notifyAdmins } from '@/lib/notify';
@@ -22,6 +22,8 @@ export interface RunSummary {
   recovered: number;
   unsigned: number;
   sent: Awaited<ReturnType<typeof notifyAdmins>> | null;
+  /** Database writes / reads that failed during the run (empty = all stored). */
+  dbErrors: string[];
 }
 
 function problem(check: SiteCheck): string {
@@ -40,6 +42,8 @@ export async function runSiteChecks(supabase: SupabaseClient, rows: SiteRunRow[]
   const recovered: Item[] = [];
   const unsigned: Item[] = [];
   const results: Array<{ id: string; check: SiteCheck }> = [];
+  /** Writes / reads that failed: the caller reports the run as failed (never as a clean success). */
+  const dbErrors: string[] = [];
 
   await Promise.all(
     rows.map(async (row) => {
@@ -70,8 +74,22 @@ export async function runSiteChecks(supabase: SupabaseClient, rows: SiteRunRow[]
         state.domain_checked_at = check.checkedAt;
         state.domain_expires_at = check.domainExpires;
       }
-      await supabase.from('monitored_sites').update(patch).eq('id', row.id);
-      await supabase.from('site_check_state').update(state).eq('site_id', row.id);
+      const failed = FAILED_STATES.includes(check.state);
+      const siteWrite = await supabase.from('monitored_sites').update(patch).eq('id', row.id);
+      const stateWrite = await supabase.from('site_check_state').update(state).eq('site_id', row.id);
+      if (siteWrite.error || stateWrite.error) dbErrors.push(`${row.name}: sonuç kaydedilemedi`);
+      else {
+        // the frequency may have changed while this check ran (site_check_reschedule
+        // answers 'checking' then): plan with the CURRENT frequency, not the claimed one
+        const current = await supabase.from('monitored_sites').select('check_interval').eq('id', row.id).maybeSingle();
+        const interval = (current.data as { check_interval?: unknown } | null)?.check_interval;
+        if (current.error) dbErrors.push(`${row.name}: güncel sıklık okunamadı`);
+        else if (isInterval(interval) && interval !== row.check_interval) {
+          const replanned = nextSchedule({ interval, failed, prevFailCount: row.fail_count, alerted: row.alerted, now: finished });
+          const fix = await supabase.from('site_check_state').update({ ...replanned, updated_at: new Date(now()).toISOString() }).eq('site_id', row.id);
+          if (fix.error) dbErrors.push(`${row.name}: yeni sıklıkla planlanamadı`);
+        }
+      }
       results.push({ id: row.id, check });
     }),
   );
@@ -103,7 +121,7 @@ export async function runSiteChecks(supabase: SupabaseClient, rows: SiteRunRow[]
         groups
           .map((g) => section(g.heading, statusList(g.items.map((it) => ({ tone: g.tone, title: it.name, detail: `${it.detail} · ${it.url.replace(/^https?:\/\//, '')}`, href: it.url })))))
           .join('') +
-        `<p style="margin:14px 0 18px 0;font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#6E6E6E;">Kontrol: ${escapeHtml(when)} · ilk başarısızlıktan 15 dk sonra tek doğrulama yapılır; iki kontrol üst üste başarısız olunca haber verilir.</p>` +
+        `<p style="margin:14px 0 18px 0;font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#6E6E6E;">Kontrol: ${escapeHtml(when)} · ilk başarısız kontrolden 15 dk sonra tek doğrulama yapılır; iki kontrol üst üste başarısız olunca haber verilir. Düzelme bir sonraki başarılı kontrolde anlaşılır.</p>` +
         buttons([{ label: 'Siteleri aç', href: `${SITE}/admin/sites`, primary: true }]),
     });
     const telegram =
@@ -114,5 +132,5 @@ export async function runSiteChecks(supabase: SupabaseClient, rows: SiteRunRow[]
     sent = await send({ kind: 'site', subject, email, telegram, keyboard: [[{ text: 'Siteleri aç →', url: `${SITE}/admin/sites` }]] });
   }
 
-  return { checked: rows.length, down: down.length, unchecked: unchecked.length, recovered: recovered.length, unsigned: unsigned.length, sent, results };
+  return { checked: rows.length, down: down.length, unchecked: unchecked.length, recovered: recovered.length, unsigned: unsigned.length, sent, dbErrors, results };
 }

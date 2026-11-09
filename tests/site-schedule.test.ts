@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CONFIRM_DELAY_MS, domainDue, INTERVAL_MS, nextAfterIntervalChange, nextSchedule, resultFreshness } from '../lib/cockpit/schedule';
+import { CONFIRM_DELAY_MS, domainDue, INTERVAL_MS, nextSchedule, parseClaimedIds, resultFreshness } from '../lib/cockpit/schedule';
 import { FAILED_STATES, siteTransition } from '../lib/cockpit/siteAlerts';
 import type { SiteState } from '../lib/cockpit/monitor';
 
@@ -42,13 +42,20 @@ test('weekly site, full incident: alert after the confirmation, once; recovery o
   assert.equal(row.alerted, false);
 });
 
-test('frequency change: only the schedule moves (alert state is not an input, nothing is cleared)', () => {
-  const last = at(T0 - 2 * H);
-  assert.deepEqual(nextAfterIntervalChange({ interval: '7d', lastCheckedAt: last, confirmPending: false, currentNext: at(T0 - H), now: T0 }), { next_check_at: at(T0 - 2 * H + INTERVAL_MS['7d']), confirm_pending: false });
-  assert.deepEqual(nextAfterIntervalChange({ interval: '15m', lastCheckedAt: at(T0 - 3 * 24 * H), confirmPending: false, currentNext: null, now: T0 }), { next_check_at: at(T0), confirm_pending: false }, 'overdue for the new interval: due now');
-  assert.deepEqual(nextAfterIntervalChange({ interval: 'manual', lastCheckedAt: last, confirmPending: true, currentNext: at(T0 + 60_000), now: T0 }), { next_check_at: null, confirm_pending: false });
-  assert.deepEqual(nextAfterIntervalChange({ interval: '24h', lastCheckedAt: last, confirmPending: true, currentNext: at(T0 + 60_000), now: T0 }), { next_check_at: at(T0 + 60_000), confirm_pending: true }, 'a pending confirmation is kept');
-  assert.deepEqual(nextAfterIntervalChange({ interval: '1h', lastCheckedAt: null, confirmPending: false, currentNext: null, now: T0 }), { next_check_at: null, confirm_pending: false }, 'never checked: next cron');
+test('"manual only": a failed (manual) check never schedules an automatic confirmation', () => {
+  const T0 = Date.parse('2026-11-09T12:00:00Z');
+  assert.deepEqual(nextSchedule({ interval: 'manual', failed: true, prevFailCount: 0, alerted: false, now: T0 }), { next_check_at: null, confirm_pending: false });
+  assert.deepEqual(nextSchedule({ interval: 'manual', failed: true, prevFailCount: 1, alerted: false, now: T0 }), { next_check_at: null, confirm_pending: false });
+  assert.deepEqual(nextSchedule({ interval: 'manual', failed: false, prevFailCount: 2, alerted: true, now: T0 }), { next_check_at: null, confirm_pending: false });
+});
+
+test('claim answer: only a real list is accepted; an empty list is "nothing due", anything else is an error', () => {
+  const id = '3f2b8c1e-1d2a-4c3b-9e8f-0a1b2c3d4e5f';
+  assert.deepEqual(parseClaimedIds([]), { ok: true, ids: [] });
+  assert.deepEqual(parseClaimedIds([{ claimed_id: id }]), { ok: true, ids: [id] });
+  for (const bad of [null, undefined, {}, 'ok', id, [{}], [{ claimed_id: 'x' }], [id], [{ claimed_id: id }, null]]) {
+    assert.equal(parseClaimedIds(bad).ok, false, `not "nothing due": ${JSON.stringify(bad)}`);
+  }
 });
 
 test('freshness follows the frequency: a weekly site checked yesterday is not stale; not-yet-due is not a failure', () => {

@@ -3,11 +3,16 @@
  * check, the panel and the morning summary).
  *
  * One cron (every 15 minutes) runs only the sites whose next_check_at has come.
- * After a FIRST failed check (fail_count 0 → 1, site not alerted) a single
- * confirmation check is scheduled 15 minutes later, whatever the frequency; a
- * second failure then raises the alert (siteAlerts.ts: two failures in a row).
- * Afterwards the site returns to its own interval — an alerted site never
- * schedules more confirmations, so there is no retry loop.
+ * An outage is seen at the site's next planned check (for a weekly site that
+ * can be up to a week after it began). After that FIRST failed check
+ * (fail_count 0 → 1, site not alerted) a single confirmation check is scheduled
+ * 15 minutes later; a second failure then raises the alert (siteAlerts.ts: two
+ * failures in a row) — so the alert comes about 15–30 minutes after the first
+ * failed CHECK, not after the outage began. Afterwards the site returns to its
+ * own interval: an alerted site never schedules more confirmations (no retry
+ * loop), and a recovery is seen at the next successful check (planned or
+ * "Şimdi kontrol et"). "manual" never schedules anything, not even a
+ * confirmation: two failed manual checks in a row raise the alert.
  */
 
 export const CHECK_INTERVALS = ['15m', '1h', '6h', '24h', '7d', 'manual'] as const;
@@ -64,18 +69,26 @@ export function nextSchedule(input: { interval: CheckInterval; failed: boolean; 
   return { next_check_at: iso(now + INTERVAL_MS[interval]), confirm_pending: false };
 }
 
+// A frequency change is planned in the database (site_check_reschedule, v28) under
+// the row lock, so it cannot cross a running check; the run itself re-reads the
+// frequency when it stores its result (siteRunner.ts).
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
- * Next check after the admin changes the frequency. Only the schedule moves:
- * fail count, alert state and the last result stay as they are (no message).
- * A pending confirmation is kept (the failure it confirms already happened).
+ * The claim RPC's answer → site ids. Only a real array of { claimed_id: uuid }
+ * is accepted; an empty array means "nothing due" (a success). Anything else
+ * (null, an object, a malformed row) is an error, never "nothing due".
  */
-export function nextAfterIntervalChange(input: { interval: CheckInterval; lastCheckedAt: string | null; confirmPending: boolean; currentNext: string | null; now: number }): { next_check_at: string | null; confirm_pending: boolean } {
-  const { interval, lastCheckedAt, confirmPending, currentNext, now } = input;
-  if (interval === 'manual') return { next_check_at: null, confirm_pending: false };
-  if (confirmPending && currentNext) return { next_check_at: currentNext, confirm_pending: true };
-  const last = lastCheckedAt ? Date.parse(lastCheckedAt) : NaN;
-  if (Number.isNaN(last)) return { next_check_at: null, confirm_pending: false }; // never checked: due at the next cron
-  return { next_check_at: iso(Math.max(now, last + INTERVAL_MS[interval])), confirm_pending: false };
+export function parseClaimedIds(data: unknown): { ok: true; ids: string[] } | { ok: false; error: string } {
+  if (!Array.isArray(data)) return { ok: false, error: 'beklenmeyen veritabanı yanıtı (site_checks_claim_due liste döndürmedi)' };
+  const ids: string[] = [];
+  for (const item of data) {
+    const id = item && typeof item === 'object' ? (item as { claimed_id?: unknown }).claimed_id : undefined;
+    if (typeof id !== 'string' || !UUID.test(id)) return { ok: false, error: 'beklenmeyen veritabanı yanıtı (site_checks_claim_due satırı geçersiz)' };
+    ids.push(id);
+  }
+  return { ok: true, ids };
 }
 
 export type Freshness = 'never' | 'manual' | 'fresh' | 'overdue';

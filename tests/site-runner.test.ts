@@ -6,15 +6,22 @@ import { runSiteChecks } from '../lib/cockpit/siteRunner';
 import type { SiteRunRow } from '../lib/cockpit/siteStatus';
 
 // TEST ONLY: local stub servers on 127.0.0.1 — no request leaves the machine; messages go to a fake sender.
-function fakeDb() {
+function fakeDb(options: { current?: Record<string, string>; failWrites?: string } = {}) {
   const writes: Array<{ table: string; values: Record<string, unknown>; id: string }> = [];
   const client = {
     from: (table: string) => ({
       update: (values: Record<string, unknown>) => ({
         eq: async (_col: string, id: string) => {
+          if (options.failWrites === table) return { error: { message: 'simulated write failure' } };
           writes.push({ table, values, id });
           return { error: null };
         },
+      }),
+      // the runner re-reads the frequency after storing a result
+      select: () => ({
+        eq: (_col: string, id: string) => ({
+          maybeSingle: async () => ({ data: options.current?.[id] ? { check_interval: options.current[id] } : null, error: null }),
+        }),
       }),
     }),
   };
@@ -66,6 +73,44 @@ test('runner: stores result + schedule, releases the claim; first failure → co
     await runSiteChecks(fakeDb().client, [row({ id: 'b', url: `${base}/ok`, fail_count: 3, alerted: true })], { now: () => now + 8 * 24 * 3_600_000, notify });
     assert.equal(sent.length, 2);
     assert.match(String((sent[1] as { subject: string }).subject), /Tekrar çalışıyor: Test/);
+  } finally {
+    srv.close();
+  }
+});
+
+test('runner: "manual only" failure plans nothing; a frequency changed during the check wins; failed writes are reported', async () => {
+  const srv = http.createServer((req, res) => { res.writeHead(req.url === '/fail' ? 503 : 200, { 'content-type': 'text/html' }); res.end('ok'); }).listen(0, '127.0.0.1');
+  await new Promise((r) => srv.once('listening', r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const sent: unknown[] = [];
+  const notify = (async (m: unknown) => { sent.push(m); return { email: 'skipped', telegram: 'skipped' }; }) as never;
+  const now = Date.parse('2026-11-09T12:00:00Z');
+  const last = (db: ReturnType<typeof fakeDb>, id: string) => db.writes.filter((w) => w.table === 'site_check_state' && w.id === id).reduce((acc, w) => ({ ...acc, ...w.values }), {} as Record<string, unknown>);
+  try {
+    // manual only + failure: no automatic confirmation, no automatic next check
+    const m = fakeDb({ current: { m: 'manual' } });
+    const r1 = await runSiteChecks(m.client, [row({ id: 'm', url: `${base}/fail`, check_interval: 'manual' })], { now: () => now, notify });
+    assert.equal(last(m, 'm').next_check_at, null);
+    assert.equal(last(m, 'm').confirm_pending, false);
+    assert.equal(sent.length, 0);
+    assert.deepEqual(r1.dbErrors, []);
+
+    // claimed as 15 min, changed to weekly while the check ran → planned weekly
+    const w = fakeDb({ current: { w: '7d' } });
+    await runSiteChecks(w.client, [row({ id: 'w', url: `${base}/ok`, check_interval: '15m' })], { now: () => now, notify });
+    assert.equal(last(w, 'w').next_check_at, new Date(now + 7 * 24 * 3_600_000).toISOString(), 'the old 15-minute plan does not keep running');
+
+    // first failure on a 24-hour site, switched to "manual only" meanwhile → confirmation cancelled, alarm history kept
+    const c = fakeDb({ current: { c: 'manual' } });
+    await runSiteChecks(c.client, [row({ id: 'c', url: `${base}/fail`, check_interval: '24h' })], { now: () => now, notify });
+    assert.equal(last(c, 'c').next_check_at, null);
+    assert.equal(last(c, 'c').confirm_pending, false);
+    assert.equal(c.writes.find((x) => x.table === 'monitored_sites')!.values.fail_count, 1, 'the failure itself is still counted');
+
+    // a result that cannot be stored is reported (the cron turns it into a failed run)
+    const f = fakeDb({ failWrites: 'site_check_state', current: { f: '7d' } });
+    const r2 = await runSiteChecks(f.client, [row({ id: 'f', url: `${base}/ok` })], { now: () => now, notify });
+    assert.equal(r2.dbErrors.length, 1);
   } finally {
     srv.close();
   }

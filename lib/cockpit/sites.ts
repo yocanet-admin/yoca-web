@@ -98,6 +98,6 @@ export function checkSiteNow(id: string): Promise<{ ok: boolean; error?: string;
 }
 
 /** Change one site's check frequency (only the schedule moves; alert state is kept). */
-export function setSiteInterval(id: string, interval: CheckInterval): Promise<{ ok: boolean; error?: string; next_check_at?: string | null }> {
+export function setSiteInterval(id: string, interval: CheckInterval): Promise<{ ok: boolean; error?: string; next_check_at?: string | null; confirm_pending?: boolean; applied?: 'now' | 'after_check' }> {
   return adminPost('/api/admin/sites/schedule', { id, interval });
 }

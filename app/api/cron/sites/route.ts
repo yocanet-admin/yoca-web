@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cronAuth } from '@/lib/cockpit/cron';
 import { sitesOutcome, withHeartbeat } from '@/lib/cockpit/heartbeat';
-import { LEASE_S } from '@/lib/cockpit/schedule';
+import { LEASE_S, parseClaimedIds } from '@/lib/cockpit/schedule';
 import { runSiteChecks } from '@/lib/cockpit/siteRunner';
 import { loadRunRows, SiteScheduleMissing } from '@/lib/cockpit/siteStatus';
 import { getCronState, saveCronState } from '@/lib/cockpit/settings';
@@ -75,11 +75,23 @@ export async function GET(request: NextRequest) {
       const pending = /site_checks_claim_due|site_check_state|does not exist|schema cache|Could not find/i.test(claim.error.message);
       return { response: NextResponse.json({ ok: false, error: pending ? 'run supabase/upgrade-v28-site-schedule.sql' : claim.error.message.slice(0, 160) }, { status: 500 }), outcome: sitesOutcome({ dbOk: false, published, sent: null }) };
     }
-    const ids = (Array.isArray(claim.data) ? (claim.data as Array<{ claimed_id: string }>) : []).map((r) => r.claimed_id);
+    // an unexpected answer is an error (Healthchecks: fail), never "nothing due"; a real empty list is a success
+    const parsed = parseClaimedIds(claim.data);
+    if (!parsed.ok) {
+      console.error('cron sites:', parsed.error);
+      return { response: NextResponse.json({ ok: false, error: parsed.error }, { status: 500 }), outcome: sitesOutcome({ dbOk: false, published, sent: null }) };
+    }
+    const ids = parsed.ids;
     try {
       const rows = await loadRunRows(supabase, ids);
       const run = await runSiteChecks(supabase, rows);
       const { results: _r, ...summary } = run;
+      if (run.dbErrors.length) {
+        // results that could not be stored: report the run as failed and free the sites for the next run
+        console.error('cron sites: database errors:', run.dbErrors.join('; '));
+        await supabase.from('site_check_state').update({ lease_until: null }).in('site_id', ids);
+        return { response: NextResponse.json({ ok: false, error: 'site sonuçları kaydedilemedi', published, due: ids.length, ...summary }, { status: 500 }), outcome: sitesOutcome({ dbOk: false, published, sent: run.sent }) };
+      }
       return { response: NextResponse.json({ ok: true, published, due: ids.length, ...summary }), outcome: sitesOutcome({ dbOk: true, published, sent: run.sent }) };
     } catch (error) {
       if (ids.length) await supabase.from('site_check_state').update({ lease_until: null }).in('site_id', ids);

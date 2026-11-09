@@ -13,9 +13,14 @@
 --   site_checks_claim_due()          atomically takes the sites whose check is due
 --                                    (lease; a site is never checked by two runs at once)
 --   site_check_claim_manual()        same for one "Şimdi kontrol et" (+ 2-minute gap)
+--   site_check_reschedule()          next check after a frequency change, under the
+--                                    row lock (a running check applies it when it ends)
 --
 -- Requires v8 (monitored_sites), v9 (alert columns), v10 Part A (is_admin).
--- Idempotent; safe to re-run. Undo: supabase/rollback-v28-site-schedule.sql
+-- Idempotent; safe to re-run.
+-- Going back: revert the CODE and leave this schema in place (the older code
+-- ignores it). supabase/rollback-v28-site-schedule.sql deletes the chosen
+-- frequencies and the stored results: only with a separate approval.
 -- ═══════════════════════════════════════════════════════════════
 
 begin;
@@ -142,9 +147,67 @@ begin
 end;
 $$;
 
+-- Next check after the admin changed check_interval (the change itself is written
+-- with the admin's session, so the audit log shows who). Only the schedule moves:
+-- fail_count / alerted / last_state and the last result are not touched.
+--   manual                      → no automatic check; a pending confirmation is cancelled
+--   pending confirmation        → kept (the failure it confirms already happened);
+--                                 afterwards the new frequency applies
+--   never checked               → due at the next cron
+--   otherwise                   → last check + new interval (now if already past),
+--                                 so the old plan does not keep running
+-- 'checking': a run holds the site; it reads the frequency again when it stores
+-- its result and plans with the new one. Returns 'ok' / 'checking' / 'missing'.
+create or replace function public.site_check_reschedule(p_site_id uuid)
+returns text
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_state public.site_check_state%rowtype;
+  v_interval text;
+  v_last timestamptz;
+  v_step interval;
+begin
+  if not exists (select 1 from public.monitored_sites where id = p_site_id) then
+    return 'missing';
+  end if;
+  insert into public.site_check_state (site_id) values (p_site_id) on conflict (site_id) do nothing;
+  -- the lock serialises with a run storing its result (it writes this row)
+  select * into v_state from public.site_check_state where site_id = p_site_id for update;
+  select check_interval, last_checked_at into v_interval, v_last from public.monitored_sites where id = p_site_id;
+  if v_state.lease_until is not null and v_state.lease_until >= now() then
+    return 'checking';
+  end if;
+  if v_interval = 'manual' then
+    update public.site_check_state set next_check_at = null, confirm_pending = false, updated_at = now() where site_id = p_site_id;
+    return 'ok';
+  end if;
+  if v_state.confirm_pending and v_state.next_check_at is not null then
+    return 'ok';
+  end if;
+  v_step := case v_interval
+    when '15m' then interval '15 minutes'
+    when '1h' then interval '1 hour'
+    when '6h' then interval '6 hours'
+    when '24h' then interval '24 hours'
+    else interval '7 days'
+  end;
+  update public.site_check_state
+     set next_check_at = case when v_last is null then null else greatest(now(), v_last + v_step) end,
+         confirm_pending = false,
+         updated_at = now()
+   where site_id = p_site_id;
+  return 'ok';
+end;
+$$;
+
 revoke all on function public.site_checks_claim_due(integer) from public, anon, authenticated;
 revoke all on function public.site_check_claim_manual(uuid, integer, integer) from public, anon, authenticated;
 grant execute on function public.site_checks_claim_due(integer) to service_role;
 grant execute on function public.site_check_claim_manual(uuid, integer, integer) to service_role;
+revoke all on function public.site_check_reschedule(uuid) from public, anon, authenticated;
+grant execute on function public.site_check_reschedule(uuid) to service_role;
 
 commit;

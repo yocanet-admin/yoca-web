@@ -35,10 +35,15 @@ export async function POST(request: NextRequest) {
   if (claim.data === 'missing') return NextResponse.json({ ok: false, error: 'Site bulunamadı.' }, { status: 404 });
   if (claim.data === 'busy') return NextResponse.json({ ok: false, error: 'Bu site şu anda kontrol ediliyor; sonuç birazdan görünecek.' }, { status: 409 });
   if (claim.data === 'too_soon') return NextResponse.json({ ok: false, error: `Aynı site ${MANUAL_GAP_S / 60} dakikada bir elle kontrol edilebilir.` }, { status: 429 });
+  if (claim.data !== 'ok') return NextResponse.json({ ok: false, error: 'Kontrol başlatılamadı (beklenmeyen veritabanı yanıtı).' }, { status: 500 });
 
   try {
     const rows = await loadRunRows(supabase, [body.id]);
     const run = await runSiteChecks(supabase, rows);
+    if (run.dbErrors.length) {
+      await supabase.from('site_check_state').update({ lease_until: null }).eq('site_id', body.id);
+      return NextResponse.json({ ok: false, error: `Kontrol yapıldı ama sonuç kaydedilemedi: ${run.dbErrors.join('; ')}` }, { status: 500 });
+    }
     const site = (await loadSiteStatuses(supabase)).find((s) => s.id === body.id) ?? null;
     return NextResponse.json({ ok: true, site, sent: run.sent });
   } catch (error) {

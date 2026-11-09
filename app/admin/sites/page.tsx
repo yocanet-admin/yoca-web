@@ -52,7 +52,7 @@ const tr = (iso: string | null) => (iso ? `${fmtDate(iso)} (TR)` : '—');
 
 function nextLine(site: SiteStatus): string {
   if (site.interval === 'manual') return 'Otomatik kontrol kapalı — yalnız elle';
-  if (site.confirmPending && site.nextCheckAt) return `${tr(site.nextCheckAt)} · ilk başarısızlıktan sonra tek doğrulama`;
+  if (site.confirmPending && site.nextCheckAt) return `${tr(site.nextCheckAt)} · ilk başarısız kontrolden sonra tek doğrulama`;
   if (!site.nextCheckAt) return 'Bir sonraki cron çalışmasında (en geç 15 dakika)';
   return tr(site.nextCheckAt);
 }
@@ -106,7 +106,13 @@ export default function AdminSites() {
   };
   const changeInterval = async (site: SiteStatus, interval: CheckInterval) => {
     const result = await setSiteInterval(site.id, interval);
-    say(result.ok ? `${site.name}: ${INTERVAL_LABEL[interval]} (alarm durumu ve son sonuç korunur)` : result.error ?? 'Sıklık kaydedilemedi.');
+    say(
+      !result.ok
+        ? result.error ?? 'Sıklık kaydedilemedi.'
+        : result.applied === 'after_check'
+          ? `${site.name}: ${INTERVAL_LABEL[interval]} — süren kontrol bitince yeni sıklıkla planlanır (alarm durumu ve son sonuç korunur)`
+          : `${site.name}: ${INTERVAL_LABEL[interval]} (alarm durumu ve son sonuç korunur)`,
+    );
     await check();
   };
   const probe = async (site: SiteStatus) => {
@@ -265,7 +271,11 @@ export default function AdminSites() {
                 )}
               </div>
               {LONG_INTERVALS.includes(site.interval) && (
-                <p className="mt-2 text-[12px] text-subtle">Seyrek izleme: iki kontrol arasındaki kısa kesintiler görülmeyebilir.</p>
+                <p className="mt-2 text-[12px] text-subtle">
+                  {site.interval === 'manual'
+                    ? 'Otomatik kontrol yok: kesinti ve düzelme yalnız elle kontrol edildiğinde görülür.'
+                    : 'Seyrek izleme: kesinti de düzelme de ancak bir sonraki kontrolde görülür; iki kontrol arasındaki kısa kesintiler görülmeyebilir.'}
+                </p>
               )}
               {c && (c.state === 'unknown' || c.problem === 'restricted') && (
                 <p className="mt-1 text-[12px] text-subtle">Bu sonuç sitenin herkes için kapalı olduğunu göstermez: kontrol {region} üzerinden yapılıyor. Tarayıcıdan açılıyorsa sorun bağlantı yolunda ya da hosting güvenlik duvarında olabilir.</p>
@@ -277,10 +287,10 @@ export default function AdminSites() {
         {sites[0] && (
           <div className="grid gap-1 text-[12px] text-subtle">
             <p>
-              <strong className="text-muted">Şimdi kontrol et:</strong> gerçek bir kontroldür; alarm ve düzelme kuralları aynen uygulanır. Başarılı olursa sonraki otomatik kontrol bu andan bir aralık sonraya kayar; başarısız olursa 15 dakika sonra tek doğrulama yapılır. Aynı site {MANUAL_GAP_S / 60} dakikada bir elle kontrol edilebilir.
+              <strong className="text-muted">Şimdi kontrol et:</strong> gerçek bir kontroldür; alarm ve düzelme kuralları aynen uygulanır. Başarılı olursa sonraki otomatik kontrol bu andan bir aralık sonraya kayar; başarısız olursa 15 dakika sonra tek doğrulama yapılır (“yalnız elle” seçili sitede otomatik doğrulama yapılmaz). Aynı site {MANUAL_GAP_S / 60} dakikada bir elle kontrol edilebilir.
             </p>
             <p>
-              <strong className="text-muted">Alarm:</strong> ilk başarısız kontrolden 15 dakika sonra tek doğrulama yapılır; ikisi de başarısızsa bir kez haber verilir. Düzelme mesajı yalnız sitenin yanıt verdiği bir kontrolden sonra gider. Sıklığı değiştirmek alarm durumunu ve son sonucu değiştirmez. “Sonuç güncel değil”: planlanan kontrol 30 dakikadan fazla gecikti.
+              <strong className="text-muted">Alarm:</strong> kesinti, sitenin sıklığına göre bir sonraki planlı kontrolde görülür (haftalık sitede başlangıcından bir haftaya kadar sonra). Bu ilk başarısız kontrolden 15 dakika sonra tek doğrulama yapılır; ikisi de başarısızsa bir kez haber verilir — yani alarm, kesintinin başlangıcından değil ilk başarısız kontrolden yaklaşık 15–30 dakika sonra gelir. Düzelme de bir sonraki başarılı kontrolde (planlı ya da “Şimdi kontrol et”) anlaşılır ve mesajı yalnız sitenin yanıt verdiği bir kontrolden sonra gider. “Yalnız elle” seçili sitede otomatik doğrulama yoktur; iki elle kontrol üst üste başarısızsa haber verilir. Sıklığı değiştirmek alarm durumunu ve son sonucu değiştirmez; sonraki kontrol yeni sıklığa göre son kontrolden itibaren yeniden hesaplanır, “yalnız elle”ye geçmek bekleyen doğrulamayı iptal eder. “Sonuç güncel değil”: planlanan kontrol 30 dakikadan fazla gecikti.
             </p>
             <p>
               “Kontrol tamamlanamadı”: izleme isteği bitmedi (zaman aşımı, bağlantı hatası). “Erişim kısıtlı”: sunucu 401/403/429 ile kontrolü reddetti. “Sunucu hatası” (5xx), “İzlenen adres bulunamadı” (404), “Güvenli bağlantı sorunu” (sertifika) ve “Alan adı bulunamadı” (DNS NXDOMAIN) sitenin kendisiyle ilgili kanıttır. Sayfa ve TLS kontrolü sitenin sıklığıyla yapılır; alan adı (RDAP) sorgusu yalnız bir kontrolle birlikte ve en fazla günde bir kez.
