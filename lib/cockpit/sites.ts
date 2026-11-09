@@ -2,6 +2,11 @@
 
 import { getAdminClient } from '@/lib/adminClient';
 import type { SiteCheck } from '@/lib/cockpit/monitor';
+import type { SiteStatus } from '@/lib/cockpit/siteStatus';
+import type { CheckInterval } from '@/lib/cockpit/schedule';
+import { adminPost } from '@/lib/cockpit/client';
+
+export type { SiteStatus } from '@/lib/cockpit/siteStatus';
 
 /** Yoca cockpit — monitored client sites (browser side). */
 
@@ -24,6 +29,10 @@ export interface HealthResponse {
   vercelConfigured: boolean;
   /** Vercel region the checks ran in (e.g. "iad1"); null outside Vercel. */
   monitorRegion?: string | null;
+  /** Stored result + schedule per active site (v28). Reading it sends no request to the sites. */
+  sites?: SiteStatus[];
+  /** v28 tables missing. */
+  migrationPending?: boolean;
   checks: SiteCheck[];
   deployments: Array<{ id: string; state: string; target: string | null; createdAt: number; message: string; branch: string; url: string }> | null;
 }
@@ -79,6 +88,16 @@ export async function removeSite(id: string): Promise<boolean> {
   return !error;
 }
 
-export { siteIssues, checkIsStale, checkLabel, CHECK_STALE_MS, PROBLEM_LABEL, type Severity, type SiteProblem } from '@/lib/cockpit/issues';
+export { siteIssues, checkLabel, PROBLEM_LABEL, type Severity, type SiteProblem } from '@/lib/cockpit/issues';
 
 export { browserProbeText, probeFromBrowser, type BrowserProbe } from '@/lib/cockpit/browserProbe';
+
+/** "Şimdi kontrol et" for one site (rate-limited and locked in the database). */
+export function checkSiteNow(id: string): Promise<{ ok: boolean; error?: string; site?: SiteStatus | null }> {
+  return adminPost('/api/admin/sites/check', { id });
+}
+
+/** Change one site's check frequency (only the schedule moves; alert state is kept). */
+export function setSiteInterval(id: string, interval: CheckInterval): Promise<{ ok: boolean; error?: string; next_check_at?: string | null; confirm_pending?: boolean; applied?: 'now' | 'after_check' }> {
+  return adminPost('/api/admin/sites/schedule', { id, interval });
+}

@@ -61,7 +61,7 @@ export interface SiteCheck {
 const SUSPENDED = /account suspended|suspendedpage|this account has been suspended|domain (is )?for sale|parked (free|domain)|hesap ask[ıi]ya al[ıi]nd[ıi]/i;
 const SIGNATURE = /yoca-credit|built by\s*yoca|href=["']https?:\/\/(www\.)?yoca\.net/i;
 
-function daysUntil(iso: string | null): number | null {
+export function daysUntil(iso: string | null): number | null {
   if (!iso) return null;
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return null;

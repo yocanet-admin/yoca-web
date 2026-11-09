@@ -4,13 +4,34 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Card, Notice, StatusBadge } from '@/components/admin/cockpit/Widgets';
 import { adminApi, fmtDate } from '@/lib/cockpit/client';
-import { addSite, checkIsStale, checkLabel, loadSiteRows, normalizeSiteUrl, browserProbeText, probeFromBrowser, removeSite, siteIssues, updateSite, type BrowserProbe, type HealthResponse, type SiteEdit, type SiteRow } from '@/lib/cockpit/sites';
+import {
+  addSite,
+  browserProbeText,
+  checkLabel,
+  checkSiteNow,
+  loadSiteRows,
+  normalizeSiteUrl,
+  probeFromBrowser,
+  removeSite,
+  setSiteInterval,
+  siteIssues,
+  updateSite,
+  type BrowserProbe,
+  type HealthResponse,
+  type SiteEdit,
+  type SiteRow,
+  type SiteStatus,
+} from '@/lib/cockpit/sites';
+import { CHECK_INTERVALS, INTERVAL_LABEL, LONG_INTERVALS, MANUAL_GAP_S, resultFreshness, type CheckInterval } from '@/lib/cockpit/schedule';
 import type { SiteCheck } from '@/lib/cockpit/monitor';
 
 /**
  * Yoca Admin — Müşteri siteleri.
- * Live checks (up / suspended / slow, signature, SSL, domain) + renewal
- * calendar + the list of monitored sites (managed here, stored in Supabase).
+ * Shows the STORED last check of each site with its schedule (frequency, last
+ * attempt, last success, next planned check — Istanbul time). Opening or
+ * refreshing this page sends no request to the client sites: the cron checks a
+ * site when its frequency says so; "Şimdi kontrol et" checks one site on demand;
+ * "Bu tarayıcıdan dene" is an explicit button too.
  */
 
 const STATE: Record<SiteCheck['state'], { kind: 'good' | 'warning' | 'critical'; label: string }> = {
@@ -27,6 +48,15 @@ function days(value: number | null): string {
   return `${value} gün`;
 }
 
+const tr = (iso: string | null) => (iso ? `${fmtDate(iso)} (TR)` : '—');
+
+function nextLine(site: SiteStatus): string {
+  if (site.interval === 'manual') return 'Otomatik kontrol kapalı — yalnız elle';
+  if (site.confirmPending && site.nextCheckAt) return `${tr(site.nextCheckAt)} · ilk başarısız kontrolden sonra tek doğrulama`;
+  if (!site.nextCheckAt) return 'Bir sonraki cron çalışmasında (en geç 15 dakika)';
+  return tr(site.nextCheckAt);
+}
+
 export default function AdminSites() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [rows, setRows] = useState<SiteRow[]>([]);
@@ -35,23 +65,25 @@ export default function AdminSites() {
   const [draft, setDraft] = useState({ name: '', url: '', expects_signature: true });
   const [formError, setFormError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
-  // re-evaluates "Sonuç güncel değil" while the page stays open
-  const [now, setNow] = useState(() => Date.now());
+  const [checking, setChecking] = useState<Record<string, boolean>>({});
   const [probes, setProbes] = useState<Record<string, BrowserProbe>>({});
+  // re-evaluates freshness and the manual-check countdown while the page stays open
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(timer);
   }, []);
 
   const say = (text: string) => {
     setFlash(text);
-    setTimeout(() => setFlash(null), 3000);
+    setTimeout(() => setFlash(null), 4000);
   };
 
-  const check = async (fresh = false) => {
+  // reads the stored results only — no request to any client site
+  const check = async () => {
     setBusy(true);
     try {
-      setHealth(await adminApi<HealthResponse>(`/api/admin/health${fresh ? '?refresh=1' : ''}`));
+      setHealth(await adminApi<HealthResponse>('/api/admin/health'));
     } finally {
       setBusy(false);
     }
@@ -65,31 +97,39 @@ export default function AdminSites() {
     setRows(result.rows);
     setReady(result.ready);
   };
+  const checkNow = async (site: SiteStatus) => {
+    setChecking((prev) => ({ ...prev, [site.id]: true }));
+    const result = await checkSiteNow(site.id);
+    setChecking((prev) => ({ ...prev, [site.id]: false }));
+    if (!result.ok) say(result.error ?? 'Kontrol yapılamadı.');
+    await check();
+  };
+  const changeInterval = async (site: SiteStatus, interval: CheckInterval) => {
+    const result = await setSiteInterval(site.id, interval);
+    say(
+      !result.ok
+        ? result.error ?? 'Sıklık kaydedilemedi.'
+        : result.applied === 'after_check'
+          ? `${site.name}: ${INTERVAL_LABEL[interval]} — süren kontrol bitince yeni sıklıkla planlanır (alarm durumu ve son sonuç korunur)`
+          : `${site.name}: ${INTERVAL_LABEL[interval]} (alarm durumu ve son sonuç korunur)`,
+    );
+    await check();
+  };
+  const probe = async (site: SiteStatus) => {
+    setProbes((prev) => ({ ...prev, [site.id]: { state: 'checking' } }));
+    const result = await probeFromBrowser(site.url);
+    setProbes((prev) => ({ ...prev, [site.id]: result }));
+  };
 
   useEffect(() => {
     check();
     loadRows();
   }, []);
 
-  const checks = health?.checks ?? [];
-
-  // For every site the server could not confirm, also try from this browser (a second vantage point).
-  useEffect(() => {
-    const pending = (health?.checks ?? []).filter((c) => c.state !== 'up' && c.state !== 'slow');
-    if (!pending.length) return;
-    let alive = true;
-    setProbes((prev) => ({ ...prev, ...Object.fromEntries(pending.map((c) => [c.url, { state: 'checking' } as BrowserProbe])) }));
-    pending.forEach((c) =>
-      probeFromBrowser(c.url).then((result) => {
-        if (alive) setProbes((prev) => ({ ...prev, [c.url]: result }));
-      }),
-    );
-    return () => {
-      alive = false;
-    };
-  }, [health]);
+  const sites = health?.sites ?? [];
+  const checks = sites.map((s) => s.check).filter((c): c is SiteCheck => Boolean(c));
   const region = health?.monitorRegion ? `Vercel ${health.monitorRegion}` : 'Vercel sunucusu';
-  const failed = health && !health.ok ? health.error ?? 'Site kontrolü yapılamadı.' : null;
+  const failed = health && !health.ok ? health.error ?? 'Site durumları alınamadı.' : null;
   const renewals = checks
     .flatMap((c) => [
       c.domainExpires ? { site: c.name, what: 'Alan adı', date: c.domainExpires } : null,
@@ -104,20 +144,20 @@ export default function AdminSites() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Müşteri siteleri</h1>
-          <p className="mt-1.5 text-[14px] text-muted">Açık mı, askıda mı, imza var mı, SSL ve alan adı ne zaman bitiyor.</p>
+          <p className="mt-1.5 text-[14px] text-muted">Açık mı, askıda mı, imza var mı, SSL ve alan adı ne zaman bitiyor. Her site kendi sıklığıyla kontrol edilir.</p>
         </div>
         <div className="flex items-center gap-3">
           {flash && <span role="status" className="text-[13px] font-bold text-amber-300">{flash}</span>}
-          <button type="button" onClick={() => check(true)} disabled={busy} className="admin-btn">
-            {busy ? 'Kontrol ediliyor…' : '↻ Şimdi kontrol et'}
+          <button type="button" onClick={() => check()} disabled={busy} className="admin-btn" title="Kayıtlı sonuçları yeniden okur; sitelere istek göndermez.">
+            {busy ? 'Okunuyor…' : '↻ Listeyi yenile'}
           </button>
         </div>
       </header>
 
       {failed && !busy && (
         <Notice tone="warning">
-          Site kontrolü alınamadı: {failed}{' '}
-          <button type="button" onClick={() => check(true)} className="font-bold underline">
+          Site durumları alınamadı: {failed}{' '}
+          <button type="button" onClick={() => check()} className="font-bold underline">
             Tekrar dene
           </button>
         </Notice>
@@ -125,44 +165,49 @@ export default function AdminSites() {
 
       {!ready && (
         <Notice tone="warning">
-          Site listesi şu an varsayılan 5 siteden oluşuyor. Site eklemek/düzenlemek ve hosting tarihlerini girmek için <code className="text-yoca-lime">supabase/upgrade-v8-cockpit.sql</code> dosyasını çalıştırın.
+          Site eklemek/düzenlemek ve hosting tarihlerini girmek için <code className="text-yoca-lime">supabase/upgrade-v8-cockpit.sql</code> dosyasını çalıştırın.
         </Notice>
       )}
 
       <div className={`grid gap-3 transition-opacity ${busy && health ? 'opacity-60' : ''}`}>
-        {checks.map((c) => {
-          // the state itself is the badge and the "İzleme noktası" line; list only the other issues (SSL, domain, signature …)
-          const issues = siteIssues(c).filter((issue) => !issue.text.startsWith(checkLabel(c)));
-          const stale = checkIsStale(c.checkedAt, now);
+        {sites.map((site) => {
+          const c = site.check;
+          // the state itself is the badge and the "Son deneme" line; list only the other issues (SSL, domain, signature …)
+          const issues = c ? siteIssues(c).filter((issue) => !issue.text.startsWith(checkLabel(c))) : [];
+          const freshness = resultFreshness({ interval: site.interval, lastAttemptAt: site.lastAttemptAt, nextCheckAt: site.nextCheckAt, now });
+          const cooldown = site.lastManualAt ? Math.max(0, Math.ceil((Date.parse(site.lastManualAt) + MANUAL_GAP_S * 1000 - now) / 1000)) : 0;
+          const inFlight = checking[site.id] || site.checking;
+          const answered = c && (c.state === 'up' || c.state === 'slow');
           return (
-            <article key={c.url} className="rounded-md border border-line bg-surface-deep/80 p-4">
+            <article key={site.id} className="rounded-md border border-line bg-surface-deep/80 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="flex items-center gap-2.5 text-[15px] font-extrabold">
-                    {c.name}
-                    <StatusBadge kind={STATE[c.state].kind}>{checkLabel(c)}</StatusBadge>
-                    {stale && <StatusBadge kind="neutral">Sonuç güncel değil</StatusBadge>}
+                  <p className="flex flex-wrap items-center gap-2.5 text-[15px] font-extrabold">
+                    {site.name}
+                    {c ? <StatusBadge kind={STATE[c.state].kind}>{checkLabel(c)}</StatusBadge> : <StatusBadge kind="neutral">Henüz kontrol edilmedi</StatusBadge>}
+                    {freshness === 'overdue' && <StatusBadge kind="neutral">Sonuç güncel değil</StatusBadge>}
+                    {inFlight && <StatusBadge kind="neutral">Kontrol ediliyor…</StatusBadge>}
                   </p>
-                  <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-[12px] text-subtle hover:text-white">
-                    {c.url.replace(/^https?:\/\//, '')} ↗
+                  <a href={site.url} target="_blank" rel="noopener noreferrer" className="text-[12px] text-subtle hover:text-white">
+                    {site.url.replace(/^https?:\/\//, '')} ↗
                   </a>
                 </div>
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-[12px] sm:grid-cols-4">
                   <div>
                     <dt className="text-subtle">Yanıt</dt>
-                    <dd className="font-bold tabular-nums text-white">{c.ms !== null ? `${(c.ms / 1000).toFixed(1)} sn` : '—'}</dd>
+                    <dd className="font-bold tabular-nums text-white">{c?.ms != null ? `${(c.ms / 1000).toFixed(1)} sn` : '—'}</dd>
                   </div>
                   <div>
                     <dt className="text-subtle">İmza</dt>
-                    <dd className="font-bold text-white">{c.signature === null ? '—' : c.signature ? 'Var' : c.expectsSignature ? 'Yok' : 'Gerekmiyor'}</dd>
+                    <dd className="font-bold text-white">{!c || c.signature === null ? '—' : c.signature ? 'Var' : c.expectsSignature ? 'Yok' : 'Gerekmiyor'}</dd>
                   </div>
                   <div>
                     <dt className="text-subtle">SSL</dt>
-                    <dd className="font-bold text-white">{days(c.sslDaysLeft)}</dd>
+                    <dd className="font-bold text-white">{days(c?.sslDaysLeft ?? null)}</dd>
                   </div>
                   <div>
                     <dt className="text-subtle">Alan adı</dt>
-                    <dd className="font-bold text-white">{days(c.domainDaysLeft)}</dd>
+                    <dd className="font-bold text-white">{days(c?.domainDaysLeft ?? null)}</dd>
                   </div>
                 </dl>
               </div>
@@ -175,35 +220,82 @@ export default function AdminSites() {
                   ))}
                 </ul>
               )}
-              <dl className="mt-3 grid gap-1 text-[12px] text-subtle">
-                <div className="flex flex-wrap gap-x-2">
-                  <dt>İzleme noktası ({region}):</dt>
-                  <dd className="text-soft">
-                    {checkLabel(c)}
-                    {c.error ? ` — ${c.error}` : c.httpStatus !== null ? ` · HTTP ${c.httpStatus}` : ''} · {fmtDate(c.checkedAt)}
-                    {stale ? ' · 30 dakikadan eski, “Şimdi kontrol et” ile yenileyin' : ''}
+              <dl className="mt-3 grid gap-1 text-[12px] text-subtle sm:grid-cols-2 sm:gap-x-6">
+                <div className="flex flex-wrap items-center gap-x-2">
+                  <dt>Sıklık:</dt>
+                  <dd>
+                    <select
+                      value={site.interval}
+                      onChange={(e) => changeInterval(site, e.target.value as CheckInterval)}
+                      aria-label={`${site.name} kontrol sıklığı`}
+                      className="admin-input !w-auto !py-1 text-[12px]"
+                    >
+                      {CHECK_INTERVALS.map((value) => (
+                        <option key={value} value={value}>
+                          {INTERVAL_LABEL[value]}
+                        </option>
+                      ))}
+                    </select>
                   </dd>
                 </div>
-                {probes[c.url] && c.state !== 'up' && c.state !== 'slow' && (
-                  <div className="flex flex-wrap gap-x-2">
+                <div className="flex flex-wrap gap-x-2">
+                  <dt>Sonraki planlanan kontrol:</dt>
+                  <dd className="text-soft">{nextLine(site)}</dd>
+                </div>
+                <div className="flex flex-wrap gap-x-2">
+                  <dt>Son deneme ({region}):</dt>
+                  <dd className="text-soft">
+                    {site.lastAttemptAt ? tr(site.lastAttemptAt) : 'yok'}
+                    {c && !answered ? ` · ${checkLabel(c)}${c.error ? ` — ${c.error}` : c.httpStatus !== null ? ` · HTTP ${c.httpStatus}` : ''}` : ''}
+                  </dd>
+                </div>
+                <div className="flex flex-wrap gap-x-2">
+                  <dt>Son başarılı kontrol:</dt>
+                  <dd className="text-soft">{tr(site.lastSuccessAt)}</dd>
+                </div>
+                {probes[site.id] && (
+                  <div className="flex flex-wrap gap-x-2 sm:col-span-2">
                     <dt title="fetch no-cors: yalnız isteğin tamamlanıp tamamlanmadığı görülür; durum kodu ve içerik okunamaz. İzleme uyarısını etkilemez.">Bu tarayıcıdan (yalnız bilgi):</dt>
-                    <dd className="text-soft">
-                      {browserProbeText(probes[c.url])}
-                    </dd>
+                    <dd className="text-soft">{browserProbeText(probes[site.id])}</dd>
                   </div>
                 )}
               </dl>
-              {(c.state === 'unknown' || c.problem === 'restricted') && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => checkNow(site)} disabled={Boolean(inFlight) || cooldown > 0} className="admin-btn !py-1.5 text-[12px]">
+                  {inFlight ? 'Kontrol ediliyor…' : cooldown > 0 ? `Şimdi kontrol et (${cooldown} sn)` : 'Şimdi kontrol et'}
+                </button>
+                {c && !answered && (
+                  <button type="button" onClick={() => probe(site)} disabled={probes[site.id]?.state === 'checking'} className="admin-btn !py-1.5 text-[12px]">
+                    Bu tarayıcıdan dene
+                  </button>
+                )}
+              </div>
+              {LONG_INTERVALS.includes(site.interval) && (
+                <p className="mt-2 text-[12px] text-subtle">
+                  {site.interval === 'manual'
+                    ? 'Otomatik kontrol yok: kesinti ve düzelme yalnız elle kontrol edildiğinde görülür.'
+                    : 'Seyrek izleme: kesinti de düzelme de ancak bir sonraki kontrolde görülür; iki kontrol arasındaki kısa kesintiler görülmeyebilir.'}
+                </p>
+              )}
+              {c && (c.state === 'unknown' || c.problem === 'restricted') && (
                 <p className="mt-1 text-[12px] text-subtle">Bu sonuç sitenin herkes için kapalı olduğunu göstermez: kontrol {region} üzerinden yapılıyor. Tarayıcıdan açılıyorsa sorun bağlantı yolunda ya da hosting güvenlik duvarında olabilir.</p>
               )}
             </article>
           );
         })}
         {!health && <div className="h-40 animate-pulse rounded-md bg-surface" />}
-        {checks[0] && (
-          <p className="text-[12px] text-subtle">
-            Sonuçlar 10 dakika saklanır. “Kontrol tamamlanamadı”: izleme isteği bitmedi (zaman aşımı, bağlantı hatası). “Erişim kısıtlı”: sunucu 401/403/429 ile kontrolü reddetti. “Sunucu hatası” (5xx), “İzlenen adres bulunamadı” (404), “Güvenli bağlantı sorunu” (sertifika) ve “Alan adı bulunamadı” (DNS NXDOMAIN) sitenin kendisiyle ilgili kanıttır.
-          </p>
+        {sites[0] && (
+          <div className="grid gap-1 text-[12px] text-subtle">
+            <p>
+              <strong className="text-muted">Şimdi kontrol et:</strong> gerçek bir kontroldür; alarm ve düzelme kuralları aynen uygulanır. Başarılı olursa sonraki otomatik kontrol bu andan bir aralık sonraya kayar; başarısız olursa 15 dakika sonra tek doğrulama yapılır (“yalnız elle” seçili sitede otomatik doğrulama yapılmaz). Aynı site {MANUAL_GAP_S / 60} dakikada bir elle kontrol edilebilir.
+            </p>
+            <p>
+              <strong className="text-muted">Alarm:</strong> kesinti, sitenin sıklığına göre bir sonraki planlı kontrolde görülür (haftalık sitede başlangıcından bir haftaya kadar sonra). Bu ilk başarısız kontrolden 15 dakika sonra tek doğrulama yapılır; ikisi de başarısızsa bir kez haber verilir — yani alarm, kesintinin başlangıcından değil ilk başarısız kontrolden yaklaşık 15–30 dakika sonra gelir. Düzelme de bir sonraki başarılı kontrolde (planlı ya da “Şimdi kontrol et”) anlaşılır ve mesajı yalnız sitenin yanıt verdiği bir kontrolden sonra gider. “Yalnız elle” seçili sitede otomatik doğrulama yoktur; iki elle kontrol üst üste başarısızsa haber verilir. Sıklığı değiştirmek alarm durumunu ve son sonucu değiştirmez; sonraki kontrol yeni sıklığa göre son kontrolden itibaren yeniden hesaplanır, “yalnız elle”ye geçmek bekleyen doğrulamayı iptal eder. “Sonuç güncel değil”: planlanan kontrol 30 dakikadan fazla gecikti.
+            </p>
+            <p>
+              “Kontrol tamamlanamadı”: izleme isteği bitmedi (zaman aşımı, bağlantı hatası). “Erişim kısıtlı”: sunucu 401/403/429 ile kontrolü reddetti. “Sunucu hatası” (5xx), “İzlenen adres bulunamadı” (404), “Güvenli bağlantı sorunu” (sertifika) ve “Alan adı bulunamadı” (DNS NXDOMAIN) sitenin kendisiyle ilgili kanıttır. Sayfa ve TLS kontrolü sitenin sıklığıyla yapılır; alan adı (RDAP) sorgusu yalnız bir kontrolle birlikte ve en fazla günde bir kez.
+            </p>
+          </div>
         )}
       </div>
 
@@ -252,7 +344,7 @@ export default function AdminSites() {
                       onClick={async () => {
                         if (window.confirm(`${row.name} izlemeden çıkarılsın mı?`) && (await removeSite(row.id))) {
                           loadRows();
-                          check(true);
+                          check();
                         }
                       }}
                       className="text-[12px] text-subtle hover:text-red-400"
@@ -290,7 +382,7 @@ export default function AdminSites() {
                 if (!result.ok) return setFormError(`Eklenemedi: ${result.error ?? 'bilinmeyen hata'}`);
                 setDraft({ name: '', url: '', expects_signature: true });
                 await loadRows();
-                check(true);
+                check();
               }}
             >
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Ad" aria-label="Site adı" className="admin-input !w-36 !py-1.5 text-[13px]" />

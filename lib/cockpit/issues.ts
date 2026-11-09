@@ -53,11 +53,3 @@ export function siteIssues(check: SiteCheck): Array<{ severity: Severity; text: 
   return issues;
 }
 
-/** A displayed check older than this is marked "Sonuç güncel değil" (the API caches checks for 10 minutes). */
-export const CHECK_STALE_MS = 30 * 60_000;
-
-/** True when the result shown is too old to describe the site now (or its time is unreadable). */
-export function checkIsStale(checkedAt: string | null | undefined, now = Date.now(), maxAgeMs = CHECK_STALE_MS): boolean {
-  const t = checkedAt ? Date.parse(checkedAt) : NaN;
-  return Number.isNaN(t) || now - t > maxAgeMs;
-}

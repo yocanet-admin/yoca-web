@@ -172,14 +172,22 @@ async function rest(req, res, url) {
     await client.query(`set local role ${role}`);
     await client.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify(claims)]);
     if (table.startsWith('rpc/')) {
-      // PostgREST-style RPC subset: POST /rest/v1/rpc/<fn> with named JSON args; scalar result.
+      // PostgREST-style RPC subset: POST /rest/v1/rpc/<fn> with named JSON args; scalar result, or an array of rows for set-returning functions.
       const fn = table.slice(4);
       if (!/^[a-z_][a-z0-9_]*$/.test(fn)) return send(res, 404, { code: 'PGRST202', message: 'function not found' });
       const args = req.method === 'POST' ? JSON.parse((await readBody(req)) || '{}') : Object.fromEntries(url.searchParams);
       const keys = Object.keys(args).filter((k) => /^[a-z_][a-z0-9_]*$/.test(k));
-      const sql = `select public.${qi(fn)}(${keys.map((k, i) => `${qi(k)} => $${i + 1}`).join(', ')}) as r`;
+      const call = `public.${qi(fn)}(${keys.map((k, i) => `${qi(k)} => $${i + 1}`).join(', ')})`;
       // like PostgREST: object / array arguments are JSON (node-postgres would turn arrays into Postgres array literals)
-      const out = await client.query(sql, keys.map((k) => (args[k] !== null && typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k])));
+      const values = keys.map((k) => (args[k] !== null && typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k]));
+      // set-returning functions (returns table / setof): PostgREST answers with an array of rows
+      const setof = (await client.query(`select bool_or(proretset) as s from pg_proc where proname = $1 and pronamespace = 'public'::regnamespace`, [fn])).rows[0]?.s;
+      if (setof) {
+        const rowsOut = (await client.query(`select * from ${call}`, values)).rows;
+        await client.query('commit');
+        return send(res, 200, JSON.stringify(rowsOut));
+      }
+      const out = await client.query(`select ${call} as r`, values);
       await client.query('commit');
       // PostgREST returns the scalar as JSON (a uuid / text result is a JSON string)
       return send(res, 200, JSON.stringify(out.rows[0].r ?? null));
