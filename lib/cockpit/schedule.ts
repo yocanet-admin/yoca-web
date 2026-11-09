@@ -113,18 +113,21 @@ export function nextSchedule(input: { interval: CheckInterval; failed: boolean; 
  * The cron slot that will actually check the site (what the panel shows): the
  * planned slot, or — when it has already passed (never checked, a missed run) —
  * the next cron run. null = no automatic check ("manual").
- * Values written before v29 (end of check + interval) count from their slot.
+ * A stored time that is not on a slot (written before v29) is checked by the
+ * first cron run AT OR AFTER it (the claim compares next_check_at <= now()),
+ * so it is shown rounded UP — never earlier than it will really run.
  */
 export function plannedSlot(input: { interval: CheckInterval; nextCheckAt: string | null; now: number }): string | null {
   if (input.interval === 'manual') return null;
   const next = input.nextCheckAt ? Date.parse(input.nextCheckAt) : NaN;
-  const slot = Number.isNaN(next) ? NaN : slotFloor(next);
+  const slot = Number.isNaN(next) ? NaN : slotCeil(next);
   return iso(!Number.isNaN(slot) && slot > input.now ? slot : slotCeil(input.now));
 }
 
 // A frequency change is planned in the database (site_check_reschedule, v29:
-// same slot rules) under the row lock, so it cannot cross a running check; the
-// run itself re-reads the frequency when it stores its result (siteRunner.ts).
+// same slot rules, using the stored slot / real start of the last check) under
+// the row lock, so it cannot cross a running check; the run itself re-reads the
+// frequency when it stores its result (siteRunner.ts).
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -154,7 +157,7 @@ export function resultFreshness(input: { interval: CheckInterval; lastAttemptAt:
   const { interval, lastAttemptAt, nextCheckAt, now } = input;
   if (!lastAttemptAt || Number.isNaN(Date.parse(lastAttemptAt))) return 'never';
   if (interval === 'manual') return 'manual';
-  const due = nextCheckAt ? slotFloor(Date.parse(nextCheckAt)) : Date.parse(lastAttemptAt) + INTERVAL_MS[interval];
+  const due = nextCheckAt ? Date.parse(nextCheckAt) : Date.parse(lastAttemptAt) + INTERVAL_MS[interval];
   if (Number.isNaN(due)) return 'fresh';
   return now > due + OVERDUE_GRACE_MS ? 'overdue' : 'fresh';
 }

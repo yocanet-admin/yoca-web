@@ -92,7 +92,7 @@ test('panel: the shown time is the cron slot that will really do the check', () 
   const now = S + 20 * MIN; // 12:20
   assert.equal(plannedSlot({ interval: '15m', nextCheckAt: at(S + 30 * MIN), now }), at(S + 30 * MIN));
   assert.equal(plannedSlot({ interval: '7d', nextCheckAt: at(S + 7 * 24 * H), now }), at(S + 7 * 24 * H));
-  assert.equal(plannedSlot({ interval: '15m', nextCheckAt: at(S + 30 * MIN + 6 * SEC), now }), at(S + 30 * MIN), 'a pre-v29 value (end + interval) counts from its slot');
+  assert.equal(plannedSlot({ interval: '24h', nextCheckAt: at(S + 24 * H + 49 * SEC), now }), at(S + 24 * H + 15 * MIN), 'a value not on a slot is shown rounded UP: it runs at the first cron at or after it, never earlier');
   assert.equal(plannedSlot({ interval: '1h', nextCheckAt: null, now }), at(S + 30 * MIN), 'never checked: the next cron run');
   assert.equal(plannedSlot({ interval: '24h', nextCheckAt: at(S - 2 * H), now }), at(S + 30 * MIN), 'a missed slot: the next cron run');
   assert.equal(plannedSlot({ interval: 'manual', nextCheckAt: null, now }), null);

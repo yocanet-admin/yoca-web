@@ -31,6 +31,11 @@ export interface SiteStatus {
   /** A run is checking this site right now. */
   checking: boolean;
   lastManualAt: string | null;
+  /** Cron slot the last check belonged to (null = manual, or before v29). */
+  lastSlotAt: string | null;
+  /** When the last check really started / finished (v29). */
+  lastStartedAt: string | null;
+  lastFinishedAt: string | null;
   /** The stored result (null = never checked since v28). */
   check: SiteCheck | null;
 }
@@ -64,6 +69,9 @@ type StateRow = {
   last_manual_at: string | null;
   domain_checked_at: string | null;
   domain_expires_at: string | null;
+  last_slot_at?: string | null;
+  last_started_at?: string | null;
+  last_finished_at?: string | null;
 };
 
 const SITE_COLUMNS = 'id,name,url,expects_signature,hosting_renews_on,note,is_active,order_index,check_interval,fail_count,alerted,signature_alerted,last_checked_at';
@@ -108,6 +116,9 @@ export async function loadSiteStatuses(supabase: SupabaseClient, now = Date.now(
       confirmPending: Boolean(s?.confirm_pending),
       checking: Boolean(s?.lease_until && Date.parse(s.lease_until) > now),
       lastManualAt: s?.last_manual_at ?? null,
+      lastSlotAt: s?.last_slot_at ?? null,
+      lastStartedAt: s?.last_started_at ?? null,
+      lastFinishedAt: s?.last_finished_at ?? null,
       check,
     };
   });

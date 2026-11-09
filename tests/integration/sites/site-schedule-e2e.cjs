@@ -75,33 +75,37 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   const setPlan = (sql) => psql(`update site_check_state set ${sql} where site_id = '${plan}'`);
   const setLast = (sql) => psql(`update monitored_sites set ${sql} where id = '${plan}'`);
   const resched = (interval) => { psql(`update monitored_sites set check_interval = '${interval}' where id = '${plan}'`); return psql(`select site_check_reschedule('${plan}')`); };
-  const FL = "to_timestamp(floor(extract(epoch from now()) / 900) * 900)"; // this slot
+  const FLms = floorS(Date.now());
+  const FL = `to_timestamp(${FLms / 1000})`; // this slot (fixed for the whole block)
   const CE = "to_timestamp(ceil(extract(epoch from now()) / 900) * 900)"; // next cron slot
-  // next_check_at equals the expected SQL expression (and confirm flag)
   const planIs = (expr, confirm = false) => psql(`select coalesce(next_check_at = (${expr}), next_check_at is null and (${expr}) is null) and confirm_pending = ${confirm} from site_check_state where site_id = '${plan}'`) === 't';
   const planNow = () => psql(`select coalesce(to_char(next_check_at at time zone 'UTC', 'DD HH24:MI:SS'), 'null') || ' ' || confirm_pending from site_check_state where site_id = '${plan}'`);
-  // last checked by the cron run of the previous slot, 49 s in
+  // last check: by the cron run of the previous slot (slot recorded), started 3 s in, ended 49 s in
   setLast(`last_checked_at = ${FL} - interval '15 minutes' + interval '49 seconds', fail_count = 0, alerted = false`);
-  setPlan(`next_check_at = ${FL}, confirm_pending = false, lease_until = null, last_manual_at = null`);
+  setPlan(`next_check_at = ${FL}, confirm_pending = false, lease_until = null, last_manual_at = null, last_slot_at = ${FL} - interval '15 minutes', last_started_at = ${FL} - interval '15 minutes' + interval '3 seconds', last_finished_at = ${FL} - interval '15 minutes' + interval '49 seconds'`);
   let r = resched('7d');
-  check('15 min → weekly: the same cron slot one week after the last check (the old 15-min plan stops)', r === 'ok' && planIs(`${FL} - interval '15 minutes' + interval '7 days'`), planNow());
+  check('cron check, 15 min → weekly: its recorded slot + 7 days (the old 15-min plan stops)', r === 'ok' && planIs(`${FL} - interval '15 minutes' + interval '7 days'`), planNow());
   r = resched('24h');
-  check('weekly → daily: the same slot one day later, not earlier', r === 'ok' && planIs(`${FL} - interval '15 minutes' + interval '24 hours'`), planNow());
+  check('cron check, weekly → daily: its slot + 24 h', r === 'ok' && planIs(`${FL} - interval '15 minutes' + interval '24 hours'`), planNow());
   r = resched('15m');
   check('→ 15 min: its slot is already here → the next cron slot (no catch-up burst)', r === 'ok' && planIs(CE), planNow());
-  // the last check was a manual one (ended right after last_manual_at): a full interval, then the next slot
-  setLast(`last_checked_at = ${FL} - interval '8 minutes'`);
-  setPlan(`last_manual_at = ${FL} - interval '8 minutes' - interval '4 seconds'`);
+  // manual check: no slot; a full interval after the real start, rounded UP
+  setPlan(`last_slot_at = null, last_started_at = ${FL} - interval '8 minutes'`);
+  setLast(`last_checked_at = ${FL} - interval '8 minutes' + interval '5 seconds'`);
   r = resched('24h');
-  check('after a manual check → daily: first slot a full 24 h later (never early)', r === 'ok' && planIs(`to_timestamp(ceil(extract(epoch from ${FL} - interval '8 minutes' + interval '24 hours') / 900) * 900)`), planNow());
-  setPlan('last_manual_at = null');
+  check('after a manual check → daily: first slot a FULL 24 h later (rounded up, never down)', r === 'ok' && planIs(`${FL} + interval '24 hours'`), planNow());
+  // a check from before v29 (no slot, no real start recorded): from last_checked_at, rounded UP
+  setPlan('last_slot_at = null, last_started_at = null');
+  setLast(`last_checked_at = ${FL} - interval '15 minutes' + interval '49 seconds'`);
+  r = resched('24h');
+  check('pre-v29 check → daily: 24 h after the real check, rounded UP (not the earlier slot)', r === 'ok' && planIs(`${FL} + interval '24 hours'`), planNow());
   setLast("last_checked_at = now() - interval '3 days'");
   r = resched('24h');
   check('overdue for the new frequency: the next cron slot, once', planIs(CE), planNow());
   setLast(`last_checked_at = ${FL} - interval '2 minutes', fail_count = 1, alerted = false`);
-  setPlan(`next_check_at = ${FL} + interval '15 minutes' + interval '37 seconds', confirm_pending = true`);
+  setPlan(`next_check_at = ${FL} + interval '15 minutes', confirm_pending = true`);
   r = resched('7d');
-  check('pending confirmation + weekly: the single confirmation is kept, on its slot', r === 'ok' && planIs(`${FL} + interval '15 minutes'`, true), planNow());
+  check('pending confirmation + weekly: the single confirmation is kept', r === 'ok' && planIs(`${FL} + interval '15 minutes'`, true), planNow());
   r = resched('manual');
   check('pending confirmation + "manual only": confirmation cancelled, alarm history kept', r === 'ok' && planIs('null::timestamptz') && psql(`select fail_count || '|' || alerted from monitored_sites where id = '${plan}'`) === '1|false', planNow());
   setPlan(`next_check_at = ${FL} + interval '1 hour', confirm_pending = false, lease_until = now() + interval '60 seconds'`);
@@ -111,6 +115,35 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   setLast('last_checked_at = null');
   r = resched('1h');
   check('never checked: due at the next cron', planIs('null::timestamptz'), planNow());
+
+  // 0c) v29 one-time conversion of stored times not on a slot: the faulty 15-min values are FIXED,
+  //     daily / weekly / hourly values and anything after a manual check are rounded UP, never down
+  const legacy = [
+    // name, interval, last_checked_at offset from this slot, manual?, confirm?, stored next (offset), expected (offset)
+    ['L 15dk cron', '15m', '-15 min +6 s', false, false, '+6 s', '+0 s'],
+    ['L 15dk cron geç', '15m', '-3 min', false, false, '+12 min', '+15 min'],
+    ['L günlük cron', '24h', '-15 min +49 s', false, false, '+24 hours -15 min +49 s', '+24 hours'],
+    ['L haftalık cron', '7d', '-15 min +49 s', false, false, '+7 days -15 min +49 s', '+7 days'],
+    ['L saatlik cron', '1h', '-15 min +49 s', false, false, '+45 min +49 s', '+1 hour'],
+    ['L 15dk elle', '15m', '-8 min', true, false, '+7 min', '+15 min'],
+    ['L günlük elle', '24h', '-8 min', true, false, '+24 hours -8 min', '+24 hours'],
+    ['L doğrulama', '7d', '-1 min', false, true, '+14 min', '+15 min'],
+    ['L zaten dilimde', '6h', '-15 min +49 s', false, false, '+6 hours', '+6 hours'],
+  ];
+  const off = (o) => o.split(/\s+(?=[+-])/).map((x) => `interval '${x.replace(/^[+]/, '')}'`).join(' + ').replace(/interval '-/g, "- interval '").replace(/\+ - /g, '- ');
+  for (const [name, iv, last, manual, confirm, next] of legacy) {
+    psql(`insert into monitored_sites (name, url, expects_signature, order_index, check_interval, is_active, last_checked_at) values ('${name}', 'http://127.0.0.1:18101/legacy', false, 50, '${iv}', false, ${FL} + ${off(last)})`);
+    psql(`insert into site_check_state (site_id, next_check_at, confirm_pending, last_manual_at) select id, ${FL} + ${off(next)}, ${confirm}, ${manual ? `${FL} + ${off(last)} - interval '4 seconds'` : 'null'} from monitored_sites where name = '${name}' on conflict (site_id) do update set next_check_at = excluded.next_check_at, confirm_pending = excluded.confirm_pending, last_manual_at = excluded.last_manual_at`);
+  }
+  execFileSync('psql', ['-h', process.env.ITEST_DIR || '/var/tmp/yoca-itest', '-p', process.env.ITEST_PORT || '54339', '-U', 'postgres', '-d', process.env.ITEST_DB || 'itest', '-q', '-v', 'ON_ERROR_STOP=1', '-f', `${ROOT}/supabase/upgrade-v29-site-slots.sql`], { stdio: 'ignore' });
+  for (const [name, iv, , manual, confirm, next, want] of legacy) {
+    const ok = psql(`select s.next_check_at = ${FL} + ${off(want)} from site_check_state s join monitored_sites m on m.id = s.site_id where m.name = '${name}'`) === 't';
+    const got = psql(`select to_char(s.next_check_at at time zone 'UTC', 'DD HH24:MI:SS') from site_check_state s join monitored_sites m on m.id = s.site_id where m.name = '${name}'`);
+    const fixes = iv === '15m' && !manual && !confirm;
+    const neverEarlier = fixes || confirm || psql(`select s.next_check_at >= ${FL} + ${off(next)} from site_check_state s join monitored_sites m on m.id = s.site_id where m.name = '${name}'`) === 't';
+    check(`v29 conversion · ${name}: ${fixes ? 'faulty 15-min value fixed' : confirm ? 'confirmation → first slot ≥ 7.5 min after the check' : 'rounded UP, not earlier than stored'}`, ok && neverEarlier, `${got} (want this slot ${want})`);
+  }
+  psql("delete from monitored_sites where name like 'L %'");
 
   // the direct changes above are audit-logged as "sistem"; from here on only the admin's change may appear
   psql("delete from audit_log where entity = 'monitored_sites'");
@@ -127,6 +160,8 @@ const id = (name) => psql(`select id from monitored_sites where name = '${name}'
   check('weekly site, first failure: fail 1, no alert, ONE confirmation at the next cron slot', f.fail === 1 && !f.alerted && f.confirm && f.next === iso(confirmSlot(t1)), JSON.stringify({ f, want: iso(confirmSlot(t1)) }));
   check('planned from the run slot: 15-min site → next slot, weekly → same slot next week', st('TEST 15dk').next === iso(plannedNext(15 * M, t1)) && st('TEST haftalık').next === iso(plannedNext(7 * D, t1)), JSON.stringify({ q: st('TEST 15dk').next, w: st('TEST haftalık').next, t1: iso(t1) }));
   check('first failure: no message', captured() === cap0);
+  const kept = psql(`select (s.last_slot_at = to_timestamp(${floorS(t1) / 1000}))::text || '|' || (s.last_started_at is not null and s.last_finished_at >= s.last_started_at)::text || '|' || (m.last_checked_at is not null)::text from site_check_state s join monitored_sites m on m.id = s.site_id where m.name = 'TEST 15dk'`);
+  check('planned slot and real start / finish stored apart', kept === 'true|true|true', kept);
 
   // 2) nothing due → no request at all
   unthrottle();

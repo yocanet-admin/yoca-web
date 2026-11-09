@@ -135,10 +135,15 @@ test('runner: plans from the run start (cron slot), not from when the check ende
     assert.equal(state(db, 'd').next_check_at, '2026-11-10T21:00:00.000Z', 'daily: same slot tomorrow');
     assert.equal(state(db, 'c').next_check_at, '2026-11-09T21:15:00.000Z');
     assert.equal(state(db, 'c').confirm_pending, true, 'confirmation at the next cron run');
+    // planned slot and real times are stored apart
+    assert.equal(state(db, 'q').last_slot_at, '2026-11-09T21:00:00.000Z');
+    assert.equal(state(db, 'q').last_finished_at, new Date(ended()).toISOString());
+    assert.ok(state(db, 'q').last_started_at, 'real start stored');
 
     const m = fakeDb({ current: { m: '24h' } });
     await runSiteChecks(m.client, [row({ id: 'm', url: `${base}/ok`, check_interval: '24h' })], { now: () => slot + 7 * 60_000 + 5_000, startedAt: slot + 7 * 60_000, manual: true, notify });
     assert.equal(state(m, 'm').next_check_at, '2026-11-10T21:15:00.000Z', 'manual at 21:07: not before 21:07 tomorrow → the 21:15 slot');
+    assert.equal(state(m, 'm').last_slot_at, null, 'a manual check has no cron slot');
   } finally {
     srv.close();
   }

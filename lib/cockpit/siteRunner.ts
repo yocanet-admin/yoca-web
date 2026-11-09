@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { checkLabel } from '@/lib/cockpit/issues';
 import { checkSites, daysUntil, type SiteCheck } from '@/lib/cockpit/monitor';
-import { domainDue, isInterval, nextSchedule } from '@/lib/cockpit/schedule';
+import { domainDue, isInterval, nextSchedule, slotFloor } from '@/lib/cockpit/schedule';
 import { FAILED_STATES, siteTransition } from '@/lib/cockpit/siteAlerts';
 import type { SiteRunRow } from '@/lib/cockpit/siteStatus';
 import { escapeHtml, notifyAdmins } from '@/lib/notify';
@@ -54,7 +54,8 @@ export async function runSiteChecks(
 
   await Promise.all(
     rows.map(async (row) => {
-      const withDomain = domainDue(row.domain_checked_at, now());
+      const checkStarted = now();
+      const withDomain = domainDue(row.domain_checked_at, checkStarted);
       const [check] = await checkSites([row], { domain: withDomain });
       if (!withDomain) {
         // RDAP was not due: keep the stored expiry instead of showing "unknown"
@@ -71,6 +72,11 @@ export async function runSiteChecks(
       const answered = check.state === 'up' || check.state === 'slow';
       const state: Record<string, unknown> = {
         last_result: check,
+        // planned slot and real times are kept apart (v29): the slot is what the
+        // next check is planned from; a manual check has no slot
+        last_slot_at: manual ? null : new Date(slotFloor(startedAt)).toISOString(),
+        last_started_at: new Date(checkStarted).toISOString(),
+        last_finished_at: new Date(finished).toISOString(),
         next_check_at: schedule.next_check_at,
         confirm_pending: schedule.confirm_pending,
         lease_until: null,

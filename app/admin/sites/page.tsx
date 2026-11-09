@@ -22,7 +22,7 @@ import {
   type SiteRow,
   type SiteStatus,
 } from '@/lib/cockpit/sites';
-import { CHECK_INTERVALS, INTERVAL_LABEL, LONG_INTERVALS, MANUAL_GAP_S, resultFreshness, slotFloor, type CheckInterval } from '@/lib/cockpit/schedule';
+import { CHECK_INTERVALS, INTERVAL_LABEL, LONG_INTERVALS, MANUAL_GAP_S, resultFreshness, slotCeil, type CheckInterval } from '@/lib/cockpit/schedule';
 import type { SiteCheck } from '@/lib/cockpit/monitor';
 
 /**
@@ -49,13 +49,14 @@ function days(value: number | null): string {
 }
 
 const tr = (iso: string | null) => (iso ? `${fmtDate(iso)} (TR)` : '—');
+const hm = (iso: string) => new Date(iso).toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit' });
 
 // the cron slot that will do the check (schedule.ts plannedSlot), not a computed "about" time
 function nextLine(site: SiteStatus): string {
   if (site.interval === 'manual' || !site.plannedAt) return 'Otomatik kontrol kapalı — yalnız elle';
   if (site.confirmPending) return `${tr(site.plannedAt)} · ilk başarısız kontrolden sonra tek doğrulama`;
   // never checked, or the planned slot has passed (a missed run): the next cron run takes it
-  if (!site.nextCheckAt || Date.parse(site.plannedAt) !== slotFloor(Date.parse(site.nextCheckAt))) return `${tr(site.plannedAt)} · bir sonraki cron çalışması`;
+  if (!site.nextCheckAt || Date.parse(site.plannedAt) !== slotCeil(Date.parse(site.nextCheckAt))) return `${tr(site.plannedAt)} · bir sonraki cron çalışması`;
   return tr(site.plannedAt);
 }
 
@@ -248,6 +249,7 @@ export default function AdminSites() {
                   <dt>Son deneme ({region}):</dt>
                   <dd className="text-soft">
                     {site.lastAttemptAt ? tr(site.lastAttemptAt) : 'yok'}
+                    {site.lastSlotAt ? ` · ${hm(site.lastSlotAt)} cron dilimi` : site.lastStartedAt ? ' · elle' : ''}
                     {c && !answered ? ` · ${checkLabel(c)}${c.error ? ` — ${c.error}` : c.httpStatus !== null ? ` · HTTP ${c.httpStatus}` : ''}` : ''}
                   </dd>
                 </div>

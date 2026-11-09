@@ -1,42 +1,11 @@
--- Yoca — rollback v29 (cron slots): restores the v28 versions of
--- site_checks_claim_due() and site_check_reschedule().
--- No data loss: no table or column is dropped; next_check_at values stay on
--- their slot (the v28 claim then checks them at that slot or the one after).
--- Run with code that does not depend on v29 (the slot release works with both,
--- only the frequency-change timing goes back to the v28 rule).
+-- Yoca — rollback v29 (cron slots). Run only AFTER the code that writes the new
+-- columns has been reverted (the v28 release does not use them).
+-- Restores the v28 site_check_reschedule() and drops the three v29 columns.
+-- Data loss: the recorded slot / start / finish of each site's last check.
+-- next_check_at values converted by v29 stay on their slot; the v28 claim checks
+-- them at that slot (nothing is moved earlier).
 
 begin;
-
-create or replace function public.site_checks_claim_due(p_lease_seconds integer default 120)
-returns table (claimed_id uuid)
-language plpgsql
-security invoker
-set search_path = public
-as $$
-begin
-  insert into public.site_check_state (site_id)
-  select m.id from public.monitored_sites m where m.is_active
-  on conflict (site_id) do nothing;
-
-  return query
-  with due as (
-    select s.site_id
-      from public.site_check_state s
-      join public.monitored_sites m on m.id = s.site_id
-     where m.is_active
-       and m.check_interval <> 'manual'
-       and coalesce(s.next_check_at, '-infinity'::timestamptz) <= now()
-       and (s.lease_until is null or s.lease_until < now())
-     for update of s skip locked
-  )
-  update public.site_check_state s
-     set lease_until = now() + make_interval(secs => greatest(coalesce(p_lease_seconds, 120), 30)),
-         updated_at = now()
-    from due
-   where s.site_id = due.site_id
-  returning s.site_id;
-end;
-$$;
 
 create or replace function public.site_check_reschedule(p_site_id uuid)
 returns text
@@ -83,9 +52,12 @@ begin
 end;
 $$;
 
-revoke all on function public.site_checks_claim_due(integer) from public, anon, authenticated;
 revoke all on function public.site_check_reschedule(uuid) from public, anon, authenticated;
-grant execute on function public.site_checks_claim_due(integer) to service_role;
 grant execute on function public.site_check_reschedule(uuid) to service_role;
+
+alter table public.site_check_state
+  drop column if exists last_slot_at,
+  drop column if exists last_started_at,
+  drop column if exists last_finished_at;
 
 commit;
