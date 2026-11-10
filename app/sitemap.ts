@@ -9,6 +9,7 @@ import {
   LOCALES,
 } from '@/lib/domains';
 import { getAllSlugs } from '@/lib/work';
+import { sitemapPaths } from '@/lib/sitemapPaths';
 import { getAllPublishedInsights } from '@/lib/insights';
 import { getCompanyInfo, getKvkkPublish } from '@/lib/siteSettings';
 import { noticeIsFinal } from '@/lib/companyInfo';
@@ -24,21 +25,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const lastModified = new Date();
   const slugs = await getAllSlugs();
 
-  const PATHS: Array<{ path: string; priority: number; changeFrequency: 'weekly' | 'monthly' }> = [
-    { path: '/', priority: 1, changeFrequency: 'weekly' },
-    { path: '/about', priority: 0.8, changeFrequency: 'monthly' },
-    { path: '/overview', priority: 0.7, changeFrequency: 'monthly' },
-    { path: '/services', priority: 0.9, changeFrequency: 'monthly' },
-    { path: '/work', priority: 0.9, changeFrequency: 'weekly' },
-    ...slugs.map((slug) => ({
-      path: `/work/${slug}`,
-      priority: 0.7,
-      changeFrequency: 'monthly' as const,
-    })),
-    { path: '/products', priority: 0.8, changeFrequency: 'monthly' },
-    { path: '/checkup', priority: 0.8, changeFrequency: 'monthly' },
-    { path: '/contact', priority: 0.8, changeFrequency: 'monthly' },
-  ];
+  const PATHS = sitemapPaths(slugs);
 
   const entries: MetadataRoute.Sitemap = [];
   for (const { path, priority, changeFrequency } of PATHS) {
