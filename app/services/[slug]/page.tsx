@@ -11,6 +11,7 @@ import Reveal from '@/components/ui/Reveal';
 import { getDict } from '@/lib/i18n';
 import { getContent } from '@/lib/content';
 import { buildMetadata, breadcrumbSchema, getRequestContext, jsonLdString } from '@/lib/seo';
+import { SERVICE_PAGES } from '@/lib/servicePages';
 
 /**
  * Yoca — service detail pages (all four locales).
@@ -19,15 +20,7 @@ import { buildMetadata, breadcrumbSchema, getRequestContext, jsonLdString } from
  * group (problem, tech stack, system name).
  */
 
-/** slug → [service item index, umbrella group index] */
-const SERVICES: Array<{ slug: string; item: number; group: number }> = [
-  { slug: 'brand-strategy-identity', item: 0, group: 0 },
-  { slug: 'web-digital-experiences', item: 1, group: 1 },
-  { slug: 'growth-performance', item: 2, group: 1 },
-  { slug: 'creative-production', item: 3, group: 0 },
-  { slug: 'ai-automation', item: 4, group: 2 },
-  { slug: 'digital-product-development', item: 5, group: 2 },
-];
+const SERVICES = SERVICE_PAGES;
 
 interface PageProps {
   params: { slug: string };
