@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabaseServiceRole();
   if (!supabase) return NextResponse.json({ ok: false, error: 'Sunucu anahtarı (service role) tanımlı değil.' }, { status: 503 });
 
+  const startedAt = Date.now();
   const claim = await supabase.rpc('site_check_claim_manual', { p_site_id: body.id, p_min_gap_seconds: MANUAL_GAP_S, p_lease_seconds: LEASE_S });
   if (claim.error) {
     const pending = /site_check_claim_manual|site_check_state|does not exist|schema cache|Could not find/i.test(claim.error.message);
@@ -39,7 +40,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const rows = await loadRunRows(supabase, [body.id]);
-    const run = await runSiteChecks(supabase, rows);
+    // a manual check is off the cron grid: the next automatic check is the first slot a full interval later
+    const run = await runSiteChecks(supabase, rows, { startedAt, manual: true });
     if (run.dbErrors.length) {
       await supabase.from('site_check_state').update({ lease_until: null }).eq('site_id', body.id);
       return NextResponse.json({ ok: false, error: `Kontrol yapıldı ama sonuç kaydedilemedi: ${run.dbErrors.join('; ')}` }, { status: 500 });

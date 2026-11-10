@@ -56,6 +56,9 @@ export async function GET(request: NextRequest) {
   const auth = cronAuth(request);
   if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
 
+  // the run's start defines its cron slot (schedule.ts): a slow check or a few
+  // seconds of cron delay never pushes a site to a later slot
+  const startedAt = Date.now();
   return withHeartbeat('sites', async () => {
     // Scheduled Insights go live once their time has come (runs even when the site check is throttled).
     const published = await publishDueInsights();
@@ -84,7 +87,7 @@ export async function GET(request: NextRequest) {
     const ids = parsed.ids;
     try {
       const rows = await loadRunRows(supabase, ids);
-      const run = await runSiteChecks(supabase, rows);
+      const run = await runSiteChecks(supabase, rows, { startedAt });
       const { results: _r, ...summary } = run;
       if (run.dbErrors.length) {
         // results that could not be stored: report the run as failed and free the sites for the next run

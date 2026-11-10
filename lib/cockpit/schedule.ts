@@ -2,17 +2,29 @@
  * Yoca cockpit — per-site check frequency (pure; shared by the cron, the manual
  * check, the panel and the morning summary).
  *
- * One cron (every 15 minutes) runs only the sites whose next_check_at has come.
- * An outage is seen at the site's next planned check (for a weekly site that
- * can be up to a week after it began). After that FIRST failed check
- * (fail_count 0 → 1, site not alerted) a single confirmation check is scheduled
- * 15 minutes later; a second failure then raises the alert (siteAlerts.ts: two
- * failures in a row) — so the alert comes about 15–30 minutes after the first
- * failed CHECK, not after the outage began. Afterwards the site returns to its
- * own interval: an alerted site never schedules more confirmations (no retry
- * loop), and a recovery is seen at the next successful check (planned or
- * "Şimdi kontrol et"). "manual" never schedules anything, not even a
- * confirmation: two failed manual checks in a row raise the alert.
+ * One cron (every 15 minutes, at :00 / :15 / :30 / :45 UTC) runs only the sites
+ * whose planned SLOT has come. Every planned time is a slot boundary — the
+ * cron run that will do the check — so the panel shows exactly that run.
+ *
+ * - A check done by a cron run is planned from that run's slot, not from when it
+ *   finished: a run of the 21:00 slot (started a few seconds late, or taking
+ *   over three minutes) plans a 15-minute site for 21:15, a daily one for
+ *   21:00 tomorrow. A run that started so late that the next slot is less than
+ *   half an interval away skips to the slot after it, so a late or missed cron
+ *   never produces back-to-back catch-up checks (one check, then the next slot).
+ * - A manual check ("Şimdi kontrol et") is not on the grid: the next check is
+ *   the first slot at least a full interval later, so daily / weekly sites are
+ *   never checked early.
+ * - An outage is seen at the site's next planned check (for a weekly site up
+ *   to a week after it began). After that FIRST failed check (fail_count 0 → 1,
+ *   site not alerted) ONE confirmation runs at the next suitable slot (at least
+ *   7.5 minutes later: normally the next cron run); a second failure raises the
+ *   alert (siteAlerts.ts: two failures in a row) — about 15 minutes after the
+ *   first failed CHECK, not after the outage began. Afterwards the site returns
+ *   to its own interval: an alerted site never schedules more confirmations (no
+ *   retry loop), and a recovery is seen at the next successful check.
+ * - "manual" never schedules anything, not even a confirmation: two failed
+ *   manual checks in a row raise the alert.
  */
 
 export const CHECK_INTERVALS = ['15m', '1h', '6h', '24h', '7d', 'manual'] as const;
@@ -36,8 +48,13 @@ export const INTERVAL_MS: Record<Exclude<CheckInterval, 'manual'>, number> = {
   '7d': 7 * 24 * 60 * MIN,
 };
 
-/** The single confirmation after a first failure (one cron tick later). */
-export const CONFIRM_DELAY_MS = 15 * MIN;
+/** The shared cron's slot: it runs at every multiple of this (UTC). */
+export const SLOT_MS = 15 * MIN;
+/** The confirmation after a first failure runs in the first slot at least this far away. */
+export const CONFIRM_MIN_GAP_MS = SLOT_MS / 2;
+
+export const slotFloor = (ms: number) => Math.floor(ms / SLOT_MS) * SLOT_MS;
+export const slotCeil = (ms: number) => Math.ceil(ms / SLOT_MS) * SLOT_MS;
 /** "Sonuç güncel değil" only when the planned check is this late (a missed cron, not a long interval). */
 export const OVERDUE_GRACE_MS = 30 * MIN;
 /** Manual "Şimdi kontrol et": at most once per site in this window (enforced in the database). */
@@ -57,19 +74,58 @@ export function isInterval(value: unknown): value is CheckInterval {
 const iso = (ms: number) => new Date(ms).toISOString();
 
 /**
- * Next schedule after a real check (cron or manual) that finished at `now`.
- * firstFailure: this check failed and the previous one had not (fail_count was 0)
- * and the site is not alerted → one confirmation in 15 minutes.
+ * The slot of the next regular check after a check that STARTED at `startedAt`.
+ * cron run: its slot + interval; if the run started so late that this slot is
+ * less than half an interval away, the slot after it (no catch-up bursts).
+ * manual check: the first slot at least a full interval later.
  */
-export function nextSchedule(input: { interval: CheckInterval; failed: boolean; prevFailCount: number; alerted: boolean; now: number }): { next_check_at: string | null; confirm_pending: boolean } {
-  const { interval, failed, prevFailCount, alerted, now } = input;
-  if (interval === 'manual') return { next_check_at: null, confirm_pending: false };
-  const firstFailure = failed && (prevFailCount ?? 0) === 0 && !alerted;
-  if (firstFailure && INTERVAL_MS[interval] > CONFIRM_DELAY_MS) return { next_check_at: iso(now + CONFIRM_DELAY_MS), confirm_pending: true };
-  return { next_check_at: iso(now + INTERVAL_MS[interval]), confirm_pending: false };
+export function plannedNext(interval: Exclude<CheckInterval, 'manual'>, startedAt: number, manual: boolean): number {
+  const step = INTERVAL_MS[interval];
+  if (manual) return slotCeil(startedAt + step);
+  let slot = slotFloor(startedAt) + step;
+  while (slot - startedAt < step / 2) slot += SLOT_MS;
+  return slot;
 }
 
-// A frequency change is planned in the database (site_check_reschedule, v28) under
+/** The slot of the single confirmation after a first failure: the next slot at least 7.5 minutes away. */
+export function confirmationSlot(startedAt: number): number {
+  let slot = slotCeil(startedAt);
+  while (slot - startedAt < CONFIRM_MIN_GAP_MS) slot += SLOT_MS;
+  return slot;
+}
+
+/**
+ * Next schedule after a real check that started at `startedAt` (a cron run's
+ * start, or the moment of a manual check — `manual: true`).
+ * firstFailure: this check failed, the previous one had not (fail_count was 0)
+ * and the site is not alerted → ONE confirmation at the next suitable slot.
+ * For a 15-minute site the next regular slot is that confirmation.
+ */
+export function nextSchedule(input: { interval: CheckInterval; failed: boolean; prevFailCount: number; alerted: boolean; startedAt: number; manual?: boolean }): { next_check_at: string | null; confirm_pending: boolean } {
+  const { interval, failed, prevFailCount, alerted, startedAt } = input;
+  if (interval === 'manual') return { next_check_at: null, confirm_pending: false };
+  const firstFailure = failed && (prevFailCount ?? 0) === 0 && !alerted;
+  if (firstFailure && interval !== '15m') return { next_check_at: iso(confirmationSlot(startedAt)), confirm_pending: true };
+  return { next_check_at: iso(plannedNext(interval, startedAt, Boolean(input.manual))), confirm_pending: false };
+}
+
+/**
+ * The cron slot that will actually check the site (what the panel shows): the
+ * planned slot, or — when it has already passed (never checked, a missed run) —
+ * the next cron run. null = no automatic check ("manual").
+ * A stored time that is not on a slot (written before v29) is checked by the
+ * first cron run AT OR AFTER it (the claim compares next_check_at <= now()),
+ * so it is shown rounded UP — never earlier than it will really run.
+ */
+export function plannedSlot(input: { interval: CheckInterval; nextCheckAt: string | null; now: number }): string | null {
+  if (input.interval === 'manual') return null;
+  const next = input.nextCheckAt ? Date.parse(input.nextCheckAt) : NaN;
+  const slot = Number.isNaN(next) ? NaN : slotCeil(next);
+  return iso(!Number.isNaN(slot) && slot > input.now ? slot : slotCeil(input.now));
+}
+
+// A frequency change is planned in the database (site_check_reschedule, v29:
+// same slot rules, using the stored slot / real start of the last check) under
 // the row lock, so it cannot cross a running check; the run itself re-reads the
 // frequency when it stores its result (siteRunner.ts).
 

@@ -22,7 +22,7 @@ import {
   type SiteRow,
   type SiteStatus,
 } from '@/lib/cockpit/sites';
-import { CHECK_INTERVALS, INTERVAL_LABEL, LONG_INTERVALS, MANUAL_GAP_S, resultFreshness, type CheckInterval } from '@/lib/cockpit/schedule';
+import { CHECK_INTERVALS, INTERVAL_LABEL, LONG_INTERVALS, MANUAL_GAP_S, resultFreshness, slotCeil, type CheckInterval } from '@/lib/cockpit/schedule';
 import type { SiteCheck } from '@/lib/cockpit/monitor';
 
 /**
@@ -49,12 +49,17 @@ function days(value: number | null): string {
 }
 
 const tr = (iso: string | null) => (iso ? `${fmtDate(iso)} (TR)` : '—');
+// a real moment (check start / result) to the second, so it is never read as the planned slot
+const trSec = (iso: string) =>
+  `${new Date(iso).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })} (TR)`;
 
+// the cron slot that will do the check (schedule.ts plannedSlot), not a computed "about" time
 function nextLine(site: SiteStatus): string {
-  if (site.interval === 'manual') return 'Otomatik kontrol kapalı — yalnız elle';
-  if (site.confirmPending && site.nextCheckAt) return `${tr(site.nextCheckAt)} · ilk başarısız kontrolden sonra tek doğrulama`;
-  if (!site.nextCheckAt) return 'Bir sonraki cron çalışmasında (en geç 15 dakika)';
-  return tr(site.nextCheckAt);
+  if (site.interval === 'manual' || !site.plannedAt) return 'Otomatik kontrol kapalı — yalnız elle';
+  if (site.confirmPending) return `${tr(site.plannedAt)} · ilk başarısız kontrolden sonra tek doğrulama`;
+  // never checked, or the planned slot has passed (a missed run): the next cron run takes it
+  if (!site.nextCheckAt || Date.parse(site.plannedAt) !== slotCeil(Date.parse(site.nextCheckAt))) return `${tr(site.plannedAt)} · bir sonraki cron çalışması`;
+  return tr(site.plannedAt);
 }
 
 export default function AdminSites() {
@@ -245,9 +250,18 @@ export default function AdminSites() {
                 <div className="flex flex-wrap gap-x-2">
                   <dt>Son deneme ({region}):</dt>
                   <dd className="text-soft">
-                    {site.lastAttemptAt ? tr(site.lastAttemptAt) : 'yok'}
+                    {/* the REAL start of the last check; the planned cron slot is its own line below */}
+                    {site.lastStartedAt
+                      ? `${trSec(site.lastStartedAt)} başladı`
+                      : site.lastAttemptAt
+                        ? `${trSec(site.lastAttemptAt)} (sonuç zamanı; başlangıç kaydı yok)`
+                        : 'yok'}
                     {c && !answered ? ` · ${checkLabel(c)}${c.error ? ` — ${c.error}` : c.httpStatus !== null ? ` · HTTP ${c.httpStatus}` : ''}` : ''}
                   </dd>
+                </div>
+                <div className="flex flex-wrap gap-x-2">
+                  <dt>Son denemenin cron dilimi:</dt>
+                  <dd className="text-soft">{site.lastSlotAt ? tr(site.lastSlotAt) : site.lastStartedAt ? 'yok — elle kontrol' : '—'}</dd>
                 </div>
                 <div className="flex flex-wrap gap-x-2">
                   <dt>Son başarılı kontrol:</dt>
@@ -287,10 +301,10 @@ export default function AdminSites() {
         {sites[0] && (
           <div className="grid gap-1 text-[12px] text-subtle">
             <p>
-              <strong className="text-muted">Şimdi kontrol et:</strong> gerçek bir kontroldür; alarm ve düzelme kuralları aynen uygulanır. Başarılı olursa sonraki otomatik kontrol bu andan bir aralık sonraya kayar; başarısız olursa 15 dakika sonra tek doğrulama yapılır (“yalnız elle” seçili sitede otomatik doğrulama yapılmaz). Aynı site {MANUAL_GAP_S / 60} dakikada bir elle kontrol edilebilir.
+              <strong className="text-muted">Şimdi kontrol et:</strong> gerçek bir kontroldür; alarm ve düzelme kuralları aynen uygulanır. Başarılı olursa sonraki otomatik kontrol, bu andan en az bir aralık sonraki ilk cron çalışmasına planlanır (günlük / haftalık site erken kontrol edilmez); başarısız olursa en az 7,5 dakika sonraki ilk cron çalışmasında tek doğrulama yapılır (“yalnız elle” seçili sitede otomatik doğrulama yapılmaz). Aynı site {MANUAL_GAP_S / 60} dakikada bir elle kontrol edilebilir.
             </p>
             <p>
-              <strong className="text-muted">Alarm:</strong> kesinti, sitenin sıklığına göre bir sonraki planlı kontrolde görülür (haftalık sitede başlangıcından bir haftaya kadar sonra). Bu ilk başarısız kontrolden 15 dakika sonra tek doğrulama yapılır; ikisi de başarısızsa bir kez haber verilir — yani alarm, kesintinin başlangıcından değil ilk başarısız kontrolden yaklaşık 15–30 dakika sonra gelir. Düzelme de bir sonraki başarılı kontrolde (planlı ya da “Şimdi kontrol et”) anlaşılır ve mesajı yalnız sitenin yanıt verdiği bir kontrolden sonra gider. “Yalnız elle” seçili sitede otomatik doğrulama yoktur; iki elle kontrol üst üste başarısızsa haber verilir. Sıklığı değiştirmek alarm durumunu ve son sonucu değiştirmez; sonraki kontrol yeni sıklığa göre son kontrolden itibaren yeniden hesaplanır, “yalnız elle”ye geçmek bekleyen doğrulamayı iptal eder. “Sonuç güncel değil”: planlanan kontrol 30 dakikadan fazla gecikti.
+              <strong className="text-muted">Alarm:</strong> kesinti, sitenin sıklığına göre bir sonraki planlı kontrolde görülür (haftalık sitede başlangıcından bir haftaya kadar sonra). Bu ilk başarısız kontrolden sonraki cron çalışmasında tek doğrulama yapılır; ikisi de başarısızsa bir kez haber verilir — yani alarm, kesintinin başlangıcından değil ilk başarısız kontrolden yaklaşık 15 dakika sonra (bir sonraki cron çalışmasında) gelir. Düzelme de bir sonraki başarılı kontrolde (planlı ya da “Şimdi kontrol et”) anlaşılır ve mesajı yalnız sitenin yanıt verdiği bir kontrolden sonra gider. “Yalnız elle” seçili sitede otomatik doğrulama yoktur; iki elle kontrol üst üste başarısızsa haber verilir. Sıklığı değiştirmek alarm durumunu ve son sonucu değiştirmez; sonraki kontrol yeni sıklığa göre son kontrolden itibaren yeniden hesaplanır, “yalnız elle”ye geçmek bekleyen doğrulamayı iptal eder. “Sonuç güncel değil”: planlanan kontrol 30 dakikadan fazla gecikti.
             </p>
             <p>
               “Kontrol tamamlanamadı”: izleme isteği bitmedi (zaman aşımı, bağlantı hatası). “Erişim kısıtlı”: sunucu 401/403/429 ile kontrolü reddetti. “Sunucu hatası” (5xx), “İzlenen adres bulunamadı” (404), “Güvenli bağlantı sorunu” (sertifika) ve “Alan adı bulunamadı” (DNS NXDOMAIN) sitenin kendisiyle ilgili kanıttır. Sayfa ve TLS kontrolü sitenin sıklığıyla yapılır; alan adı (RDAP) sorgusu yalnız bir kontrolle birlikte ve en fazla günde bir kez.
