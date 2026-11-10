@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { insightSlugFromPath } from '@/lib/insightAlternates';
+import { isAppLocale, LOCALE_COOKIE, pickLocale, type AppLocale } from '@/lib/localeDetect';
 
 /**
  * Yoca — edge middleware for path-based i18n routing.
@@ -8,8 +9,11 @@ import { insightSlugFromPath } from '@/lib/insightAlternates';
  * - A request with a locale prefix is REWRITTEN to the unprefixed route
  *   (app/ pages stay flat) while `x-yoca-locale` / `x-yoca-base` headers
  *   carry the locale to the application layer.
- * - A request without a prefix 308-redirects to the visitor's preferred
- *   locale (remembered in the `yoca_locale` cookie; default: en).
+ * - A request with a prefix is served in that language, whatever the
+ *   browser or country says, and does not change the saved preference.
+ * - A request without a prefix 307-redirects (temporary, not cacheable) to
+ *   the visitor's language: saved switcher choice (`yoca_locale` cookie) →
+ *   browser languages → country (x-vercel-ip-country) → en (lib/localeDetect.ts).
  * - /admin, /api, /_vercel (Web Analytics), sitemap/robots/manifest and all static files bypass
  *   locale handling entirely.
  * - www.* hosts 308-redirect to the apex host.
@@ -20,17 +24,13 @@ import { insightSlugFromPath } from '@/lib/insightAlternates';
  *   lookup error fails open (the page itself still shows not-found).
  */
 
-const LOCALES = ['en', 'tr', 'az', 'ar'] as const;
-type AppLocale = (typeof LOCALES)[number];
 
 export const config = {
   // Skip Next internals and any path with a file extension (static assets).
   matcher: ['/((?!_next/|_vercel/|api/|admin|.*\\..*).*)'],
 };
 
-function isLocale(value: string | undefined): value is AppLocale {
-  return !!value && (LOCALES as readonly string[]).includes(value);
-}
+const isLocale = (value: string | undefined): value is AppLocale => isAppLocale(value);
 
 const NOT_FOUND_PATH = '/__yoca-not-found';
 
@@ -100,19 +100,24 @@ export async function middleware(request: NextRequest) {
 
     const response = NextResponse.rewrite(url, { request: { headers: requestHeaders } });
     response.headers.set('x-yoca-locale', segment);
-    // Remember the visitor's language for future unprefixed requests.
-    response.cookies.set('yoca_locale', segment, {
-      path: '/',
-      maxAge: 31536000,
-      sameSite: 'lax',
-    });
+    // An explicit language URL is served as is and does NOT change the saved
+    // preference: only the language switcher saves it (components/ui/LanguageSwitcher).
     return response;
   }
 
-  // ── No locale prefix → redirect to the preferred locale ──────────
-  const cookieLocale = request.cookies.get('yoca_locale')?.value;
-  const locale: AppLocale = isLocale(cookieLocale) ? cookieLocale : 'en';
-  const url = request.nextUrl.clone();
+  // ── No locale prefix → temporary redirect to the visitor's language ──
+  // saved choice → browser languages → country (Vercel header) → English.
+  // 307 (not permanent) and not cacheable, so one visitor's language is never
+  // reused for another (and a later choice is not hidden by a cached redirect).
+  const { locale } = pickLocale({
+    cookie: request.cookies.get(LOCALE_COOKIE)?.value,
+    acceptLanguage: request.headers.get('accept-language'),
+    country: request.headers.get('x-vercel-ip-country'),
+  });
+  const url = request.nextUrl.clone(); // keeps the query string; the browser keeps the #fragment
   url.pathname = `/${locale}${pathname === '/' ? '' : pathname}`;
-  return NextResponse.redirect(url, 308);
+  const response = NextResponse.redirect(url, 307);
+  response.headers.set('Cache-Control', 'private, no-store, max-age=0');
+  response.headers.set('Vary', 'Cookie, Accept-Language, X-Vercel-IP-Country');
+  return response;
 }

@@ -5,13 +5,15 @@ import { AnimatePresence, motion } from 'framer-motion';
 import type { Locale } from '@/types';
 import { HREFLANG, localizePath, LOCALES } from '@/lib/domains';
 import { DUR, EASE_YOCA } from '@/lib/motion';
+import { chooseLocale } from '@/lib/localeChoice';
 
 /**
  * Yoca — header language menu (click to open).
  * A single compact trigger (current code) opens a small panel listing every
  * language in its own native name. No flags: flags mean countries, not
  * languages (English ≠ one flag; Arabic spans twenty). Escape / outside
- * click close it; links are plain <a> with hrefLang → crawlable.
+ * click close it; links are plain <a> with hrefLang → crawlable. A click
+ * saves the choice (yoca_locale) and keeps ?query and #fragment.
  */
 
 interface LanguageMenuProps {
@@ -97,7 +99,11 @@ export default function LanguageMenu({ current, path, localePaths, ariaLabel }: 
                       lang={locale}
                       dir={locale === 'ar' ? 'rtl' : 'ltr'}
                       aria-current={isActive ? 'true' : undefined}
-                      onClick={() => setOpen(false)}
+                      onClick={(event) => {
+                        setOpen(false);
+                        // saves the choice, keeps ?query and #fragment (lib/localeChoice)
+                        chooseLocale(event, locale, localizePath(locale, localePaths?.[locale] ?? path));
+                      }}
                       className={`flex min-h-[40px] items-center justify-between gap-6 rounded-sm px-3 text-[13px] font-semibold transition-colors ${
                         isActive ? 'bg-yoca-lime text-black' : 'text-soft hover:bg-surface-elevated hover:text-white'
                       }`}
