@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { localeFromCountry, localesFromAcceptLanguage, pickLocale } from '../lib/localeDetect';
+import { localeFromCountry, localesFromAcceptLanguage, pickLocale, rejectedLocales } from '../lib/localeDetect';
 
 test('browser languages: regional variants match, q order is respected, unsupported ones are skipped', () => {
   assert.deepEqual(localesFromAcceptLanguage('tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7'), ['tr', 'en']);
@@ -29,4 +29,23 @@ test('order: saved choice → browser → country → English', () => {
   assert.deepEqual(pickLocale({ acceptLanguage: 'en-GB', country: 'TR' }), { locale: 'en', source: 'browser' }, 'the browser beats the country');
   assert.deepEqual(pickLocale({ acceptLanguage: 'de', country: null }), { locale: 'en', source: 'default' }, 'no country information still works');
   assert.deepEqual(pickLocale({}), { locale: 'en', source: 'default' });
+});
+
+test('a language refused with q=0 is never chosen — not from the browser list, not from the country', () => {
+  assert.deepEqual(localesFromAcceptLanguage('tr;q=0'), []);
+  assert.deepEqual(localesFromAcceptLanguage('tr;q=0.0, en;q=0.1'), ['en']);
+  assert.deepEqual(localesFromAcceptLanguage('tr-TR;q=0, az'), ['az']);
+  assert.deepEqual(rejectedLocales('tr;q=0, ar-AE;q=0.000, de'), ['tr', 'ar']);
+  assert.deepEqual(rejectedLocales('tr-TR;q=0, tr;q=0.5'), [], 'another tr entry is acceptable → not refused');
+  assert.deepEqual(rejectedLocales(null), []);
+  assert.deepEqual(pickLocale({ acceptLanguage: 'tr;q=0', country: 'TR' }), { locale: 'en', source: 'default' });
+  assert.deepEqual(pickLocale({ acceptLanguage: 'ar;q=0, de', country: 'AE' }), { locale: 'en', source: 'default' });
+  assert.deepEqual(pickLocale({ acceptLanguage: 'tr;q=0, az;q=0.3', country: 'TR' }), { locale: 'az', source: 'browser' });
+  assert.deepEqual(pickLocale({ acceptLanguage: 'en;q=0', country: 'AZ' }), { locale: 'az', source: 'country' }, 'refusing English does not block an unrefused country language');
+});
+
+test('countries outside the list fall back to English when no supported browser language exists', () => {
+  for (const c of ['IR', 'IL', 'LB', 'MA', 'DZ', 'TN', 'SY', 'GE', 'RU', 'GB', 'DE', 'FR', 'US']) {
+    assert.deepEqual(pickLocale({ acceptLanguage: 'de-DE,fr;q=0.8', country: c }), { locale: 'en', source: 'default' }, c);
+  }
 });

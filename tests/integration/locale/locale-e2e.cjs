@@ -28,6 +28,14 @@ const to = (r) => (r.location ? new URL(r.location, BASE).pathname + new URL(r.l
   check('browser (en) beats country (TR)', to(r) === '/en', JSON.stringify(r));
   r = await get('/', { 'accept-language': 'de-DE', 'x-vercel-ip-country': 'DE' });
   check('unclear country (DE) → English', to(r) === '/en', JSON.stringify(r));
+  r = await get('/', { 'accept-language': 'tr;q=0, de', 'x-vercel-ip-country': 'TR' });
+  check('tr refused with q=0 → not chosen from country TR → English', to(r) === '/en', JSON.stringify(r));
+  r = await get('/', { 'accept-language': 'tr;q=0, az;q=0.3', 'x-vercel-ip-country': 'TR' });
+  check('tr refused (q=0), az accepted → /az', to(r) === '/az', JSON.stringify(r));
+  r = await get('/', { 'accept-language': 'de-DE', 'x-vercel-ip-country': 'IR' });
+  check('country outside the list (IR) → English', to(r) === '/en', JSON.stringify(r));
+  r = await get('/', { 'accept-language': 'fr-FR', 'x-vercel-ip-country': 'MA' });
+  check('Arabic-speaking but not mapped (MA) → English', to(r) === '/en', JSON.stringify(r));
   r = await get('/', { 'accept-language': 'de-DE' });
   check('no country information → English, flow still works', to(r) === '/en', JSON.stringify(r));
   r = await get('/');
