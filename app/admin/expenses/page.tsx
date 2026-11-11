@@ -245,8 +245,8 @@ function ExpensesPage() {
               <div className={`${t.tableWrap} ${t.desktopOnly}`}>
                 <table className={t.table}>
                   <colgroup>
-                    <col style={{ width: 108 }} /><col /><col style={{ width: 136 }} />
-                    <col style={{ width: 118 }} /><col style={{ width: 104 }} /><col style={{ width: 110 }} /><col style={{ width: 158 }} /><col style={{ width: 136 }} />
+                    <col style={{ width: 104 }} /><col /><col style={{ width: 128 }} />
+                    <col style={{ width: 112 }} /><col style={{ width: 104 }} /><col style={{ width: 108 }} /><col style={{ width: 140 }} /><col style={{ width: 140 }} />
                   </colgroup>
                   <thead>
                     <tr>
@@ -336,8 +336,8 @@ function Row({ it, today }: { it: Item; today: string }) {
       <td className={t.right}>{it.amount ? <span className={t.amt}>{formatAmount(it.amount, it.currency)}</span> : <span className={`${t.amt} ${t.amtMuted}`}>Tutar bekleniyor</span>}</td>
       <td className={t.right}><span className={`${t.amt} ${st.paid === BigInt(0) ? t.amtMuted : ''}`}>{money(st.paid, it.currency)}</span></td>
       <td className={t.right}><span className={`${t.amt} ${st.remaining === null ? t.amtMuted : ''}`}>{st.remaining === null ? '—' : money(st.remaining, it.currency)}</span></td>
-      <td><Status tone={STATE_TONE[st.state]} icon={STATE_ICON[st.state]}>{stateText(st)}</Status></td>
-      <td><Link href={href(it)} className={`${t.btn} ${t.btnSmall}`}>{canPay(it) ? 'Ödeme kaydet' : 'Aç'}</Link></td>
+      <td className={t.statusCell}><Status tone={STATE_TONE[st.state]} icon={STATE_ICON[st.state]}>{stateText(st)}</Status></td>
+      <td className={t.actionCell}><Link href={href(it)} className={`${t.btn} ${t.btnSmall}`}>{canPay(it) ? 'Ödeme kaydet' : 'Aç'}</Link></td>
     </tr>
   );
 }

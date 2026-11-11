@@ -8,8 +8,10 @@ import s from './tangram.module.css';
  * Tek seri sütun grafik (Tangram dili: yuvarlak uçlu kalın sütunlar, ince
  * taban çizgisi, seyrek eksen etiketi). Son gün (sürüyor) lime, diğerleri gri;
  * değerler fareyle VE klavye odağıyla görünür, ekran okuyucu için gizli tablo.
+ * value 0 = gerçek sıfır (tabanda ince çizgi); value null = kaynak o gün için
+ * satır döndürmedi (boş bırakılır, "veri yok"; tahmin çizilmez).
  */
-export default function Bars({ data, label, lastIsPartial = true }: { data: Array<{ date: string; value: number }>; label: string; lastIsPartial?: boolean }) {
+export default function Bars({ data, label, lastIsPartial = true }: { data: Array<{ date: string; value: number | null }>; label: string; lastIsPartial?: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
   const box = useRef<HTMLElement>(null);
   const [W, setW] = useState(720);
@@ -24,7 +26,7 @@ export default function Bars({ data, label, lastIsPartial = true }: { data: Arra
   }, []);
   if (data.length === 0) return <p className={s.note}>Bu aralıkta veri yok.</p>;
 
-  const max = Math.max(1, ...data.map((d) => d.value));
+  const max = Math.max(1, ...data.map((d) => d.value ?? 0));
   const niceMax = max <= 10 ? 10 : max <= 50 ? Math.ceil(max / 10) * 10 : Math.ceil(max / 50) * 50;
   const H = W < 420 ? 170 : 210;
   const pad = { l: 34, r: 4, t: 10, b: 24 };
@@ -50,7 +52,8 @@ export default function Bars({ data, label, lastIsPartial = true }: { data: Arra
           );
         })}
         {data.map((d, i) => {
-          const h = d.value === 0 ? 0 : Math.max(3, (d.value / niceMax) * plotH);
+          const v = d.value;
+          const h = v === null || v === 0 ? 0 : Math.max(3, (v / niceMax) * plotH);
           const x = pad.l + i * band + (band - barW) / 2;
           const y = pad.t + plotH - h;
           const r = Math.min(6, barW / 2, h);
@@ -58,8 +61,9 @@ export default function Bars({ data, label, lastIsPartial = true }: { data: Arra
           const isLast = i === last && lastIsPartial;
           const fill = hover === i ? '#d7ff8f' : isLast ? '#a2ff00' : '#4a505b';
           return (
-            <g key={d.date}>
+            <g key={d.date} data-value={v === null ? 'yok' : v}>
               {path && <path d={path} fill={fill} />}
+              {v === 0 && <rect x={x} y={pad.t + plotH - 2} width={barW} height={2} rx={1} fill={fill} />}
               {(i % labelEvery === 0 || i === last) && (
                 <text x={pad.l + i * band + band / 2} y={H - 6} textAnchor={i === last ? 'end' : 'middle'} fontSize="11" fill={i === last ? '#f4f4f1' : '#a3a6ae'} fontWeight={i === last ? 700 : 400}>
                   {i === last && lastIsPartial ? 'Bugün' : fmtDay(d.date)}
@@ -67,7 +71,7 @@ export default function Bars({ data, label, lastIsPartial = true }: { data: Arra
               )}
               <rect
                 x={pad.l + i * band} y={pad.t} width={band} height={plotH} fill="transparent" tabIndex={0}
-                aria-label={`${fmtDay(d.date)}${isLast ? ' (bugün, gün sürüyor)' : ''}: ${d.value} ${label.toLocaleLowerCase('tr')}`}
+                aria-label={`${fmtDay(d.date)}${isLast ? ' (bugün, gün sürüyor)' : ''}: ${v === null ? 'veri yok' : `${v} ${label.toLocaleLowerCase('tr')}`}`}
                 onPointerEnter={() => setHover(i)} onPointerLeave={() => setHover(null)} onFocus={() => setHover(i)} onBlur={() => setHover(null)}
                 className={s.chartBar}
               />
@@ -78,7 +82,7 @@ export default function Bars({ data, label, lastIsPartial = true }: { data: Arra
       </svg>
       {active && hover !== null && (
         <div className={s.chartTip} style={{ left: `${Math.min(78, Math.max(0, ((pad.l + hover * band) / W) * 100 - 6))}%` }}>
-          <strong className={s.num}>{fmtNumber(active.value)}</strong>
+          <strong className={s.num}>{active.value === null ? 'Veri yok' : fmtNumber(active.value)}</strong>
           <span>{label} · {fmtDay(active.date)}{hover === last && lastIsPartial ? ' · gün sürüyor' : ''}</span>
         </div>
       )}
@@ -87,7 +91,7 @@ export default function Bars({ data, label, lastIsPartial = true }: { data: Arra
           <caption>{label}</caption>
           <tbody>
             {data.map((d) => (
-              <tr key={d.date}><th scope="row">{d.date}</th><td>{d.value}</td></tr>
+              <tr key={d.date}><th scope="row">{d.date}</th><td>{d.value === null ? 'veri yok' : d.value}</td></tr>
             ))}
           </tbody>
         </table>

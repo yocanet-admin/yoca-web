@@ -29,6 +29,21 @@ sql(`insert into site_check_state (site_id, next_check_at, last_result, last_suc
   ('${id('TEST Panel eski')}', now() - interval '2 days', '${res({ state: 'up' })}', now() - interval '3 days')
   on conflict (site_id) do update set next_check_at = excluded.next_check_at, last_result = excluded.last_result, last_success_at = excluded.last_success_at`);
 
+// a synthetic overdue period with a partial payment → "Gecikti (kısmen ödendi)", long title
+const LONG = 'TEST Panel uzun adlı gider — kısmi ödemeli ve gecikmiş, durum etiketi iki satıra iner (sentetik)';
+const cleanupExpense = () => sql(`set session_replication_role = replica; delete from fin_payments where period_id in (select p.id from fin_periods p join fin_expenses e on e.id = p.expense_id where e.title like 'TEST Panel uzun%'); delete from fin_periods where expense_id in (select id from fin_expenses where title like 'TEST Panel uzun%'); delete from fin_expenses where title like 'TEST Panel uzun%';`);
+cleanupExpense();
+sql(`insert into fin_expenses (title, category, kind, first_due_on, amount, currency) values ('${LONG}', 'services', 'once', current_date - 5, 1000, 'TRY')`);
+sql(`insert into fin_periods (expense_id, seq, due_on, amount, currency) select id, 0, current_date - 5, 1000, 'TRY' from fin_expenses where title = '${LONG}' on conflict do nothing`);
+sql(`insert into fin_payments (period_id, amount, currency, paid_on, created_by) select p.id, 250, 'TRY', current_date - 2, 'test' from fin_periods p join fin_expenses e on e.id = p.expense_id where e.title = '${LONG}' limit 1`);
+// /api/admin/traffic answers built by the real server code from a Vercel stand-in (see traffic-fixtures.mts)
+execFileSync(require('node:path').join(__dirname, '..', 'node_modules', '.bin', 'tsx'), [require('node:path').join(__dirname, 'traffic-fixtures.mts'), OUT], { stdio: 'inherit' });
+const fixture = (sc, days) => fs.readFileSync(`${OUT}/traffic-${sc}-${days}.json`, 'utf8');
+const mockTraffic = async (page, sc) => page.route('**/api/admin/traffic?days=*', (r) => {
+  const days = new URL(r.request().url()).searchParams.get('days');
+  return r.fulfill({ status: 200, contentType: 'application/json', body: fixture(sc, days === '7' ? 7 : 30) });
+});
+
 async function login(ctx, email, pw, start) {
   const page = await ctx.newPage();
   const errors = [];
@@ -186,6 +201,58 @@ const noOverflow = async (p) => p.evaluate(() => document.documentElement.scroll
   console.log(`INFO  React hydration notices (#418/#423): Kokpit ${p.errors.filter((e) => /#4(18|23)/.test(e)).length}, Giderler ${g.errors.filter((e) => /#4(18|23)/.test(e)).length}, other screens ${hydration.length}`);
   await ctx.close();
 
+  // ── visitor charts with a simulated Vercel answer (full / missing days / zero), desktop ──
+  const ac = await b.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  await (await login(ac, 'admin@test.local', 'itest-admin-pw', '/admin')).close();
+  for (const sc of ['full', 'gaps', 'zero']) {
+    const tp = await ac.newPage();
+    await mockTraffic(tp, sc);
+    await tp.goto(`${B}/admin`);
+    await tp.locator('section[aria-labelledby="k-traffic"] svg').waitFor({ timeout: 15000 });
+    await tp.waitForTimeout(600);
+    const vis = flat(await tp.locator('section[aria-labelledby="k-visit"]').innerText());
+    const sub = flat(await tp.locator('section[aria-labelledby="k-traffic"] p').first().innerText());
+    const groups = await tp.locator('section[aria-labelledby="k-traffic"] svg g[data-value]').evaluateAll((gs) => gs.map((g) => g.getAttribute('data-value')));
+    const mini = await tp.locator('section[aria-labelledby="k-visit"] i[data-value]').evaluateAll((is) => is.map((i) => i.getAttribute('data-value')));
+    if (sc === 'full') check('chart (full): 30 days drawn, today counted, 7-day mini bars, no "veri yok"', groups.length === 30 && groups.every((v) => v !== 'yok') && mini.length === 7 && /Türkiye saatiyle 03:00/.test(vis) && !/veri yok|satır döndürmedi/.test(vis + sub), `${groups.length} ${mini.length} ${vis.slice(0, 120)}`);
+    if (sc === 'gaps') check('chart (missing days): 4 days left empty and named; today "–" with the reason; no zero invented', groups.length === 30 && groups.filter((v) => v === 'yok').length === 4 && !groups.includes('0') && /4 gün için Vercel satır döndürmedi/.test(sub) && /satır döndürmedi/.test(vis) && /3 gün veri yok/.test(vis) && mini.filter((v) => v === 'yok').length === 3, `${groups.filter((v) => v === 'yok').length} · ${sub} · ${vis.slice(0, 160)}`);
+    if (sc === 'zero') check('chart (zero values): real zeros drawn as zero, today "0 · henüz ziyaret yok"', groups.length === 30 && groups.filter((v) => v === '0').length === 3 && !groups.includes('yok') && /^Ziyaretçi · Bugün · UTC Trafik → 0 /.test(vis) && /henüz ziyaret yok/.test(vis), `${groups.join(',')} · ${vis.slice(0, 120)}`);
+    await tp.locator('section[aria-labelledby="k-traffic"]').screenshot({ path: `${OUT}/panel-grafik-${sc}-masaustu.png` });
+    await tp.locator('section[aria-labelledby="k-visit"]').screenshot({ path: `${OUT}/panel-ziyaretci-${sc}-masaustu.png` });
+    await tp.close();
+  }
+
+  // ── Giderler table: status and action never overlap; narrower desktops get cards ──
+  for (const w of [1440, 1366, 1280, 1024]) {
+    const wp = await b.newPage({ viewport: { width: w, height: 1000 }, reducedMotion: 'reduce', storageState: await ac.storageState() });
+    await wp.goto(`${B}/admin/expenses?state=all&kapsam=tum`);
+    await wp.getByText(LONG).locator('visible=true').first().waitFor({ timeout: 15000 });
+    const table = await wp.locator('table').first().isVisible();
+    console.log(`INFO  ${w}px: innerWidth ${await wp.evaluate(() => window.innerWidth)}, table visible ${table}`);
+    let detail = '';
+    let ok = await noOverflow(wp);
+    if (table) {
+      const boxes = await wp.locator('tbody tr').evaluateAll((rows) => rows.map((r) => {
+        const st = r.querySelector('td:nth-child(7) [class*="st"]')?.getBoundingClientRect();
+        const bt = r.querySelector('td:nth-child(8) a')?.getBoundingClientRect();
+        return { st: st ? [st.left, st.right] : null, bt: bt ? [bt.left, bt.right] : null, text: r.querySelector('td:nth-child(7)')?.textContent ?? '' };
+      }));
+      const clash = boxes.filter((x) => x.st && x.bt && x.st[1] > x.bt[0] - 4);
+      const long = boxes.find((x) => /Gecikti \(kısmen ödendi\)/.test(x.text));
+      ok = ok && clash.length === 0 && Boolean(long);
+      detail = `clash=${clash.length} long=${Boolean(long)}`;
+      await wp.locator('tbody tr', { hasText: LONG }).screenshot({ path: `${OUT}/panel-tablo-${w}.png` });
+    } else {
+      const card = wp.locator('ul[class*="cards"] > li', { hasText: LONG }).first();
+      ok = ok && (await card.isVisible()) && /Gecikti \(kısmen ödendi\)/.test(await card.innerText());
+      detail = 'cards';
+      await card.screenshot({ path: `${OUT}/panel-kart-${w}.png` });
+    }
+    check(`giderler ${w}px: ${w >= 1360 ? 'table, status and "Ödeme kaydet" in separate cells (long status wraps)' : 'cards (two per row), long status readable'}, no sideways scroll`, ok && (w >= 1360) === table, detail);
+    await wp.close();
+  }
+  await ac.close();
+
   // ── admin, phone ──
   const m = await b.newContext({ ...devices['iPhone 13'], reducedMotion: 'reduce' });
   const mp = await login(m, 'admin@test.local', 'itest-admin-pw', '/admin');
@@ -198,6 +265,18 @@ const noOverflow = async (p) => p.evaluate(() => document.documentElement.scroll
   check('phone kokpit: count and urgent stay visible', /\d+/.test(await mp.locator('[class*="heroCount"]').innerText()) && /acil/.test(await mp.locator('[class*="attnSummary"]').innerText()));
   check('phone kokpit: no sideways scroll', await noOverflow(mp));
   await mp.screenshot({ path: `${OUT}/panel-4-kokpit-mobil.png`, fullPage: true });
+  for (const sc of ['full', 'gaps', 'zero']) {
+    const tm = await m.newPage();
+    await mockTraffic(tm, sc);
+    await tm.goto(`${B}/admin`);
+    await tm.locator('section[aria-labelledby="k-traffic"] svg').waitFor({ timeout: 15000 });
+    await tm.waitForTimeout(500);
+    const n = await tm.locator('section[aria-labelledby="k-traffic"] svg g[data-value]').count();
+    check(`phone chart (${sc}): 30 day slots, fits the screen`, n === 30 && (await noOverflow(tm)));
+    await tm.locator('section[aria-labelledby="k-traffic"]').screenshot({ path: `${OUT}/panel-grafik-${sc}-mobil.png` });
+    await tm.locator('section[aria-labelledby="k-visit"]').screenshot({ path: `${OUT}/panel-ziyaretci-${sc}-mobil.png` });
+    await tm.close();
+  }
   const menuBtn = mp.getByRole('button', { name: /Menü/ });
   await menuBtn.click();
   check('phone menu: opens with the groups', await mp.locator('#admin-mobile-menu').isVisible());
@@ -216,6 +295,20 @@ const noOverflow = async (p) => p.evaluate(() => document.documentElement.scroll
   await mp.locator('section[aria-label="Genel bakış (özet)"]').waitFor();
   await mp.getByRole('link', { name: /Kayıtlara geç/ }).click(); await mp.waitForTimeout(400);
   check('phone giderler: "Kayıtlara geç" jumps to the records', await mp.locator('#giderler-kayitlar').evaluate((el) => el === document.activeElement && el.getBoundingClientRect().top < 160));
+  const bar = mp.locator('div[class*="topbarRow"]');
+  const barBottom = async () => (await bar.boundingBox()).y + (await bar.boundingBox()).height;
+  const target = await mp.locator('#giderler-kayitlar').boundingBox();
+  check('phone: after "Kayıtlara geç" the records start below the sticky bar (not covered)', target.y >= (await barBottom()) - 1, `bar ${await barBottom()} · target ${target.y}`);
+  await mp.evaluate(() => window.scrollTo(0, 0)); await mp.waitForTimeout(200);
+  check('phone: top bar at the top of the screen at page start', (await bar.boundingBox()).y === 0);
+  await mp.screenshot({ path: `${OUT}/panel-mobil-ust.png` });
+  await mp.evaluate(() => window.scrollTo(0, 2200)); await mp.waitForTimeout(300);
+  check('phone: top bar stays at the top while scrolled (sticky, not mid-page)', (await bar.boundingBox()).y === 0);
+  await mp.screenshot({ path: `${OUT}/panel-mobil-kaydirilmis.png` });
+  await mp.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)); await mp.waitForTimeout(200);
+  await mp.getByRole('link', { name: /Kayıtlara geç/ }).focus(); await mp.waitForTimeout(300);
+  const fbox = await mp.getByRole('link', { name: /Kayıtlara geç/ }).boundingBox();
+  check('phone: a field focused from below scrolls into view below the bar (not under it)', fbox.y >= (await barBottom()) - 1, `bar ${await barBottom()} · focused ${fbox.y}`);
   const firstCard = mp.locator('ul[class*="cards"] > li').first();
   check('phone giderler: records as cards with the action visible', (await firstCard.isVisible()) && (await firstCard.getByRole('link', { name: /Ödeme kaydet|Aç/ }).isVisible()));
   check('phone giderler: no sideways scroll', await noOverflow(mp));
@@ -234,6 +327,7 @@ const noOverflow = async (p) => p.evaluate(() => document.documentElement.scroll
   await f.close();
 
   sql(`delete from monitored_sites where name like 'TEST Panel%'`);
+  cleanupExpense();
   const failed = results.filter((r) => !r.ok).length;
   console.log(`\n${results.length - failed}/${results.length} passed`);
   await b.close();

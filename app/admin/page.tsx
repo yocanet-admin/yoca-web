@@ -172,9 +172,11 @@ export default function Cockpit() {
     { n: sitesNever, label: 'henüz kontrol yok', icon: '○', color: '#343943' },
     { n: Math.max(0, sitesOther), label: 'diğer', icon: '·', color: '#4a505b' },
   ].filter((x) => x.n > 0);
-  const weekDaily = week?.report?.daily ?? [];
-  const monthDaily = month?.report?.daily ?? [];
   const todayUtc = new Date().toISOString().slice(0, 10);
+  // every UTC day of the period; a day Vercel returned no row for stays empty (null), never 0 or an estimate
+  const weekDays = filledDays(week?.report ?? null);
+  const monthDays = filledDays(month?.report ?? null);
+  const monthMissing = monthDays.filter((d) => d.value === null).length;
 
   const skeleton = (h: number) => <div className="animate-pulse rounded-md bg-surface" style={{ height: h }} />;
 
@@ -255,7 +257,7 @@ export default function Cockpit() {
             </div>
             <p className={t.note}>{visitors.weekNote}</p>
           </div>
-          {weekDaily.length > 0 && <MiniWeek days={weekDaily.map((d) => ({ date: d.date, value: d.visitors }))} todayUtc={todayUtc} />}
+          {weekDays.some((d) => d.value !== null) && <MiniWeek days={weekDays} todayUtc={todayUtc} />}
         </section>
       </div>
 
@@ -432,7 +434,7 @@ export default function Cockpit() {
           <div className={t.tileHead}>
             <div>
               <h2 id="k-traffic" className={t.tileTitle}>Ziyaretçi · son 30 gün</h2>
-              <p className={t.tileSub}>Günlük tekil ziyaretçi · UTC günleri{monthDaily.at(-1)?.date === todayUtc ? ' · son sütun bugün (sürüyor)' : ''}</p>
+              <p className={t.tileSub}>Günlük tekil ziyaretçi · UTC günleri{monthDays.at(-1)?.date === todayUtc ? ' · son sütun bugün (sürüyor)' : ''}{monthMissing ? ` · ${monthMissing} gün için Vercel satır döndürmedi (boş)` : ''}</p>
             </div>
             <Link href="/admin/traffic" className={t.tileLink}>Trafik detayı →</Link>
           </div>
@@ -440,7 +442,7 @@ export default function Cockpit() {
             <TokenHelp />
           ) : month?.report ? (
             <>
-              <Bars data={monthDaily.map((d) => ({ date: d.date, value: d.visitors }))} label="Ziyaretçi" lastIsPartial={monthDaily.at(-1)?.date === todayUtc} />
+              <Bars data={monthDays} label="Ziyaretçi" lastIsPartial={monthDays.at(-1)?.date === todayUtc} />
               <div className={t.twoCol}>
                 <div>
                   <p className={t.miniHead}>En çok bakılan</p>
@@ -547,23 +549,36 @@ async function loadRenewals(): Promise<RenewCard> {
 }
 
 /** Last 7 UTC days as Vercel returned them (a missing day is not drawn as zero). */
-function MiniWeek({ days, todayUtc }: { days: Array<{ date: string; value: number }>; todayUtc: string }) {
-  const max = Math.max(1, ...days.map((d) => d.value));
+function MiniWeek({ days, todayUtc }: { days: Array<{ date: string; value: number | null }>; todayUtc: string }) {
+  const max = Math.max(1, ...days.map((d) => d.value ?? 0));
+  const missing = days.filter((d) => d.value === null).length;
   const wd = (iso: string) => new Intl.DateTimeFormat('tr-TR', { weekday: 'short', timeZone: 'UTC' }).format(new Date(`${iso}T12:00:00Z`));
   return (
     <figure className={t.miniBars} style={{ margin: 0 }}>
       <div className={t.miniBarsRow} aria-hidden="true">
         {days.map((d) => (
           <div key={d.date} className={`${t.miniBar} ${d.date === todayUtc ? t.miniBarToday : ''}`}>
-            <i style={{ height: `${Math.max(4, (d.value / max) * 64)}px` }} />
+            {d.value === null ? <i data-value="yok" style={{ height: 0 }} /> : <i data-value={d.value} style={{ height: `${d.value === 0 ? 2 : Math.max(4, (d.value / max) * 64)}px` }} />}
             <span>{d.date === todayUtc ? 'Bugün' : wd(d.date)}</span>
           </div>
         ))}
       </div>
-      <figcaption className={t.note}>Günlük ziyaretçi · son 7 gün (UTC) · günler toplanınca dönem toplamı çıkmaz</figcaption>
-      <table className="sr-only"><caption>Günlük ziyaretçi, son 7 gün</caption><tbody>{days.map((d) => <tr key={d.date}><th scope="row">{d.date}</th><td>{d.value}</td></tr>)}</tbody></table>
+      <figcaption className={t.note}>Günlük ziyaretçi · son 7 gün (UTC) · günler toplanınca dönem toplamı çıkmaz{missing ? ` · ${missing} gün veri yok` : ''}</figcaption>
+      <table className="sr-only"><caption>Günlük ziyaretçi, son 7 gün</caption><tbody>{days.map((d) => <tr key={d.date}><th scope="row">{d.date}</th><td>{d.value === null ? 'veri yok' : d.value}</td></tr>)}</tbody></table>
     </figure>
   );
+}
+
+/** All UTC days of a report's range with Vercel's value, or null where no row came back. */
+function filledDays(report: TrafficReport | null): Array<{ date: string; value: number | null }> {
+  if (!report) return [];
+  const byDate = new Map(report.daily.map((d) => [d.date, d.visitors] as const));
+  const out: Array<{ date: string; value: number | null }> = [];
+  for (let at = Date.parse(`${report.range.since}T00:00:00Z`), end = Date.parse(`${report.range.until}T00:00:00Z`); at < end; at += 86_400_000) {
+    const date = new Date(at).toISOString().slice(0, 10);
+    out.push({ date, value: byDate.has(date) ? byDate.get(date)! : null });
+  }
+  return out;
 }
 
 function RankList({ rows }: { rows: Array<{ label: string; value: number }> }) {

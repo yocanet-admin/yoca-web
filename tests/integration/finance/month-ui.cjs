@@ -79,6 +79,8 @@ sql(`update fin_periods set amount = 300, review_note = 'TEST: Ödendi, tarih yo
   await mp.click('button[type="submit"]');
   // phones show the compact summary (the desktop cards are hidden there)
   await mp.locator('section[aria-label="Genel bakış (özet)"]').waitFor({ timeout: 20000 });
+  const msum = (await mp.locator('section[aria-label="Genel bakış (özet)"]').innerText()).replace(/\s+/g, ' ');
+  check('mobile: compact summary keeps the "tarih bekleniyor" row (₺300,00) apart from Geciken', /Ödendi işaretli · tarih bekleniyor ₺300,00 1 dönem/.test(msum) && /Geciken · tüm aylar · bugün itibarıyla — 0 dönem/.test(msum), msum);
   const sw = await mp.evaluate(() => document.documentElement.scrollWidth);
   check('mobile: month selector fits, no horizontal page scroll', sw <= 390, `scrollWidth=${sw}`);
   await mp.screenshot({ path: `${OUT}/ay-mobil.png`, fullPage: true });

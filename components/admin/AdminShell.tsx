@@ -227,6 +227,16 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
 
+  // Phones / tablets: the top bar is sticky (58 px), so anchor jumps and keyboard focus keep clear of it.
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)');
+    const root = document.documentElement;
+    const apply = () => { root.style.scrollPaddingTop = mq.matches ? '72px' : ''; };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => { mq.removeEventListener('change', apply); root.style.scrollPaddingTop = ''; };
+  }, []);
+
   useEffect(() => {
     if (!supabase) {
       setLoading(false);
