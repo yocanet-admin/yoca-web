@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Card, StatusBadge } from '@/components/admin/cockpit/Widgets';
-import { Badge, small } from '@/components/admin/ops/ui';
+import { Badge, small, ScrollArea } from '@/components/admin/ops/ui';
 import { fmtDate } from '@/lib/cockpit/client';
 import { FIELD_LABEL, FIELD_SCOPE_LABEL, KEY_PAGES, LAB_LABEL, NO_FIELD } from '@/lib/seoPanel/pagespeed';
 import type { AuditFinding, AuditRun, PsiRow } from '@/components/admin/seo/types';
@@ -33,7 +33,7 @@ export function Audit({ audit, onRun, busy, hosts }: { audit: { run: AuditRun; f
   const stale = audit?.run.status === 'running' && Date.now() - Date.parse(audit.run.started_at) > AUDIT_RUN_TIMEOUT_S * 1000;
   const shown = (audit?.findings ?? []).filter((f) => all || f.severity === 'error' || f.severity === 'warning').sort((a, b) => order[a.severity] - order[b.severity]);
   return (
-    <Card title="Teknik kontrol" action={<button type="button" className="admin-btn !py-1.5 text-[12px]" disabled={busy} onClick={onRun}>{busy ? 'Taranıyor…' : 'Taramayı başlat'}</button>}>
+    <Card title="Teknik kontrol" action={<button type="button" className="admin-btn admin-btn-sm" disabled={busy} onClick={onRun}>{busy ? 'Taranıyor…' : 'Taramayı başlat'}</button>}>
       <p className="mb-3 max-w-[95ch] text-[12px] leading-relaxed text-subtle">
         Yalnızca izin verilen alan adları ({hosts.join(', ')}); adresler sitenin sitemap’inden. robots.txt’e uyulur, yalnızca GET, izin listesi dışına yönlendirme izlenmez. Sınırlar: en çok 50 sayfa (üst sınır 100), toplam ~40 sn, istek başına 8 sn, aynı anda en çok 3 istek. Elle başlatılır.
       </p>
@@ -51,14 +51,14 @@ export function Audit({ audit, onRun, busy, hosts }: { audit: { run: AuditRun; f
           {/* phones / tablets: one card per finding (severity, check, page, finding), no horizontal scrolling */}
           <ul className="grid gap-2 md:hidden" data-testid="seo-finding-cards">
             {shown.slice(0, 300).map((f, i) => (
-              <li key={i} className="grid gap-1 rounded-sm border border-line bg-surface-deep/60 p-3 text-[13px]" data-testid="seo-finding-card">
+              <li key={i} className="grid gap-1 admin-box p-3 text-[13px]" data-testid="seo-finding-card">
                 <div className="flex flex-wrap items-center gap-2"><StatusBadge kind={SEV[f.severity].kind}>{SEV[f.severity].label}</StatusBadge><span className="font-semibold text-soft">{CHECK[f.check_key] ?? f.check_key}</span></div>
                 <p className="break-all font-mono text-[12px] text-subtle">{path(f.url)}</p>
                 <p className="break-words text-soft">{f.message}</p>
               </li>
             ))}
           </ul>
-          <div className="-mx-1 hidden overflow-x-auto md:block">
+          <div className="hidden md:block"><ScrollArea label="Teknik bulgular">
             <table className="w-full min-w-[640px] text-left text-[13px]" data-testid="seo-findings">
               <thead><tr className="border-b border-line text-[11px] uppercase tracking-[0.06em] text-subtle"><th className="px-1 py-2">Önem</th><th className="px-1 py-2">Kontrol</th><th className="px-1 py-2">Sayfa</th><th className="px-1 py-2">Bulgu</th></tr></thead>
               <tbody>
@@ -72,7 +72,7 @@ export function Audit({ audit, onRun, busy, hosts }: { audit: { run: AuditRun; f
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollArea></div>
         </div>
       )}
     </Card>
@@ -88,7 +88,7 @@ function PsiCell({ row }: { row: PsiRow | undefined }) {
   if (row.error) return <p className="text-[12px] text-red-300">{row.error}</p>;
   return (
     <div className="grid gap-2 sm:grid-cols-2">
-      <div className="rounded-sm border border-line p-2.5" data-testid="seo-psi-lab">
+      <div className="admin-box p-2.5" data-testid="seo-psi-lab">
         <p className="text-[11px] font-bold text-muted">{LAB_LABEL}</p>
         <p className="mt-1 text-[22px] font-extrabold tabular-nums text-white">{row.lab_perf_score === null ? '—' : Math.round(Number(row.lab_perf_score))}<span className="text-[12px] font-semibold text-subtle"> /100 performans</span></p>
         <p className="text-[12px] tabular-nums text-soft">LCP {ms(row.lab_lcp_ms)} · CLS {cls(row.lab_cls)} · TBT {ms(row.lab_tbt_ms)}</p>

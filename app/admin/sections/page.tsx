@@ -59,10 +59,11 @@ export default function AdminSections() {
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Bölümler</h1>
-          <p className="mt-1.5 text-[14px] text-muted">
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Site içeriği</p>
+          <h1 className="admin-h1">Bölümler</h1>
+          <p className="admin-lede">
             Kapatılan bölüm sitede hiç render edilmez; içerik silinmez.
           </p>
         </div>

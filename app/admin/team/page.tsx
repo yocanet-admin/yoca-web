@@ -190,10 +190,11 @@ export default function AdminTeam() {
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Ekip</h1>
-          <p className="mt-1.5 max-w-3xl text-[14px] text-muted">
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Site içeriği</p>
+          <h1 className="admin-h1">Ekip</h1>
+          <p className="admin-lede">
             Yalnızca gerçek ekip üyeleri. Kart, ad, unvan ve fotoğraf ayrı ayrı onaylanınca (“doğrulandı”) ve “Göster” açıkken sitede görünür. Yapay zekâ ile üretilmiş portre kullanmayın. Doğrulanmış üye yokken ekip bölümü sitede hiç görünmez.
           </p>
         </div>
@@ -202,10 +203,10 @@ export default function AdminTeam() {
 
       <form onSubmit={submit} className="admin-card grid gap-3">
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">Ad Soyad *<input value={form.name} onChange={(event) => setField('name', event.target.value)} className="admin-input" required /></label>
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">Unvan<input value={form.role} onChange={(event) => setField('role', event.target.value)} className="admin-input" placeholder="Ör. Tasarım" /></label>
+          <label className="admin-label">Ad Soyad *<input value={form.name} onChange={(event) => setField('name', event.target.value)} className="admin-input" required /></label>
+          <label className="admin-label">Unvan<input value={form.role} onChange={(event) => setField('role', event.target.value)} className="admin-input" placeholder="Ör. Tasarım" /></label>
         </div>
-        <label className="grid gap-1 text-[12px] font-bold text-subtle">Kısa biyografi (en fazla 400 karakter; kişinin onayladığı metin)
+        <label className="admin-label">Kısa biyografi (en fazla 400 karakter; kişinin onayladığı metin)
           <textarea rows={2} maxLength={400} value={form.bio} onChange={(event) => setForm({ ...form, bio: event.target.value })} className="admin-input" />
         </label>
         <div className="grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
@@ -218,13 +219,13 @@ export default function AdminTeam() {
           </div>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">LinkedIn URL<input value={form.linkedin} onChange={(event) => setForm({ ...form, linkedin: event.target.value })} className="admin-input" /></label>
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">Uzmanlık etiketleri (virgülle)<input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} className="admin-input" /></label>
+          <label className="admin-label">LinkedIn URL<input value={form.linkedin} onChange={(event) => setForm({ ...form, linkedin: event.target.value })} className="admin-input" /></label>
+          <label className="admin-label">Uzmanlık etiketleri (virgülle)<input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} className="admin-input" /></label>
         </div>
-        <label className="grid gap-1 text-[12px] font-bold text-subtle">Diğer bağlantılar — her satır: Etiket | https://… (en fazla 4)
+        <label className="admin-label">Diğer bağlantılar — her satır: Etiket | https://… (en fazla 4)
           <textarea rows={2} value={form.links} onChange={(event) => setForm({ ...form, links: event.target.value })} className="admin-input font-mono text-[12px]" />
         </label>
-        <fieldset className="grid gap-1.5 rounded-sm border border-line p-3">
+        <fieldset className="grid gap-1.5 admin-box p-3">
           <legend className="px-1 text-[12px] font-bold text-subtle">Doğrulama (kişiyle teyit edildi)</legend>
           {([['name_confirmed', 'Ad soyad doğru ve kişi sitede yer almayı kabul etti'], ['role_confirmed', 'Unvan doğru'], ['photo_confirmed', 'Fotoğraf kişinin gerçek fotoğrafı ve kullanım izni var']] as const).map(([key, text]) => (
             <label key={key} className="flex items-center gap-2 text-[13px] text-soft">
@@ -252,8 +253,8 @@ export default function AdminTeam() {
             .map((row, index, list) => (
               <div key={row.id} className="admin-card flex flex-wrap items-center gap-4 !p-3.5">
                 <div className="flex flex-none gap-1">
-                  <button type="button" aria-label="Yukarı taşı" className="admin-btn !px-2.5 !py-1" disabled={index === 0} onClick={() => move(row, -1)}>↑</button>
-                  <button type="button" aria-label="Aşağı taşı" className="admin-btn !px-2.5 !py-1" disabled={index === list.length - 1} onClick={() => move(row, 1)}>↓</button>
+                  <button type="button" aria-label="Yukarı taşı" className="admin-btn admin-btn-sm" disabled={index === 0} onClick={() => move(row, -1)}>↑</button>
+                  <button type="button" aria-label="Aşağı taşı" className="admin-btn admin-btn-sm" disabled={index === list.length - 1} onClick={() => move(row, 1)}>↓</button>
                 </div>
                 {row.image_url ? (
                   <img src={row.image_url} alt="" className="h-11 w-11 flex-none rounded-sm object-cover grayscale" />

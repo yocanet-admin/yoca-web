@@ -24,8 +24,8 @@ export default function ClientDocuments({ clientId }: { clientId: string }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-[13px] font-bold uppercase tracking-[0.08em] text-muted">Teklifler ve belgeler</h2>
         <div className="flex gap-2">
-          <Link href={`/admin/documents?client=${clientId}`} className="admin-btn !px-2.5 !py-1 !text-[12px]">Tümü</Link>
-          <Link href={`/admin/documents?new=1&client=${clientId}`} className="admin-btn !px-2.5 !py-1 !text-[12px]">+ Yeni belge</Link>
+          <Link href={`/admin/documents?client=${clientId}`} className="admin-btn admin-btn-sm">Tümü</Link>
+          <Link href={`/admin/documents?new=1&client=${clientId}`} className="admin-btn admin-btn-sm">+ Yeni belge</Link>
         </div>
       </div>
       {error ? <p className="text-[13px] text-subtle">{error}</p> : rows === null ? <p className="text-[13px] text-subtle">Yükleniyor…</p> : rows.length === 0 ? <p className="text-[13px] text-subtle">Bu müşteriye bağlı belge yok.</p> : (

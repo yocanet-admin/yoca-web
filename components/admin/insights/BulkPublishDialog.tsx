@@ -147,14 +147,14 @@ export default function BulkPublishDialog({ groupId, languages: given, onClose, 
   };
 
   return (
-    <div className="fixed inset-0 z-[80] grid place-items-center bg-black/80 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !running) onClose(); }}>
-      <div ref={boxRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="bulk-title" className="admin-card grid max-h-[90vh] w-full max-w-[860px] gap-4 overflow-y-auto !bg-surface-deep shadow-2xl outline-none">
+    <div className="admin-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !running) onClose(); }}>
+      <div ref={boxRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="bulk-title" className="admin-dialog max-w-[860px] outline-none">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 id="bulk-title" className="text-lg font-extrabold">Yayınla · diller</h2>
             <p className="text-[12px] text-muted">Seçtiğiniz dillerin editördeki güncel hâli kaydedilir, denetlenir ve yayımlanır. Seçmediğiniz diller değişmez. Yayın e-posta göndermez.</p>
           </div>
-          <button type="button" className="admin-btn !px-2.5 !py-1" onClick={onClose} disabled={running}>Kapat</button>
+          <button type="button" className="admin-btn admin-btn-sm" onClick={onClose} disabled={running}>Kapat</button>
         </div>
 
         {checkError && <p className="text-[13px] text-red-300">Denetim yapılamadı: {checkError}</p>}
@@ -164,7 +164,7 @@ export default function BulkPublishDialog({ groupId, languages: given, onClose, 
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-[12px] text-subtle">{readyIds.length ? `${readyIds.length} dil hazır.` : 'Hazır dil yok.'}</p>
-              <button type="button" className="admin-btn !px-2.5 !py-1 !text-[12px]" disabled={!readyIds.length || running} onClick={() => setSelected((cur) => new Set([...Array.from(cur), ...readyIds]))}>Hazır dillerin tümünü seç</button>
+              <button type="button" className="admin-btn admin-btn-sm" disabled={!readyIds.length || running} onClick={() => setSelected((cur) => new Set([...Array.from(cur), ...readyIds]))}>Hazır dillerin tümünü seç</button>
             </div>
             <ul className="grid gap-2">
               {languages.map((l) => {
@@ -206,7 +206,7 @@ export default function BulkPublishDialog({ groupId, languages: given, onClose, 
             </ul>
 
             {reviewLocales.length > 0 && (
-              <label className="flex items-start gap-2 border border-yellow-400/40 bg-yellow-400/10 p-3 text-[13px] text-yellow-100">
+              <label className="admin-notice admin-notice-warn flex items-start gap-2">
                 <input type="checkbox" className="mt-0.5 h-4 w-4" checked={reviewConfirmed} onChange={(e) => setReviewConfirmed(e.target.checked)} disabled={running} />
                 <span><strong>Dil kontrolü: {reviewLocales.join(', ')}.</strong> Bu dillerdeki metinleri o dili bilen biri okudu ve kontrol etti. “Dil kontrolü yapıldı” sizin adınızla ve şimdiki saatle kaydedilsin. (İşaretlemezseniz bu diller yayımlanmaz.)</span>
               </label>

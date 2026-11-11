@@ -26,12 +26,15 @@ export default function PreviewModal({ title, excerpt, body, locale, coverUrl, c
   const [width, setWidth] = useState<'desktop' | 'mobile'>('desktop');
   const md = replaceImageRefs(body, imageUrls);
   return (
-    <div role="dialog" aria-modal="true" aria-label="Önizleme" className="fixed inset-0 z-50 grid grid-rows-[auto_1fr] bg-black/90">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-4 py-3">
-        <p className="text-[12px] font-bold uppercase tracking-[0.1em] text-subtle">Önizleme · kaydedilmemiş değişiklikler dahil · herkese açık değil</p>
-        <div className="flex gap-2">
-          <button type="button" className={`admin-btn ${width === 'desktop' ? '!border-yoca-lime !text-yoca-lime' : ''}`} onClick={() => setWidth('desktop')}>Masaüstü</button>
-          <button type="button" className={`admin-btn ${width === 'mobile' ? '!border-yoca-lime !text-yoca-lime' : ''}`} onClick={() => setWidth('mobile')}>Mobil (390 px)</button>
+    <div role="dialog" aria-modal="true" aria-label="Önizleme" className="fixed inset-0 z-[80] grid grid-rows-[auto_1fr] bg-[rgb(4_5_7/94%)]">
+      {/* the shared panel bar: kicker on the left, segmented width switch, primary close */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line,#262a31)] bg-[var(--island,#101216)] px-4 py-3">
+        <p className="admin-kicker min-w-0">Önizleme · kaydedilmemiş değişiklikler dahil · herkese açık değil</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="admin-tabs" role="group" aria-label="Önizleme genişliği">
+            <button type="button" className="admin-tab" aria-pressed={width === 'desktop'} onClick={() => setWidth('desktop')}>Masaüstü</button>
+            <button type="button" className="admin-tab" aria-pressed={width === 'mobile'} onClick={() => setWidth('mobile')}>Mobil (390 px)</button>
+          </div>
           <button type="button" className="admin-btn-primary" onClick={onClose}>Kapat</button>
         </div>
       </div>

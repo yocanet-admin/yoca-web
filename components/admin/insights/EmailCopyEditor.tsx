@@ -74,13 +74,13 @@ export default function EmailCopyEditor({ insightId, published, saved, locked, o
   const ref = published.find((p) => p.locale === active);
   const dir = active === 'ar' ? 'rtl' : 'ltr';
   const field = 'admin-input !text-[13px]';
-  const label = 'grid gap-1 text-[12px] font-semibold text-muted';
+  const label = 'admin-label';
 
   return (
-    <div className="grid gap-2 border border-line p-3">
+    <div className="grid gap-2 admin-box p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[13px] font-bold text-white">E-posta metni</p>
-        {!locked && <button type="button" className="admin-btn !px-2.5 !py-1 !text-[12px]" disabled={!!busy} onClick={() => suggest()}>OpenAI ile hazırla (tüm diller)</button>}
+        {!locked && <button type="button" className="admin-btn admin-btn-sm" disabled={!!busy} onClick={() => suggest()}>OpenAI ile hazırla (tüm diller)</button>}
       </div>
       <p className="text-[12px] text-subtle">Konu satırı, gelen kutusundaki önizleme satırı, okuru yazıya çeken kısa bir giriş ve yazıdan birebir bir alıntı. Yalnızca yazıdaki bilgiler kullanılır; tık tuzağı yok. Boş bırakılırsa başlık ve özet kullanılır. Kategori, “Ayrıca okuyun”, yazının CTA satırı ve gönderen bilgisi (Şirket bilgileri) kendiliğinden eklenir.</p>
       <div className="flex flex-wrap gap-1" role="tablist">

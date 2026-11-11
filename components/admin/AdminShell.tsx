@@ -281,7 +281,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   if (!supabase) {
     return (
       <div className="relative z-[7] flex min-h-screen items-center justify-center p-6">
-        <div className="glass max-w-md rounded-md p-8 text-center">
+        <div className="admin-card max-w-md !p-8 text-center">
           <h1 className="text-xl font-extrabold">Yapılandırma eksik</h1>
           <p className="mt-3 text-[14px] leading-relaxed text-muted">
             Supabase ortam değişkenleri tanımlı değil. Vercel&apos;de
@@ -321,9 +321,9 @@ export default function AdminShell({ children }: { children: ReactNode }) {
             height={37}
             className="mx-auto h-9 w-auto"
           />
-          <form onSubmit={handleLogin} className="glass mt-8 grid gap-4 rounded-md p-7">
+          <form onSubmit={handleLogin} className="admin-card mt-8 grid gap-4 !p-7">
             <h1 className="text-lg font-extrabold">Yönetim Paneli</h1>
-            <label className="grid gap-1.5 text-[13px] font-semibold text-muted">
+            <label className="admin-label">
               E-posta
               <input
                 type="email"
@@ -334,7 +334,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                 className="admin-input"
               />
             </label>
-            <label className="grid gap-1.5 text-[13px] font-semibold text-muted">
+            <label className="admin-label">
               Şifre
               <input
                 type="password"
@@ -487,7 +487,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         </aside>
         <main className={t.main}>
           {warnings.length > 0 && (
-            <div role="alert" className="mb-6 grid gap-2 rounded-sm border border-red-400/60 bg-red-500/10 p-4 text-[14px] leading-relaxed text-red-200">
+            <div role="alert" className="admin-notice admin-notice-bad mb-6 grid gap-2 text-[14px]">
               <p className="font-bold text-red-300">Yapılandırma hatası</p>
               {warnings.map((text) => (
                 <p key={text}>{text}</p>

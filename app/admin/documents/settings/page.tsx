@@ -84,7 +84,7 @@ export default function DocumentSettingsPage() {
         <h2 className="text-[15px] font-extrabold">Banka hesapları</h2>
         <p className="text-[12px] text-subtle">Teklif ve proformada isteğe bağlı seçilir. IBAN kontrol hanesi doğrulanır; geçersiz IBAN kaydedilmez.</p>
         {value.bankAccounts.map((a, i) => (
-          <div key={a.id} className="grid gap-2 border border-line p-3 sm:grid-cols-3">
+          <div key={a.id} className="grid gap-2 admin-box p-3 sm:grid-cols-3">
             <label className={label}>Etiket<input className={field} value={a.label} onChange={(e) => setBank(i, { label: e.target.value })} placeholder="TL hesabı" /></label>
             <label className={label}>Banka<input className={field} value={a.bank} onChange={(e) => setBank(i, { bank: e.target.value })} /></label>
             <label className={label}>Hesap sahibi<input className={field} value={a.holder} onChange={(e) => setBank(i, { holder: e.target.value })} /></label>

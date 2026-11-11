@@ -123,10 +123,11 @@ export default function AdminTraffic() {
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Trafik</h1>
-          <p className="mt-1.5 text-[14px] text-muted">yoca.net — Vercel Web Analytics (çerezsiz, admin hariç).</p>
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Genel</p>
+          <h1 className="admin-h1">Trafik</h1>
+          <p className="admin-lede">yoca.net — Vercel Web Analytics (çerezsiz, admin hariç).</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {[7, 30, 90].map((d) => (
@@ -140,7 +141,7 @@ export default function AdminTraffic() {
               Son {d} gün
             </button>
           ))}
-          <button type="button" onClick={() => load(true)} className="admin-btn !py-1.5 text-[12px]">
+          <button type="button" onClick={() => load(true)} className="admin-btn admin-btn-sm">
             ↻ Yenile
           </button>
         </div>
@@ -183,7 +184,7 @@ export default function AdminTraffic() {
             />
           </div>
 
-          <div className="-mt-2 grid gap-2 rounded-md border border-line bg-surface-deep/60 p-4 text-[12px] leading-relaxed text-subtle">
+          <div className="-mt-2 grid gap-2 admin-box p-4 text-[12px] leading-relaxed text-subtle">
             <p>
               <strong className="text-muted">Bu aralıkta:</strong> tarayıcıda gönderim olayı {show(browserSubmits)} · sunucuda kaydedilen {show(accepted)} · elenen (spam / tekrar) {show(server?.dropped)} · şu an Leadler’de duran {show(server?.stored)}.
             </p>

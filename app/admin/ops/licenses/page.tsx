@@ -1,5 +1,6 @@
 'use client';
 
+import { LabeledDate } from '@/components/admin/DateField';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Details, Empty, EntityLink, Flash, PageHead, field, fmtDate, fmtDateTime, label, small } from '@/components/admin/ops/ui';
@@ -253,7 +254,7 @@ export default function LicensesPage() {
                 const soon = exp && daysUntil(exp, today) <= 30;
                 const actions: LicenseAction[] = l.status === 'revoked' ? [] : l.status === 'suspended' ? ['resume', 'extend', 'revoke'] : ['extend', 'suspend', 'revoke'];
                 return (
-                  <li key={l.id} className="grid gap-2 rounded-md border border-line bg-surface-deep/80 p-3 text-[13px]">
+                  <li key={l.id} className="grid gap-2 admin-box p-3 text-[13px]">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-bold text-white">{l.product?.name ?? 'Ürün bilinmiyor'}</span>
                       <Badge tone={STATUS_TONE[l.status]}>{STATUS_LABEL[l.status] ?? l.status}</Badge>
@@ -302,7 +303,9 @@ function ActionPanel({ act, setAct, onSubmit, onClose, products, data }: { act: 
   const f = (k: string) => act.form[k] ?? '';
   const set = (k: string, v: string) => setAct({ ...act, form: { ...act.form, [k]: v } });
   const input = (k: string, text: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
-    <label className={label}>{text}<input className={field} value={f(k)} disabled={locked} onChange={(e) => set(k, e.target.value)} {...props} /></label>
+    props.type === 'date' && !locked
+      ? <LabeledDate label={text} value={f(k)} onChange={(v) => set(k, v)} />
+      : <label className={label}>{text}<input className={field} value={f(k)} disabled={locked} onChange={(e) => set(k, e.target.value)} {...props} type={props.type === "date" ? "text" : props.type} /></label>
   );
   const busy = act.status === 'running';
   const done = act.status === 'done';
@@ -352,7 +355,7 @@ function ActionPanel({ act, setAct, onSubmit, onClose, products, data }: { act: 
           {act.action === 'resume' && input('note', 'Not')}
           {act.action === 'revoke' && <>
             {input('reason', 'İptal nedeni *')}
-            <div className="grid gap-2 border border-red-500/50 bg-red-500/10 p-3 text-[13px] text-red-100 sm:col-span-2">
+            <div className="admin-notice admin-notice-bad grid gap-2 sm:col-span-2">
               <p className="font-bold">İptal kalıcıdır ve geri alınamaz. Lisans tüm sitelerde çalışmayı durdurur; aynı lisans yeniden açılamaz.</p>
               <label className="flex items-center gap-2"><input type="checkbox" checked={act.confirmRevoke} disabled={locked} onChange={(e) => setAct({ ...act, confirmRevoke: e.target.checked })} /> Geri alınamayacağını anlıyorum.</label>
             </div>
@@ -439,7 +442,7 @@ function LinkTable({ data, list, fetchedAt, prefill, clearPrefill, onChange, onE
 
   const name = (arr: Array<{ id: string; name: string }>, id: string | null) => (id ? arr.find((x) => x.id === id)?.name ?? '—' : null);
   const form = (
-    <form onSubmit={save} className="grid gap-3 border border-line p-3">
+    <form onSubmit={save} className="grid gap-3 admin-box p-3">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className={label}>Lisans kimliği (license.yoca.net) *<input className={`${field} font-mono`} value={d.license_id} onChange={(e) => setD({ ...d, license_id: e.target.value })} /></label>
         <label className={label}>Etiket<input className={field} value={d.label} onChange={(e) => setD({ ...d, label: e.target.value })} placeholder="ör. Kuzey Mimarlık — WP eklentisi" /></label>

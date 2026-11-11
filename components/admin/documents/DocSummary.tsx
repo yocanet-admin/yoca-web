@@ -5,7 +5,7 @@ import { computeDocument, fmtMoney, fmtPct, parseMoney, quantityText } from '@/l
 import { BLOCK_LABEL, CURRENCY_LABEL, KIND_DEF, KIND_LABEL, billingText, bodyParts, type DocContent, type DocKind } from '@/lib/documents/model';
 import { RecurringSummary } from '@/components/admin/documents/Recurring';
 import { formatIban, type BankAccount } from '@/lib/documents/settings';
-import { fmtDate } from '@/components/admin/ops/ui';
+import { fmtDate, ScrollArea } from '@/components/admin/ops/ui';
 
 /**
  * Read-only view of a finalized (or archived) document: what the PDF says,
@@ -87,7 +87,7 @@ export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: Do
 
       {def.items && (
         <Card title="Kalemler" aside={<span className="text-[12px] text-subtle">{lines.length} kalem</span>}>
-          <div className="overflow-x-auto">
+          <ScrollArea label="Kalemler">
             <table className="w-full min-w-[620px] text-[13px]">
               <thead className="text-left text-[11px] uppercase tracking-[0.08em] text-subtle">
                 <tr><th className="py-1.5 pe-2">#</th><th className="py-1.5 pe-2">Açıklama</th><th className="py-1.5 pe-2 text-right">Adet / Süre</th><th className="py-1.5 pe-2 text-right">Birim fiyat (KDV hariç)</th>{showDisc && <th className="py-1.5 pe-2 text-right">İnd.</th>}<th className="py-1.5 pe-2 text-right">KDV</th><th className="py-1.5 text-right">Tutar (KDV hariç)</th></tr>
@@ -109,7 +109,7 @@ export function DocSummary({ kind, content: c, banks, sourceNumber }: { kind: Do
                 })}
               </tbody>
             </table>
-          </div>
+          </ScrollArea>
           <div className="grid justify-end gap-1 border-t border-line pt-3 text-[13px]">
             <div className="flex justify-between gap-10"><span className="text-muted">Ara toplam</span><span className="tabular-nums">{money(totals.subtotal)}</span></div>
             {totals.discount > BigInt(0) && <div className="flex justify-between gap-10"><span className="text-muted">İndirim</span><span className="tabular-nums">−{money(totals.discount)}</span></div>}

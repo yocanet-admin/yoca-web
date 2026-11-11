@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { LabeledDate } from '@/components/admin/DateField';
 import Link from 'next/link';
 import { getAdminClient } from '@/lib/adminClient';
 import { DEFAULT_CASE_STUDY_SLUGS, staticCaseStudies } from '@/lib/workData';
@@ -144,16 +145,17 @@ export default function AdminCaseResults() {
   };
 
   const field = 'admin-input text-[13px]';
-  const label = 'grid gap-1 text-[12px] font-bold text-subtle';
+  const label = 'admin-label';
   const visible = (r: Result) => r.approval_status === 'approved' && Boolean(r.approval_date) && r.publication_scope.includes('site');
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
+      <header className="admin-head">
+        <div className="admin-head-text">
           <p className="text-[12px] text-subtle"><Link href="/admin/work" className="hover:text-yoca-lime">← Work / Projeler</Link></p>
-          <h1 className="text-2xl font-extrabold tracking-tight">Sonuçlar ve referanslar</h1>
-          <p className="mt-1.5 max-w-3xl text-[14px] text-muted">Yalnızca müşterinin yazılı onayladığı sonuç ve yorumları girin. Proje sayfasında yalnızca “Müşteri onayladı” + onay tarihi + “Web sitesi” kapsamındaki kayıtlar görünür. Sayı veya yorum üretmeyin, tahmin girmeyin.</p>
+          <p className="admin-kicker">Site içeriği</p>
+          <h1 className="admin-h1">Sonuçlar ve referanslar</h1>
+          <p className="admin-lede">Yalnızca müşterinin yazılı onayladığı sonuç ve yorumları girin. Proje sayfasında yalnızca “Müşteri onayladı” + onay tarihi + “Web sitesi” kapsamındaki kayıtlar görünür. Sayı veya yorum üretmeyin, tahmin girmeyin.</p>
         </div>
         {msg && <p role="status" className="text-[13px] font-bold text-yoca-lime">{msg}</p>}
       </header>
@@ -181,7 +183,7 @@ export default function AdminCaseResults() {
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
           <label className={label}>Müşteri onayı<select value={form.approval_status} onChange={(e) => setForm({ ...form, approval_status: e.target.value as Result['approval_status'] })} className={field}>{(Object.keys(STATUS) as Array<Result['approval_status']>).map((k) => <option key={k} value={k}>{STATUS[k]}</option>)}</select></label>
-          <label className={label}>Onay tarihi<input type="date" value={form.approval_date ?? ''} onChange={(e) => setForm({ ...form, approval_date: e.target.value || null })} className={field} /></label>
+          <LabeledDate label="Onay tarihi" value={form.approval_date ?? ''} onChange={(v) => setForm({ ...form, approval_date: v || null })} />
           <fieldset className={label}>Yayın kapsamı
             <div className="flex flex-wrap gap-3 pt-1">
               {SCOPES.map((s) => (

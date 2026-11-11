@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { LabeledDate } from '@/components/admin/DateField';
 import { Badge, field, fmtDate, fmtDateTime, label, small } from '@/components/admin/ops/ui';
 import { newKey } from '@/lib/documents/client';
 import { archiveFinDocument, finDocumentUrl, listFinDocuments, loadFinHistory, uploadFinDocument, type FinAuditRow, type FinDocEntity, type FinDocument, type PaymentInput } from '@/lib/fin/data';
@@ -62,7 +63,7 @@ export function PaymentForm({ currency, suggested, ops = false, income = false, 
   };
 
   return (
-    <div className="grid gap-3 border border-line p-3">
+    <div className="grid gap-3 admin-box p-3">
       <div className="grid gap-3 sm:grid-cols-4">
         <label className={label}>Tür
           <select className={field} value={kind} onChange={(e) => setKind(e.target.value as PaymentInput['kind'])}>
@@ -72,7 +73,7 @@ export function PaymentForm({ currency, suggested, ops = false, income = false, 
           </select>
         </label>
         <label className={label}>Tutar ({currency})<input className={field} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" /></label>
-        <label className={label}>{income ? 'Tahsilat tarihi' : 'Tarih'}<input type="date" className={field} value={paidOn} max={istanbulDay()} onChange={(e) => setPaidOn(e.target.value)} /></label>
+        <LabeledDate label={income ? 'Tahsilat tarihi' : 'Tarih'} value={paidOn} max={istanbulDay()} onChange={(v) => setPaidOn(v)} />
         <label className={label}>Yöntem
           <select className={field} value={method} onChange={(e) => setMethod(e.target.value)}>
             <option value="">—</option>{METHODS.map((m) => <option key={m} value={m}>{METHOD_LABEL[m]}</option>)}
@@ -218,9 +219,9 @@ export function FinHistory({ ids, refreshKey = '' }: { ids: string[]; refreshKey
 /** One overview card: totals per currency (never converted), a short explanation underneath. */
 export function TotalsCard({ title, totals, sub, tone }: { title: string; totals: Record<string, bigint>; sub?: string; tone?: 'bad' | 'warn' | 'ok' }) {
   return (
-    <div className={`grid content-start gap-0.5 border px-3 py-2.5 ${tone === 'bad' ? 'border-red-500/50' : tone === 'warn' ? 'border-yellow-400/40' : tone === 'ok' ? 'border-yoca-lime/40' : 'border-line'}`}>
-      <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-subtle">{title}</span>
-      <span className="text-[16px] font-extrabold tabular-nums">{formatTotals(totals)}</span>
+    <div className={`grid min-w-0 content-start gap-1 rounded-[14px] border bg-[var(--tile,#15171c)] px-4 py-3 ${tone === 'bad' ? 'border-[rgb(255_123_123/50%)]' : tone === 'warn' ? 'border-[rgb(250_178_25/45%)]' : tone === 'ok' ? 'border-yoca-lime/40' : 'border-[var(--line,#262a31)]'}`}>
+      <span className="text-[12px] font-bold text-[var(--ink-2,#c6c9cf)]">{title}</span>
+      <span className="text-[19px] font-extrabold leading-tight tracking-[-0.01em] tabular-nums [overflow-wrap:anywhere]">{formatTotals(totals)}</span>
       {sub && <span className="text-[12px] text-subtle">{sub}</span>}
     </div>
   );

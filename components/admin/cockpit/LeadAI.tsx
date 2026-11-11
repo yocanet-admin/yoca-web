@@ -54,10 +54,10 @@ export function LeadAI({
     <div className="grid gap-3 rounded-sm border border-line bg-surface/60 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[12px] font-bold uppercase tracking-[0.1em] text-subtle">Yapay zekâ</span>
-        <button type="button" className="admin-btn !py-1 text-[12px]" disabled={busy !== null} onClick={() => run('summary')}>
+        <button type="button" className="admin-btn admin-btn-sm" disabled={busy !== null} onClick={() => run('summary')}>
           {busy === 'summary' ? 'Özetleniyor…' : summary ? '↻ Yeniden özetle' : 'Özetle'}
         </button>
-        <button type="button" className="admin-btn !py-1 text-[12px]" disabled={busy !== null} onClick={() => run('reply')}>
+        <button type="button" className="admin-btn admin-btn-sm" disabled={busy !== null} onClick={() => run('reply')}>
           {busy === 'reply' ? 'Yazılıyor…' : 'Yanıt taslağı'}
         </button>
       </div>

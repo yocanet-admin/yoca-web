@@ -143,9 +143,12 @@ export default function AdminActivity() {
 
   return (
     <div className="grid gap-6">
-      <header>
-        <h1 className="text-2xl font-extrabold tracking-tight">İşlem geçmişi</h1>
-        <p className="mt-1.5 text-[14px] text-muted">Kim, neyi, ne zaman değiştirdi: leadler, CRM, siteler, içerik ve ayarlar.</p>
+      <header className="admin-head">
+        <div className="admin-head-text">
+        <p className="admin-kicker">Sistem</p>
+        <h1 className="admin-h1">İşlem geçmişi</h1>
+          <p className="admin-lede">Kim, neyi, ne zaman değiştirdi: leadler, CRM, siteler, içerik ve ayarlar.</p>
+        </div>
       </header>
 
       {!ready && (

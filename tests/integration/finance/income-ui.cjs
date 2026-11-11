@@ -56,7 +56,7 @@ async function login(ctx, start) {
   const bg = await dialog.evaluate((el) => getComputedStyle(el).backgroundColor);
   const sel = page.getByRole('gridcell', { selected: true });
   const selBg = await sel.evaluate((el) => getComputedStyle(el).backgroundColor);
-  check('picker: dark popover (not the white native calendar), selected month in lime', bg === 'rgb(30, 34, 42)' && selBg === 'rgb(162, 255, 0)', `${bg} / ${selBg}`);
+  check('picker: dark popover (not the white native calendar), selected month in lime', bg === 'rgb(28, 31, 37)' /* panel token --tile-2 (shared Yoca panel design) */ && selBg === 'rgb(162, 255, 0)', `${bg} / ${selBg}`);
   await page.screenshot({ path: `${OUT}/ay-secici-acik.png`, clip: { x: 260, y: 120, width: 700, height: 470 } });
   const focused0 = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
   await page.keyboard.press('ArrowLeft');
@@ -148,8 +148,20 @@ async function login(ctx, start) {
   await mp.getByRole('gridcell', { name: new RegExp(`^${MONTHS[Number(prev.slice(5, 7)) - 1]} `) }).tap();
   await mp.waitForURL(new RegExp(`ay=${prev}`));
   check('mobile: tapping a month selects it and closes the picker', (await mdlg.count()) === 0);
-  await mp.goto('http://localhost:3190/admin/finance/income');
-  await mp.getByText(/^Beklenen · /).waitFor();
+  await mp.goto('http://localhost:3190/admin/finance/income?state=all');
+  // phones: the compact summary (Giderler layout) instead of the four large cards; same figures, per currency
+  const sumMob = mp.locator('section[aria-label="Gelirler (özet)"]');
+  await sumMob.waitFor();
+  const mobLines = async (title) => (await sumMob.getByRole('list', { name: `${title}: para birimine göre` }).locator('li').allInnerTexts()).map((s) => s.trim()).sort().join(' | ');
+  const deskLines = (v) => (v ?? '').split(' · ').map((s) => s.trim()).filter(Boolean).sort().join(' | ');
+  const mob = { b: await mobLines('Beklenen'), t: await mobLines('Tahsil edilen'), k: await mobLines('Kalan') };
+  // the amount fix above changed the month: compare with the desktop cards read now, on the same data
+  await page.goto('http://localhost:3190/admin/finance/income?state=all');
+  await page.getByText(/^Beklenen · /).waitFor();
+  const cardsNow = flat(await page.locator('section[aria-label="Gelir dönem takibi"]').innerText());
+  const glNow = { b: pick(cardsNow, /BEKLENEN · \S+ \d{4} (.+?) \d+ kayıt/i), t: pick(cardsNow, /TAHSIL EDILEN · \S+ \d{4} (.+?) \S+ \d{4} gelirlerine/i), k: pick(cardsNow, /KALAN ALACAK · \S+ \d{4} (.+?) \d+ kayıt/i) };
+  check('mobile Gelirler: compact Beklenen / Tahsil edilen / Kalan = the desktop cards (per currency, never added)', Boolean(glNow.b) && mob.b === deskLines(glNow.b) && mob.t === deskLines(glNow.t) && mob.k === deskLines(glNow.k), `${JSON.stringify(mob)} vs ${JSON.stringify(glNow)}`);
+  check('mobile Gelirler: Geciken alacak stays a separate row; large cards hidden; explanations in a disclosure', (await sumMob.getByText(/Geciken alacak · tüm aylar/).count()) === 1 && !(await mp.locator('section[aria-label="Gelir dönem takibi"]').isVisible()) && (await mp.locator('details summary', { hasText: 'Bu kartlar nasıl hesaplanır?' }).count()) === 1);
   const sw2 = await mp.evaluate(() => document.documentElement.scrollWidth);
   check('mobile Gelirler: no horizontal page scroll', sw2 <= 390, `scrollWidth=${sw2}`);
   await mp.screenshot({ path: `${OUT}/mobil-gelirler.png`, fullPage: true });

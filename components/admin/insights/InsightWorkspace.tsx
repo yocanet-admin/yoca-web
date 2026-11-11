@@ -128,27 +128,27 @@ export default function InsightWorkspace({ id }: { id: string }) {
   return (
     <div className="grid gap-4">
       {/* Article header */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <Link href="/admin/insights" className="text-[11px] font-bold uppercase tracking-[0.1em] text-subtle hover:text-white">← İçerik / Insights</Link>
-          <h1 className="mt-1 truncate text-xl font-extrabold tracking-tight" dir={group.titleLocale === 'ar' ? 'rtl' : 'ltr'}>{group.title || '(başlıksız)'}</h1>
-          <p className="text-[12px] text-muted">Tek yazı · {group.members.length} dil sürümü{dirtyLocales.length ? ` · kaydedilmemiş: ${dirtyLocales.map((l) => l.toUpperCase()).join(', ')}` : ''}</p>
+      <div className="admin-head">
+        <div className="admin-head-text">
+          <Link href="/admin/insights" className="admin-kicker hover:text-white">← İçerik / Insights</Link>
+          <h1 className="admin-h1 !text-[28px]" dir={group.titleLocale === 'ar' ? 'rtl' : 'ltr'}>{group.title || '(başlıksız)'}</h1>
+          <p className="admin-lede !text-[13px]">Tek yazı · {group.members.length} dil sürümü{dirtyLocales.length ? ` · kaydedilmemiş: ${dirtyLocales.map((l) => l.toUpperCase()).join(', ')}` : ''}</p>
         </div>
         <button type="button" className="admin-btn-primary" onClick={() => setBulkOpen(true)}>Yayınla</button>
       </div>
 
       {group.warnings.length > 0 && (
-        <div className="grid gap-1 rounded-sm border border-yellow-400/40 bg-yellow-400/10 px-4 py-2 text-[13px] text-yellow-200">
+        <div className="admin-notice admin-notice-warn grid gap-1">
           {group.warnings.map((w) => <p key={w}>{w}</p>)}
           {GROUP_LOCALES.filter((l) => (group.byLocale[l]?.length ?? 0) > 1).map((l) => (
             <p key={l} className="text-[12px]">{l.toUpperCase()} kayıtları: {(group.byLocale[l] as InsightRow[]).map((m) => <a key={m.id} href={`/admin/insights/${m.id}`} className="me-2 underline">{m.slug} ({LANG_STATE_LABEL[langState(m)]})</a>)}</p>
           ))}
         </div>
       )}
-      {notice && <p role="status" className="rounded-sm border border-yoca-green/40 bg-yoca-green/10 px-4 py-2 text-[13px] text-yoca-green">{notice}</p>}
+      {notice && <p role="status" className="admin-notice admin-notice-good">{notice}</p>}
 
       {/* Language tabs */}
-      <div role="tablist" aria-label="Diller" className="flex flex-wrap gap-1.5 border-b border-line pb-3">
+      <div role="tablist" aria-label="Diller" className="flex flex-wrap gap-1.5 border-b border-[var(--line,#262a31)] pb-3">
         {GROUP_LOCALES.map((l) => {
           const t = tabState(l);
           const isActive = active === l;
@@ -161,10 +161,10 @@ export default function InsightWorkspace({ id }: { id: string }) {
               aria-selected={isActive}
               aria-controls={`panel-${l}`}
               onClick={() => open(l)}
-              className={`flex items-center gap-2 border px-3 py-2 text-[12px] font-bold ${isActive ? 'border-white bg-white text-black' : 'border-line text-muted hover:text-white'}`}
+              className={`flex items-center gap-2 rounded-[10px] border px-3 py-2 text-[12px] font-bold ${isActive ? 'border-yoca-lime bg-yoca-lime text-black' : 'border-[var(--line-2,#343943)] bg-[var(--tile,#15171c)] text-muted hover:text-white'}`}
             >
               <span>{l.toUpperCase()}</span>
-              <span className={`border px-1.5 py-0.5 text-[11px] ${isActive ? 'border-black/30 text-black' : STATE_STYLE[t.state]}`}>{LANG_STATE_LABEL[t.state]}</span>
+              <span className={`rounded-[6px] border px-1.5 py-0.5 text-[11px] ${isActive ? 'border-black/30 text-black' : STATE_STYLE[t.state]}`}>{LANG_STATE_LABEL[t.state]}</span>
               {t.dirty && <span className={isActive ? 'text-black' : 'text-yellow-200'} title="Kaydedilmemiş düzenleme var">• kaydedilmedi</span>}
               <span className={`text-[11px] font-semibold ${isActive ? 'text-black/70' : 'text-subtle'}`}>{t.member ? 'Düzenle' : 'Çeviri oluştur'}</span>
             </button>

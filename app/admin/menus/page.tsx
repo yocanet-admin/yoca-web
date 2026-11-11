@@ -108,10 +108,11 @@ export default function AdminMenus() {
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Menüler</h1>
-          <p className="mt-1.5 text-[14px] text-muted">
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Site içeriği</p>
+          <h1 className="admin-h1">Menüler</h1>
+          <p className="admin-lede">
             Bilinen sayfaların başlıkları sitede ziyaretçinin dilinde gösterilir; özel linklerde
             yazdığınız başlık kullanılır.
           </p>
@@ -175,7 +176,7 @@ export default function AdminMenus() {
                   <button
                     type="button"
                     aria-label="Yukarı taşı"
-                    className="admin-btn !px-2.5 !py-1"
+                    className="admin-btn admin-btn-sm"
                     disabled={index === 0}
                     onClick={() => move(row, -1)}
                   >
@@ -184,20 +185,20 @@ export default function AdminMenus() {
                   <button
                     type="button"
                     aria-label="Aşağı taşı"
-                    className="admin-btn !px-2.5 !py-1"
+                    className="admin-btn admin-btn-sm"
                     disabled={index === list.length - 1}
                     onClick={() => move(row, 1)}
                   >
                     ↓
                   </button>
                 </div>
-                <div className="min-w-0 flex-1">
+                <div className="min-w-[10rem] flex-1">
                   <p className={`text-[14px] font-extrabold ${row.is_active ? '' : 'text-subtle line-through'}`}>
                     {row.title}
                   </p>
                   <p className="truncate text-[12px] text-subtle">{row.url}</p>
                 </div>
-                <div className="flex flex-none gap-2">
+                <div className="flex flex-wrap gap-2 sm:flex-none">
                   <button type="button" className="admin-btn" onClick={() => toggle(row)}>
                     {row.is_active ? 'Gizle' : 'Göster'}
                   </button>

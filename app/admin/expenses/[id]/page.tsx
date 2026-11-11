@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { LabeledDate } from '@/components/admin/DateField';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Badge, Details, Flash, PageHead, field, fmtDate, fmtDateTime, small } from '@/components/admin/ops/ui';
@@ -164,7 +165,7 @@ function PeriodCard({ it, data, today, open, onToggle, onDone }: { it: Item; dat
           {mode === 'edit' && (
             <div className="flex flex-wrap items-end gap-2">
               <label className="grid gap-1 text-[12px] text-muted">Tutar ({per.currency})<input className={field} value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
-              <label className="grid gap-1 text-[12px] text-muted">Vade<input type="date" className={field} value={due} onChange={(e) => setDue(e.target.value)} /></label>
+              <LabeledDate label="Vade" value={due} onChange={(v) => setDue(v)} />
               <button type="button" className="admin-btn" onClick={async () => {
                 const m = parseAmount(amount);
                 if (m === undefined || (m !== null && m <= BigInt(0))) { setErr('Tutar geçersiz.'); return; }

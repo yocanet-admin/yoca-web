@@ -99,8 +99,8 @@ export function ForwardDialog({ service, target, offset, clientName, contacts, d
   const contactEmails = contacts.filter((c) => c.email).map((c) => ({ email: c.email as string, who: [c.name, c.role].filter(Boolean).join(' · ') }));
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="forward-title" className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
-      <div className="admin-card grid max-h-[92vh] w-full max-w-3xl gap-4 overflow-y-auto p-5">
+    <div role="dialog" aria-modal="true" aria-labelledby="forward-title" className="admin-backdrop">
+      <div className="admin-dialog max-w-3xl">
         <div>
           <h2 id="forward-title" className="text-[17px] font-extrabold">E-postayla ilet · {service.name}</h2>
           <p className="mt-1 text-[12px] text-subtle">Elle iletme: yalnızca yazdığınız veya seçtiğiniz adrese, siz “Gönder” deyince gider. Müşteri adresi kendiliğinden eklenmez. {preview?.from ? `Gönderen: ${preview.from}${preview.replyTo ? ` · yanıtlar: ${preview.replyTo}` : ''}.` : ''}</p>
@@ -118,7 +118,7 @@ export function ForwardDialog({ service, target, offset, clientName, contacts, d
           <label className={label}>Konu<input className={field} value={subject} onChange={(e) => edit(setSubject)(e.target.value)} maxLength={300} /></label>
           <label className={label}>Mesaj<textarea className={field} rows={8} value={message} onChange={(e) => edit(setMessage)(e.target.value)} /></label>
 
-          <div className="grid gap-2 border border-line p-3 text-[12px]">
+          <div className="grid gap-2 admin-box p-3 text-[12px]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-bold text-soft">Yapay zekâ</span>
               <button type="button" className={small} disabled={ai.busy || !message.trim()} onClick={() => void askAi()}>{ai.busy ? 'Hazırlanıyor…' : 'Kurumsal dille düzenle'}</button>
@@ -127,7 +127,7 @@ export function ForwardDialog({ service, target, offset, clientName, contacts, d
             {ai.error && <p className="text-yellow-200">{ai.error}</p>}
             {ai.text && (
               <div className="grid gap-2">
-                <pre className="whitespace-pre-wrap border border-line p-2 font-sans text-soft">{ai.text}</pre>
+                <pre className="whitespace-pre-wrap admin-box p-2 font-sans text-soft">{ai.text}</pre>
                 {ai.warnings?.map((w) => <p key={w} className="text-yellow-200">{w}</p>)}
                 <div className="flex gap-2">
                   <button type="button" className={small} onClick={() => { edit(setMessage)(ai.text ?? message); setAi({ busy: false }); }}>Uygula</button>

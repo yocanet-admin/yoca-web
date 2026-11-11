@@ -60,7 +60,7 @@ export default function ResponseTimesCard() {
     <Card title="Yanıt süreleri" action={msg ? <span className="text-[12px] font-bold text-yoca-lime">{msg}</span> : undefined}>
       <div className="grid gap-3 text-[13px]">
         {!data.ready && <Notice tone="warning">Ayar tablosu okunamıyor (SUPABASE_SERVICE_ROLE_KEY / v9). Site nötr metinleri kullanıyor.</Notice>}
-        <label className="flex cursor-pointer items-start gap-3 rounded-sm border border-line p-3">
+        <label className="flex cursor-pointer items-start gap-3 admin-box p-3">
           <input type="checkbox" className="mt-0.5 h-4 w-4 accent-yoca-lime" checked={draft.approved} disabled={busy} onChange={(e) => save({ ...draft, approved: e.target.checked })} />
           <span>
             <span className="block font-bold text-white">Süreleri sitede göster (sahip onayı)</span>
@@ -68,14 +68,14 @@ export default function ResponseTimesCard() {
           </span>
         </label>
         <div className="grid grid-cols-2 gap-3">
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">İletişim formu (iş günü)
+          <label className="admin-label">İletişim formu (iş günü)
             <input type="number" min={1} max={30} value={draft.contactDays} onChange={(e) => setDraft({ ...draft, contactDays: Number(e.target.value) })} className="admin-input" />
           </label>
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">Check-Up (iş günü)
+          <label className="admin-label">Check-Up (iş günü)
             <input type="number" min={1} max={30} value={draft.checkupDays} onChange={(e) => setDraft({ ...draft, checkupDays: Number(e.target.value) })} className="admin-input" />
           </label>
         </div>
-        <label className="grid gap-1 text-[12px] font-bold text-subtle">Tatil günleri (iş günü sayılmaz; her satıra YYYY-AA-GG — kendiniz girin, hazır liste yok)
+        <label className="admin-label">Tatil günleri (iş günü sayılmaz; her satıra YYYY-AA-GG — kendiniz girin, hazır liste yok)
           <textarea rows={3} value={holidayText} onChange={(e) => setHolidayText(e.target.value)} className="admin-input font-mono text-[12px]" placeholder="2027-01-01" />
         </label>
         <button type="button" className="admin-btn w-fit" disabled={busy} onClick={() => save(draft)}>Süreleri kaydet</button>

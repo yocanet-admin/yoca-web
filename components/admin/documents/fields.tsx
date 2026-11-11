@@ -28,7 +28,7 @@ export function UnitField({ value, onChange, fixed, className, ariaLabel }: { va
     return (
       <span className="flex gap-1">
         <input aria-label={ariaLabel} autoFocus className={`${className} min-w-0`} value={value} onChange={(e) => onChange(e.target.value.slice(0, 30))} placeholder="ör. bin kelime" />
-        <button type="button" className="admin-btn !px-2 !py-1 !text-[12px]" onClick={() => setFree(false)} aria-label="Birim listesine dön">Liste</button>
+        <button type="button" className="admin-btn admin-btn-sm" onClick={() => setFree(false)} aria-label="Birim listesine dön">Liste</button>
       </span>
     );
   }

@@ -13,10 +13,10 @@ import { fmtDay, fmtNumber } from '@/lib/cockpit/client';
 
 export function Card({ title, action, children, className = '' }: { title?: string; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={`rounded-md border border-line bg-surface-deep/80 p-5 lg:p-6 ${className}`}>
+    <section className={`admin-card ${className}`}>
       {(title || action) && (
-        <header className="mb-4 flex items-center justify-between gap-3">
-          {title && <h2 className="text-[13px] font-bold uppercase tracking-[0.08em] text-muted">{title}</h2>}
+        <header className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          {title && <h2 className="admin-h2 text-[15px]">{title}</h2>}
           {action}
         </header>
       )}
@@ -27,7 +27,7 @@ export function Card({ title, action, children, className = '' }: { title?: stri
 
 export function CardLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <Link href={href} className="text-[12px] font-bold text-subtle transition-colors hover:text-yoca-lime">
+    <Link href={href} className="text-[12px] font-extrabold text-soft transition-colors hover:text-yoca-lime">
       {children} →
     </Link>
   );
@@ -56,9 +56,9 @@ export function StatTile({
 }) {
   const body = (
     <>
-      <p className="text-[12px] font-semibold text-muted">{label}</p>
-      <p className={`mt-2 text-[30px] font-extrabold leading-none tabular-nums tracking-[-0.02em] ${tone === 'alert' ? 'text-amber-300' : 'text-white'}`}>
-        {value ?? <span className="inline-block h-7 w-14 animate-pulse rounded-sm bg-surface" />}
+      <p className="text-[12px] font-bold text-[var(--ink-2,#c6c9cf)]">{label}</p>
+      <p className={`mt-2 text-[30px] font-extrabold leading-none tabular-nums tracking-[-0.03em] ${tone === 'alert' ? 'text-[var(--warn,#fab219)]' : 'text-white'}`}>
+        {value ?? <span className="inline-block h-7 w-14 animate-pulse rounded-[6px] bg-[var(--tile-2,#1c1f25)] motion-reduce:animate-none" />}
       </p>
       <p className="mt-2 flex flex-wrap items-center gap-x-2 text-[12px] text-subtle">
         {deltaPct !== undefined && deltaPct !== null && (
@@ -81,7 +81,7 @@ export function StatTile({
       )}
     </>
   );
-  const cls = 'block rounded-md border border-line bg-surface-deep/80 p-5 transition-colors';
+  const cls = 'block min-w-0 rounded-[14px] border border-[var(--line,#262a31)] bg-[var(--tile,#15171c)] p-4 transition-colors';
   return href ? (
     <Link href={href} className={`${cls} hover:border-yoca-lime/50`}>
       {body}
@@ -213,7 +213,7 @@ export function RankList({ rows, empty = 'Veri yok.', format }: { rows: Array<{ 
             </span>
             <span className="flex-none font-bold tabular-nums text-white">{fmtNumber(row.value)}</span>
           </div>
-          <div className="h-1.5 rounded-full bg-surface">
+          <div className="h-1.5 rounded-full bg-[var(--inset,#0d0f12)]">
             <div className="h-full rounded-full bg-yoca-green" style={{ width: `${Math.max(2, (row.value / max) * 100)}%` }} />
           </div>
         </li>
@@ -225,14 +225,14 @@ export function RankList({ rows, empty = 'Veri yok.', format }: { rows: Array<{ 
 /** Status badge — icon + label, never colour alone. */
 export function StatusBadge({ kind, children }: { kind: 'good' | 'warning' | 'critical' | 'neutral'; children: ReactNode }) {
   const style = {
-    good: 'border-[#0ca30c]/50 text-[#5fd35f]',
-    warning: 'border-[#fab219]/50 text-[#fab219]',
-    critical: 'border-[#d03b3b]/60 text-[#ff7b7b]',
-    neutral: 'border-line text-subtle',
+    good: 'admin-tag admin-tag-good',
+    warning: 'admin-tag admin-tag-warn',
+    critical: 'admin-tag admin-tag-bad',
+    neutral: 'admin-tag',
   }[kind];
   const icon = { good: '●', warning: '▲', critical: '✕', neutral: '○' }[kind];
   return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 py-0.5 text-[11px] font-bold ${style}`}>
+    <span className={style}>
       <span aria-hidden="true">{icon}</span>
       {children}
     </span>
@@ -241,7 +241,7 @@ export function StatusBadge({ kind, children }: { kind: 'good' | 'warning' | 'cr
 
 export function Notice({ tone = 'info', children }: { tone?: 'info' | 'warning'; children: ReactNode }) {
   return (
-    <div className={`rounded-md border px-4 py-3 text-[13px] leading-relaxed ${tone === 'warning' ? 'border-amber-400/40 bg-amber-400/5 text-amber-100' : 'border-line bg-surface text-soft'}`}>
+    <div className={`admin-notice block ${tone === 'warning' ? 'admin-notice-warn' : ''}`}>
       {children}
     </div>
   );

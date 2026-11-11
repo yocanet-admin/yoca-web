@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { LabeledDate } from '@/components/admin/DateField';
 import { field, label } from '@/components/admin/ops/ui';
 import { MonthPicker } from '@/components/admin/fin/MonthPicker';
 import type { ReceivableInput } from '@/lib/fin/incomeData';
@@ -78,7 +79,7 @@ export function ReceivableForm({ initial, clients, amountLocked = false, busy = 
       </div>
       <div className="grid gap-3 sm:grid-cols-[auto_1fr_1fr] sm:items-end">
         <div className="grid gap-1"><span className="text-[12px] font-semibold text-muted">Ait olduğu dönem</span><MonthPicker value={month} onChange={setMonth} thisMonth={thisMonth} label="Dönem" /></div>
-        <label className={label}>Beklenen tahsilat tarihi (vade, isteğe bağlı)<input type="date" className={field} value={dueOn} onChange={(e) => setDueOn(e.target.value)} /></label>
+        <LabeledDate label="Beklenen tahsilat tarihi (vade, isteğe bağlı)" value={dueOn} onChange={(v) => setDueOn(v)} />
         <div className="grid grid-cols-[1fr_auto] gap-2">
           <label className={label}>Beklenen tutar<input className={field} inputMode="decimal" value={amount} disabled={amountLocked} onChange={(e) => setAmount(e.target.value)} placeholder="bilinmiyorsa boş" /></label>
           <label className={label}>Para birimi

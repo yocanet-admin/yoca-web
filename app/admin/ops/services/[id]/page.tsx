@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { LabeledDate } from '@/components/admin/DateField';
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ServiceForm, { EMAIL_RE, PAY_TONE, RENEW_TONE, StatusBadges, looksSecret } from '@/components/admin/ops/ServiceForm';
-import { Badge, DateOr, Documents, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, fmtDateTime, label as labelCls, small } from '@/components/admin/ops/ui';
+import { Badge, DateOr, Documents, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, fmtDateTime, label as labelCls, small, ScrollArea } from '@/components/admin/ops/ui';
 import {
   addPayment,
   archiveRow,
@@ -34,6 +35,7 @@ import {
   dueText,
   istanbulDay,
   missingInfo,
+  missingText,
   payState,
   renewState,
   suggestNextEnd,
@@ -139,7 +141,7 @@ function PayLine({ title, sum, payments, periodId, direction }: { title: string;
   // Without an expected currency the paid amounts are shown per currency (never added together).
   const paid = sum.currency ? formatMinor(sum.paid, sum.currency) : formatTotals(paidByCurrency(payments, periodId, direction));
   return (
-    <div className="grid gap-1 border border-line p-2.5 text-[12px]">
+    <div className="grid gap-1 admin-box p-2.5 text-[12px]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-bold text-soft">{title}</span>
         <Badge tone={PAY_TONE[sum.state]}>{PAY_STATE_LABEL[sum.state]}</Badge>
@@ -227,7 +229,7 @@ function PaymentForm({ service, period, preset, clients, say, onDone, onCancel }
             {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </label>
-        <label className={labelCls}>Tarih<input className={field} type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} /></label>
+        <LabeledDate label="Tarih" value={paidOn} onChange={(v) => setPaidOn(v)} />
         <label className={labelCls}>Yöntem
           <input className={field} list="ops-pay-methods" value={method} onChange={(e) => setMethod(e.target.value)} />
           <datalist id="ops-pay-methods">{METHODS.map((m) => <option key={m} value={m} />)}</datalist>
@@ -295,11 +297,11 @@ function RenewalForm({ service, period, say, onDone, onCancel }: { service: Serv
   };
 
   return (
-    <form onSubmit={submit} role="dialog" aria-label="Sağlayıcıda yenileme doğrulandı" className="grid gap-3 border border-yoca-lime/40 p-3">
+    <form onSubmit={submit} role="dialog" aria-label="Sağlayıcıda yenileme doğrulandı" className="admin-box grid gap-3 !border-yoca-lime/40">
       <p className="text-[13px] font-bold">Sağlayıcıda yenileme doğrulandı</p>
       <p className="text-[12px] text-subtle">Yalnızca sağlayıcı panelinde yeni bitiş tarihini gördüyseniz kaydedin. Mevcut bitiş: {current ? fmtDate(current) : 'bilinmiyor'}. Bu işlem açık dönemi kapatır ve yeni dönemi açar (tek işlem); tahsilatı veya sağlayıcı ödemesini tamamlamaz. Kapanan dönemin tarih ve tutarları sonradan değiştirilemez.</p>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className={labelCls}>Yeni bitiş tarihi *<input className={field} type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} required /></label>
+        <LabeledDate label="Yeni bitiş tarihi *" value={newEnd} onChange={(v) => setNewEnd(v)} />
         <div className="grid gap-1.5">
           <span className="text-[13px] font-semibold text-muted">Gerçek maliyet (isteğe bağlı)</span>
           <div className="flex gap-2">
@@ -312,8 +314,8 @@ function RenewalForm({ service, period, say, onDone, onCancel }: { service: Serv
         </div>
         <label className={labelCls}>Referans (sipariş / fatura no)<input className={field} value={ref} onChange={(e) => setRef(e.target.value)} /></label>
         <label className={labelCls}>Not<input className={field} value={note} onChange={(e) => setNote(e.target.value)} /></label>
-        <label className={labelCls}>Yeni dönem: sağlayıcı ödeme vadesi<input className={field} type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} /></label>
-        <label className={labelCls}>Yeni dönem: müşteri tahsilat vadesi<input className={field} type="date" value={nextCustomerDue} onChange={(e) => setNextCustomerDue(e.target.value)} /></label>
+        <LabeledDate label="Yeni dönem: sağlayıcı ödeme vadesi" value={nextDue} onChange={(v) => setNextDue(v)} />
+        <LabeledDate label="Yeni dönem: müşteri tahsilat vadesi" value={nextCustomerDue} onChange={(v) => setNextCustomerDue(v)} />
       </div>
       <Flash tone="bad" message={error} onClose={() => setError(null)} />
       <div className="flex flex-wrap gap-2">
@@ -377,10 +379,10 @@ function PeriodForm({ service, period, say, onDone, onCancel }: { service: Servi
     <form onSubmit={submit} className="grid gap-3 border border-yoca-lime/40 p-3" aria-label={period ? 'Açık dönemi düzenle' : 'Dönem aç'}>
       <p className="text-[13px] font-bold">{period ? 'Açık dönemi düzenle' : 'Dönem aç'}</p>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className={labelCls}>Başlangıç<input className={field} type="date" value={v.starts_on} onChange={(e) => set('starts_on', e.target.value)} /></label>
-        <label className={labelCls}>Bitiş<input className={field} type="date" value={v.ends_on} onChange={(e) => set('ends_on', e.target.value)} /></label>
-        <label className={labelCls}>Sağlayıcı ödeme vadesi<input className={field} type="date" value={v.due_on} onChange={(e) => set('due_on', e.target.value)} /></label>
-        <label className={labelCls}>Müşteri tahsilat vadesi<input className={field} type="date" value={v.customer_due_on} onChange={(e) => set('customer_due_on', e.target.value)} /></label>
+        <LabeledDate label="Başlangıç" value={v.starts_on} onChange={(v) => set('starts_on', v)} />
+        <LabeledDate label="Bitiş" value={v.ends_on} onChange={(v) => set('ends_on', v)} />
+        <LabeledDate label="Sağlayıcı ödeme vadesi" value={v.due_on} onChange={(v) => set('due_on', v)} />
+        <LabeledDate label="Müşteri tahsilat vadesi" value={v.customer_due_on} onChange={(v) => set('customer_due_on', v)} />
         <div className="grid gap-1.5">
           <span className="text-[13px] font-semibold text-muted">Beklenen alış</span>
           <div className="flex gap-2">
@@ -512,7 +514,7 @@ function PaymentsSection({ service, data, say, reload }: { service: Service; dat
   return (
     <Section title="Ödeme kayıtları" id="odemeler" action={<label className="flex items-center gap-2 text-[12px] text-muted"><input type="checkbox" className="accent-yoca-lime" checked={showVoided} onChange={(e) => setShowVoided(e.target.checked)} />İptal edilenleri göster</label>}>
       {pays.length === 0 ? <p className="text-[13px] text-subtle">Ödeme kaydı yok. Kayıtlar “Dönem geçmişi”ndeki dönemden eklenir.</p> : (
-        <div className="overflow-x-auto">
+        <ScrollArea label="Ödeme kayıtları">
           <table className="w-full min-w-[760px] text-left text-[12px]">
             <thead className="text-[11px] uppercase tracking-[0.06em] text-subtle">
               <tr><th className="py-1.5 pe-3">Tarih</th><th className="py-1.5 pe-3">Yön</th><th className="py-1.5 pe-3">Tür</th><th className="py-1.5 pe-3 text-right">Tutar</th><th className="py-1.5 pe-3">Yöntem · ref</th><th className="py-1.5 pe-3">Dönem</th><th className="py-1.5 pe-3">Durum</th><th className="py-1.5" /></tr>
@@ -548,7 +550,7 @@ function PaymentsSection({ service, data, say, reload }: { service: Service; dat
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
       )}
       <p className="text-[11px] text-subtle">Ödeme kayıtları silinmez; yanlış kayıt “İptal et (void)” ile nedeni yazılarak iptal edilir ya da düzeltme/iade kaydı eklenir.</p>
     </Section>
@@ -591,7 +593,7 @@ function LinksSection({ service, data, say, reload }: { service: Service; data: 
   );
   const adder = (title: string, options: Array<{ id: string; label: string }>, onPick: (id: string) => void) => (
     options.length > 0 && (
-      <select className={`${field} !py-1.5 text-[13px]`} value="" disabled={busy} aria-label={title} onChange={(e) => { if (e.target.value) onPick(e.target.value); }}>
+      <select className={field} value="" disabled={busy} aria-label={title} onChange={(e) => { if (e.target.value) onPick(e.target.value); }}>
         <option value="">+ {title}…</option>
         {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
       </select>
@@ -617,7 +619,7 @@ function LinksSection({ service, data, say, reload }: { service: Service; data: 
             const other = svc(r.service_id === service.id ? r.related_id : r.service_id);
             return row(r.id, other ? <span><EntityLink href={`${BASE}/${other.id}`}>{other.name}</EntityLink> <span className="text-subtle">· {KIND_LABEL[other.kind]}{r.note ? ` · ${r.note}` : ''}</span></span> : <Unknown>Silinmiş kayıt</Unknown>, () => remove('ops_service_relations', r.id, other?.name ?? 'İlişki'));
           })}</ul> : <p className="text-[12px] text-subtle">İlişkili hizmet yok (örn. domain ↔ hosting ↔ SSL).</p>}
-          {freeServices.length > 0 && <input className={`${field} !py-1.5 text-[13px]`} value={relNote} onChange={(e) => setRelNote(e.target.value)} placeholder="İlişki notu (isteğe bağlı)" aria-label="İlişki notu" />}
+          {freeServices.length > 0 && <input className={field} value={relNote} onChange={(e) => setRelNote(e.target.value)} placeholder="İlişki notu (isteğe bağlı)" aria-label="İlişki notu" />}
           {adder('Hizmet ilişkilendir', freeServices.map((s) => ({ id: s.id, label: `${s.name} · ${KIND_LABEL[s.kind]}` })), (id) => { void add({ service_id: service.id, related_id: id, note: relNote.trim() || null }, 'ops_service_relations', 'Hizmet ilişkilendirildi.'); setRelNote(''); })}
         </div>
       </div>
@@ -683,7 +685,7 @@ function MaintenanceSection({ service, open, logs, say, reload }: { service: Ser
         {open && (!open.starts_on || !open.ends_on) && <p className="text-[12px] text-yellow-200">Açık dönemin tarihlerinden biri bilinmiyor; o yönde sınır uygulanmadı.</p>}
       </div>
       <form onSubmit={submit} className="grid gap-2 sm:grid-cols-[auto_8rem_minmax(0,1fr)_auto] sm:items-end">
-        <label className={labelCls}>Tarih<input className={field} type="date" value={day} onChange={(e) => setDay(e.target.value)} /></label>
+        <LabeledDate label="Tarih" value={day} onChange={(v) => setDay(v)} />
         <label className={labelCls}>Süre<input className={field} value={dur} onChange={(e) => setDur(e.target.value)} placeholder="1:30" /></label>
         <label className={labelCls}>Not<input className={field} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ne yapıldı" /></label>
         <button type="submit" className="admin-btn-primary" disabled={busy}>{busy ? 'Ekleniyor…' : 'Çalışma ekle'}</button>
@@ -755,7 +757,7 @@ function TasksSection({ service, tasks, say, reload }: { service: Service; tasks
           </select>
         </label>
         <label className={labelCls}>Görev<input className={field} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ne yapılacak" /></label>
-        <label className={labelCls}>Son gün<input className={field} type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>
+        <LabeledDate label="Son gün" value={due} onChange={(v) => setDue(v)} />
         <label className={labelCls}>Sorumlu<input className={field} type="email" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="e-posta" /></label>
         <button type="submit" className="admin-btn" disabled={busy}>Ekle</button>
       </form>
@@ -798,7 +800,7 @@ function NotificationsSection({ notes, error, today, onForward, say, reload }: {
     <Section title="Bildirim geçmişi" id="bildirimler">
       {error && <Flash tone="warn" message={`Bazı kayıtlar okunamadı: ${error}`} />}
       {notes.length === 0 ? <p className="text-[12px] text-subtle">Bu hizmet için planlanmış, gönderilmiş veya iletilmiş bildirim yok.</p> : (
-        <div className="overflow-x-auto">
+        <ScrollArea label="Bildirim geçmişi">
           <table className="w-full min-w-[760px] text-left text-[12px]">
             <thead className="text-[11px] uppercase tracking-[0.06em] text-subtle">
               <tr><th className="py-1.5 pe-3">Tür</th><th className="py-1.5 pe-3">Zaman</th><th className="py-1.5 pe-3">Hedef tarih</th><th className="py-1.5 pe-3">Durum</th><th className="py-1.5 pe-3">Ayrıntı</th><th className="py-1.5 pe-3">Gönderildi</th><th className="py-1.5" /></tr>
@@ -838,7 +840,7 @@ function NotificationsSection({ notes, error, today, onForward, say, reload }: {
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
       )}
     </Section>
   );
@@ -895,7 +897,7 @@ function ServiceDetailInner({ id }: { id: string }) {
       renew: renewState(service, open, pays, today),
       pin: open ? payState(open, pays, 'in', today) : null,
       pout: open ? payState(open, pays, 'out', today) : null,
-      missing: missingInfo(service),
+      missing: missingInfo(service).map((m) => missingText(m, open?.ends_on)),
       licenses: data.licenses.filter((l) => l.service_id === id),
     };
   }, [data, service, id, today]);

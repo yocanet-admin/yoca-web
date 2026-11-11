@@ -380,11 +380,14 @@ export default function AdminWork() {
     const slugChanged = editing.id !== undefined && originalSlug !== '' && editing.slug.trim() !== originalSlug;
     return (
       <div className="grid gap-6">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-extrabold tracking-tight">
-            {editing.id !== undefined ? `Düzenle: ${editing.slug}` : 'Yeni Proje'}
-          </h1>
-          <div className="flex gap-2">
+        <header className="admin-head">
+          <div className="admin-head-text">
+            <p className="admin-kicker">Site içeriği · Work</p>
+            <h1 className="admin-h1">
+              {editing.id !== undefined ? `Düzenle: ${editing.slug}` : 'Yeni Proje'}
+            </h1>
+          </div>
+          <div className="admin-head-actions">
             <button type="button" className="admin-btn" onClick={close}>
               Vazgeç
             </button>
@@ -431,7 +434,7 @@ export default function AdminWork() {
         <MediaSummary slug={originalSlug || editing.slug.trim()} />
 
         <div className="admin-card grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
+          <label className="admin-label">
             Slug (URL) *
             <input
               value={editing.slug}
@@ -447,7 +450,7 @@ export default function AdminWork() {
               </span>
             )}
           </label>
-          <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
+          <label className="admin-label">
             Sıra (küçük önce; kod projeleri 0–{DEFAULT_CASE_STUDY_SLUGS.length - 1})
             <input
               type="number"
@@ -456,7 +459,7 @@ export default function AdminWork() {
               className="admin-input"
             />
           </label>
-          <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
+          <label className="admin-label">
             Yıl
             <input
               value={editing.year}
@@ -464,7 +467,7 @@ export default function AdminWork() {
               className="admin-input"
             />
           </label>
-          <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
+          <label className="admin-label">
             Pazar
             <input
               value={editing.market}
@@ -472,7 +475,7 @@ export default function AdminWork() {
               className="admin-input"
             />
           </label>
-          <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
+          <label className="admin-label">
             Hizmetler (virgülle)
             <input
               value={servicesText}
@@ -484,7 +487,7 @@ export default function AdminWork() {
               className="admin-input"
             />
           </label>
-          <label className="grid gap-1.5 text-[12px] font-bold text-subtle">
+          <label className="admin-label">
             Tür
             <select
               value={editing.kind}
@@ -503,7 +506,7 @@ export default function AdminWork() {
               <option value="experimental">Deneysel</option>
             </select>
           </label>
-          <label className="grid gap-1.5 text-[12px] font-bold text-subtle sm:col-span-2 lg:col-span-3">
+          <label className="admin-label sm:col-span-2 lg:col-span-3">
             Hover video URL (opsiyonel — .mp4/.webm; karta gelince sessiz döngüyle oynar)
             <input
               value={editing.video_url ?? ''}
@@ -511,7 +514,7 @@ export default function AdminWork() {
               className="admin-input"
             />
           </label>
-          <label className="grid gap-1.5 text-[12px] font-bold text-subtle sm:col-span-2 lg:col-span-4">
+          <label className="admin-label sm:col-span-2 lg:col-span-4">
             Canlı proje linki (opsiyonel — vaka sayfasında "Canlı Görüntüle" butonu)
             <input
               value={editing.live_url ?? ''}
@@ -519,7 +522,7 @@ export default function AdminWork() {
               className="admin-input"
             />
           </label>
-          <label className="grid gap-1.5 text-[12px] font-bold text-subtle sm:col-span-2 lg:col-span-4">
+          <label className="admin-label sm:col-span-2 lg:col-span-4">
             Görsel URL (/work/… veya https://…)
             <input
               value={editing.image_url}
@@ -529,7 +532,7 @@ export default function AdminWork() {
           </label>
         </div>
 
-        <div className="flex gap-1 rounded-sm border border-line p-1 sm:w-fit">
+        <div className="flex gap-1 admin-box p-1 sm:w-fit">
           {LOCALES.map((locale) => (
             <button
               key={locale.code}
@@ -577,10 +580,11 @@ export default function AdminWork() {
   const maxOrder = Math.max(DEFAULT_CASE_STUDY_SLUGS.length - 1, ...rows.map((row) => row.order_index));
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Work / Projeler</h1>
-          <p className="mt-1.5 text-[14px] text-muted">
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Site içeriği</p>
+          <h1 className="admin-h1">Work / Projeler</h1>
+          <p className="admin-lede">
             {loading
               ? 'Vaka çalışmaları 4 dilde yönetilir.'
               : `Sitede ${visibleCount} proje görünüyor: ${dbCount - hiddenCount} veritabanından, ${codeCount} koddan (varsayılan)${
@@ -662,7 +666,7 @@ export default function AdminWork() {
                     type="button"
                     aria-label="Yukarı taşı"
                     title="Bir önceki veritabanı kaydıyla yer değiştirir"
-                    className="admin-btn !px-2.5 !py-1"
+                    className="admin-btn admin-btn-sm"
                     disabled={dbIndex === 0}
                     onClick={() => move(row, -1)}
                   >
@@ -672,7 +676,7 @@ export default function AdminWork() {
                     type="button"
                     aria-label="Aşağı taşı"
                     title="Bir sonraki veritabanı kaydıyla yer değiştirir"
-                    className="admin-btn !px-2.5 !py-1"
+                    className="admin-btn admin-btn-sm"
                     disabled={dbIndex === dbRows.length - 1}
                     onClick={() => move(row, 1)}
                   >

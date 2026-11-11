@@ -14,7 +14,7 @@ export const PAYMENT_CHECK_SCOPE = 'Denetim yalnız Ödeme koşulları ve Notlar
 export function PaymentCheckStatus({ check, onApprove, onRevoke, readOnly = false }: { check: PaymentCheck; onApprove?: () => void; onRevoke?: () => void; readOnly?: boolean }) {
   if (check.state === 'noplan') return null;
   return (
-    <div className="grid gap-1.5 border border-line p-3 text-[13px]" data-testid="payment-check" data-state={check.state} data-approved={check.approved ? '1' : '0'} role="status">
+    <div className="grid gap-1.5 admin-box p-3 text-[13px]" data-testid="payment-check" data-state={check.state} data-approved={check.approved ? '1' : '0'} role="status">
       {check.state === 'verified' && <p><Badge tone="ok">Uyum doğrulandı</Badge> <span className="text-muted">Metindeki her ödeme aşaması plandaki aşamayla yüzde ve ödeme zamanı olarak eşleşti.</span></p>}
       {check.state === 'neutral' && <p><Badge tone="muted">Metinde ödeme aşaması yok</Badge> <span className="text-muted">Plan yalnız tabloda; doğrulanacak ödeme metni yok.</span></p>}
       {check.state === 'conflict' && check.conflict && <p><Badge tone="bad">Çelişki var</Badge> <span className="text-red-200">Ödeme metni ile plan uyuşmuyor: {conflictText(check.conflict)}. Kesinleştirilemez.</span></p>}

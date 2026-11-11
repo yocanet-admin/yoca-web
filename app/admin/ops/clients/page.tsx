@@ -128,7 +128,7 @@ export default function OpsClients() {
           <button type="submit" disabled={busy || !data?.ready} className="admin-btn-primary">{busy ? 'Ekleniyor…' : '+ Ekle'}</button>
         </div>
         {dupes.length > 0 && (
-          <div className="grid gap-1.5 border border-yellow-400/40 bg-yellow-400/5 p-3 text-[13px] text-yellow-100">
+          <div className="admin-notice admin-notice-warn grid gap-1.5">
             <p>Benzer adla kayıt var — aynı firma olabilir:</p>
             <ul className="grid gap-1">
               {dupes.map((p) => (
@@ -199,7 +199,7 @@ export default function OpsClients() {
             const prov = counts.provided.get(p.id) ?? 0;
             return (
               <li key={p.id}>
-                <Link href={`/admin/ops/clients/${p.id}`} className="grid gap-1.5 rounded-md border border-line bg-surface-deep/80 p-3 transition-colors hover:border-yoca-lime/50 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                <Link href={`/admin/ops/clients/${p.id}`} className="grid gap-1.5 admin-box p-3 transition-colors hover:border-yoca-lime/50 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                   <span className="grid min-w-0 gap-1">
                     <span className="flex flex-wrap items-center gap-2">
                       <span className="truncate font-bold text-white">{p.name}</span>

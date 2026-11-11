@@ -1,5 +1,6 @@
 'use client';
 
+import { LabeledDate } from '@/components/admin/DateField';
 import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -253,10 +254,11 @@ function LeadsInner() {
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Leadler</h1>
-          <p className="mt-1.5 text-[14px] text-muted">İletişim formu ve Digital Check-Up başvuruları — tek akışta.</p>
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Genel</p>
+          <h1 className="admin-h1">Leadler</h1>
+          <p className="admin-lede">İletişim formu ve Digital Check-Up başvuruları — tek akışta.</p>
         </div>
         <div className="flex items-center gap-3">
           {flash && <span role="status" className="text-[13px] font-bold text-yoca-lime">{flash}</span>}
@@ -355,11 +357,11 @@ function LeadsInner() {
                 ))}
               </select>
               {status !== 'spam' && (
-                <button type="button" disabled={!ready || busy} onClick={() => bulkStatus('spam')} className="admin-btn !py-1 text-[12px]">
+                <button type="button" disabled={!ready || busy} onClick={() => bulkStatus('spam')} className="admin-btn admin-btn-sm">
                   Spam olarak işaretle
                 </button>
               )}
-              <button type="button" disabled={busy} onClick={() => bulkDelete(picked)} className="admin-btn !py-1 text-[12px] hover:!border-red-400 hover:!text-red-400">
+              <button type="button" disabled={busy} onClick={() => bulkDelete(picked)} className="admin-btn admin-btn-sm hover:!border-red-400 hover:!text-red-400">
                 Seçilenleri sil
               </button>
               <button type="button" onClick={() => setSelected(new Set())} className="text-[12px] text-subtle hover:text-white">
@@ -487,7 +489,7 @@ function LeadsInner() {
                       </div>
                     </div>
                     <div className="grid content-start gap-3">
-                      <label className="grid gap-1 text-[12px] font-bold text-subtle">
+                      <label className="admin-label">
                         Not
                         <textarea
                           rows={3}
@@ -499,16 +501,14 @@ function LeadsInner() {
                           placeholder="Görüşme notu, bütçe, beklenti…"
                         />
                       </label>
-                      <label className="grid gap-1 text-[12px] font-bold text-subtle">
-                        Takip tarihi
-                        <input
-                          type="date"
-                          disabled={!ready}
-                          value={lead.followUpOn ?? ''}
-                          onChange={(e) => change(lead, { follow_up_on: e.target.value || null })}
-                          className="admin-input !w-auto text-[13px]"
-                        />
-                      </label>
+                      {ready ? (
+                        <LabeledDate label="Takip tarihi" className="max-w-[16rem]" value={lead.followUpOn ?? ''} onChange={(v) => change(lead, { follow_up_on: v || null })} />
+                      ) : (
+                        <label className="admin-label">
+                          Takip tarihi
+                          <input disabled value={lead.followUpOn ?? ''} className="admin-input !w-auto" readOnly />
+                        </label>
+                      )}
                       <div className="flex flex-wrap gap-2">
                         <a href={replyHref(lead)} className="admin-btn-primary">
                           Yanıtla
@@ -526,7 +526,7 @@ function LeadsInner() {
                         </button>
                       </div>
                       {choice?.key === key && (
-                        <div className="grid gap-2 rounded-sm border border-line p-3" role="group" aria-label="Benzer müşteriler">
+                        <div className="grid gap-2 admin-box p-3" role="group" aria-label="Benzer müşteriler">
                           <p className="text-[13px] text-muted">Bu başvuruya benzeyen müşteri kayıtları var. Aynı müşteriyse bağlayın; değilse yeni müşteri oluşturun. Hiçbiri kendiliğinden seçilmez.</p>
                           <ul className="grid gap-1">
                             {choice.candidates.map((c) => (

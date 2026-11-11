@@ -195,8 +195,8 @@ export default function StudioPanel(props: Props) {
   const next = () => setStep(STEPS[Math.min(STEPS.length - 1, stepIndex + 1)].key);
 
   const field = 'admin-input !text-[13px]';
-  const label = 'grid gap-1 text-[12px] font-semibold text-muted';
-  const small = 'admin-btn !px-2.5 !py-1 !text-[12px]';
+  const label = 'admin-label';
+  const small = 'admin-btn admin-btn-sm';
 
   return (
     <aside className="admin-card grid content-start gap-4 !p-4" aria-label="İçerik stüdyosu">
@@ -220,7 +220,7 @@ export default function StudioPanel(props: Props) {
       </ol>
 
       {busy && <p role="status" className="rounded-sm border border-yoca-lime/40 bg-yoca-lime/10 px-3 py-2 text-[12px] text-yoca-lime">{busy}</p>}
-      {error && <p role="alert" className="rounded-sm border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{error}</p>}
+      {error && <p role="alert" className="admin-notice admin-notice-bad">{error}</p>}
 
       {/* ── 1 · Konu ── */}
       {step === 'topic' && (
@@ -236,7 +236,7 @@ export default function StudioPanel(props: Props) {
           {fetched && <SourceStatus sources={fetched} />}
           <label className={label}>Notlar (isteğe bağlı — kendi bilgileriniz, rakamlar ve dayanakları)<textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={field} /></label>
           <label className={label}>Mevcut metin (isteğe bağlı)<textarea value={existingText} onChange={(e) => setExistingText(e.target.value)} rows={3} className={field} /></label>
-          <details className="border border-line p-2">
+          <details className="admin-box p-2">
             <summary className="cursor-pointer text-[12px] font-bold text-muted">Gelişmiş: amaç, hizmet, anahtar kelime, ton, CTA</summary>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className={label}>Amaç<input value={goal} onChange={(e) => setGoal(e.target.value)} className={field} placeholder="Ör. Okur kendi formunu kontrol edebilsin" /></label>
@@ -260,7 +260,7 @@ export default function StudioPanel(props: Props) {
               ) : (
                 <ul className="grid gap-1">
                   {research.citations.map((c) => (
-                    <li key={c.url} className="border border-line p-1.5">
+                    <li key={c.url} className="admin-box p-1.5">
                       <span className="me-2 font-bold text-yellow-300">Doğrulanmadı</span>
                       <a href={c.url} target="_blank" rel="noopener noreferrer" className="break-all text-soft hover:text-yoca-lime">{c.title || c.domain}</a>
                       <span className="text-subtle"> · {c.domain} · OpenAI web araması buldu; sunucumuz okumadı</span>
@@ -278,7 +278,7 @@ export default function StudioPanel(props: Props) {
           {ideas && (
             <ul className="grid gap-2">
               {ideas.map((i) => (
-                <li key={i.title} className="border border-line p-2">
+                <li key={i.title} className="admin-box p-2">
                   <button type="button" className="text-start font-bold text-white hover:text-yoca-lime" onClick={() => { setTopic(i.title); setKeyword(i.keyword); setIdeas(null); }}>{i.title}</button>
                   <p className="text-[12px] text-muted">{i.angle}</p>
                   <p className="text-[11px] text-subtle">{i.keyword} · {i.why}</p>
@@ -293,7 +293,7 @@ export default function StudioPanel(props: Props) {
       {step === 'draft' && (
         <div className="grid gap-3 text-[13px]">
           {draft ? (
-            <div className="grid gap-2 border border-line p-3">
+            <div className="grid gap-2 admin-box p-3">
               <p className="text-[11px] font-bold uppercase tracking-wide text-subtle">Taslak önerisi · sürüm geçmişine kaydedildi</p>
               <p className="font-bold text-white">{draft.draft.title}</p>
               <p className="text-muted">{draft.draft.excerpt}</p>
@@ -329,7 +329,7 @@ export default function StudioPanel(props: Props) {
             {titles && (
               <ul className="grid gap-1">
                 {titles.map((t) => (
-                  <li key={t} className="flex items-center justify-between gap-2"><span>{t}</span><button type="button" className="admin-btn !px-2 !py-0.5 !text-[11px]" onClick={() => props.onSetTitle(t)}>Kullan</button></li>
+                  <li key={t} className="flex items-center justify-between gap-2"><span>{t}</span><button type="button" className="admin-btn admin-btn-sm" onClick={() => props.onSetTitle(t)}>Kullan</button></li>
                 ))}
               </ul>
             )}
@@ -352,7 +352,7 @@ export default function StudioPanel(props: Props) {
               findings.length === 0 ? <p className="text-yoca-green">Listelenen kalıplardan biri bulunmadı.</p> : (
                 <ul className="grid max-h-80 gap-2 overflow-auto">
                   {findings.map((f, i) => (
-                    <li key={i} className="border border-line p-2">
+                    <li key={i} className="admin-box p-2">
                       <p className="text-[11px] font-bold uppercase tracking-wide text-yellow-300">{PATTERN_LABEL[f.pattern] ?? f.pattern}</p>
                       <button type="button" disabled={!f.found} onClick={() => props.onLocate(f.excerpt)} className="text-start text-white hover:text-yoca-lime disabled:text-muted">“{f.excerpt}”</button>
                       {!f.found && <p className="text-[11px] text-subtle">Bu alıntı metinde birebir bulunamadı.</p>}
@@ -383,7 +383,7 @@ export default function StudioPanel(props: Props) {
                 )}
                 <ul className="grid gap-1.5">
                   {check.claims.map((c, i) => (
-                    <li key={i} className="border border-line p-2">
+                    <li key={i} className="admin-box p-2">
                       <span className={`me-2 text-[11px] font-bold uppercase ${c.status === 'supported' ? 'text-yoca-green' : 'text-yellow-300'}`}>{c.status === 'supported' ? 'Destekleniyor' : c.status === 'contradicted' ? 'Çelişiyor' : c.status === 'needs_source' ? 'Kaynak gerekli' : 'Desteklenmiyor'}</span>
                       {c.claim}
                       <p className="text-[11px] text-subtle">{c.source ? `${c.source} · ` : ''}{c.note}</p>
@@ -445,7 +445,7 @@ export default function StudioPanel(props: Props) {
             <button type="button" className="admin-btn" onClick={props.onMarkInReview}>Durumu “İncelemede” yap</button>
           </div>
           {seo && (
-            <div className="grid gap-1 border border-line p-2">
+            <div className="grid gap-1 admin-box p-2">
               <p><span className="text-subtle">SEO başlığı:</span> {seo.seoTitle} <span className="text-subtle">({seo.seoTitle.length})</span></p>
               <p><span className="text-subtle">Meta:</span> {seo.metaDescription} <span className="text-subtle">({seo.metaDescription.length})</span></p>
               {seo.internalLinks.length > 0 && <ul className="text-[12px] text-muted">{seo.internalLinks.map((l) => <li key={l.path}>{l.path} — {l.anchor}</li>)}</ul>}
@@ -522,7 +522,7 @@ function SourceStatus({ sources }: { sources: FetchedInfo[] }) {
   return (
     <ul className="grid gap-1 text-[12px]">
       {sources.map((s, i) => (
-        <li key={i} className="border border-line p-1.5">
+        <li key={i} className="admin-box p-1.5">
           <span className={`me-2 font-bold ${s.status === 'fetched' ? 'text-yoca-green' : 'text-yellow-300'}`}>{s.status === 'fetched' ? 'Okundu' : s.status === 'failed' ? 'Okunamadı' : 'Atlandı'}</span>
           <span className="break-all">{s.finalUrl ?? s.url}</span>
           {s.status === 'fetched' ? <span className="text-subtle"> · {s.title} · {s.chars} karakter · {new Date(s.fetchedAt).toLocaleString('tr-TR')}</span> : <span className="text-subtle"> · {s.reason}</span>}

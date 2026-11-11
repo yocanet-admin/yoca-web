@@ -87,8 +87,8 @@ export function EmailDialog({ docId, number, kind, versionTitles, versions, defa
   };
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="email-title" className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
-      <div className="admin-card grid max-h-[92vh] w-full max-w-2xl gap-4 overflow-y-auto p-5">
+    <div role="dialog" aria-modal="true" aria-labelledby="email-title" className="admin-backdrop">
+      <div className="admin-dialog max-w-2xl">
         <div>
           <h2 id="email-title" className="text-[17px] font-extrabold">E-postayla gönder · {number}</h2>
           <p className="mt-1 text-[12px] text-subtle">Gönderen: {from}{replyTo ? ` · yanıtlar: ${replyTo}` : ''}. Siz “Gönder” demeden hiçbir şey gönderilmez.</p>

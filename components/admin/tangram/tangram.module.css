@@ -97,6 +97,17 @@
   padding: 8px 0 32px;
 }
 
+/* Screen roots are single-column grids: their column must never grow to the
+   widest child (a long name in a nowrap / truncate line pushed phones sideways). */
+.main > * {
+  min-width: 0;
+}
+
+/* zero specificity: any grid-cols-* / sm:grid-cols-* utility still wins where it applies */
+:where(.main) :where(:global(.grid):not([class*='grid-flow'])) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 /* ── Island sidebar (desktop) ───────────────────────────────────── */
 
 .island {

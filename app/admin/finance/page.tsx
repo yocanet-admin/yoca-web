@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Badge, Empty, Flash, PageHead, fmtDate, small } from '@/components/admin/ops/ui';
+import { AdminTable, Badge, Empty, Flash, PageHead, fmtDate, small } from '@/components/admin/ops/ui';
 import { MonthPicker, monthName } from '@/components/admin/fin/MonthPicker';
 import { FinanceNav } from '@/components/admin/fin/FinanceNav';
 import { TotalsCard } from '@/components/admin/fin/parts';
@@ -76,17 +76,17 @@ function OverviewPage() {
           <p className="text-[12px] text-subtle">{mName} dönemine ait alacak ve giderler; tahsilat/ödeme tarihi farklı ay olabilir (ör. Kasım kirası Aralık’ta ödenirse burada Kasım’da ödendi görünür, nakit olarak Aralık’tadır).</p>
         </div>
         <div className="grid gap-3 lg:grid-cols-2">
-          <div className="grid gap-2 border border-line p-3">
+          <div className="grid gap-2 admin-box p-3">
             <div className="flex items-center justify-between"><h3 className="text-[13px] font-extrabold">Gelirler</h3><Link href={`/admin/finance/income${month === thisMonth ? '' : `?ay=${month}`}`} className={small}>Gelirler →</Link></div>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1 2xl:grid-cols-3">
               <TotalsCard title="Beklenen alacak" totals={income.total} sub={`${income.count} kayıt${income.unknownCount ? ` · ${income.unknownCount} tutarı bekleniyor` : ''}`} />
               <TotalsCard title="Tahsil edilen" totals={income.collected} sub={`net${Object.keys(income.over).length ? ` · ${formatTotals(income.over)} fazla dahil` : ''}`} />
               <TotalsCard title="Kalan alacak" totals={income.remaining} sub={`${income.remainingCount} kayıt`} />
             </div>
           </div>
-          <div className="grid gap-2 border border-line p-3">
+          <div className="grid gap-2 admin-box p-3">
             <div className="flex items-center justify-between"><h3 className="text-[13px] font-extrabold">Giderler</h3><Link href={`/admin/expenses${month === thisMonth ? '' : `?ay=${month}`}`} className={small}>Giderler →</Link></div>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1 2xl:grid-cols-3">
               <TotalsCard title="Gider" totals={exp.total} sub={`${exp.count} dönem${exp.unknownCount ? ` · ${exp.unknownCount} tutarı bekleniyor` : ''}`} />
               <TotalsCard title="Ödenen" totals={exp.paid} sub={`net${Object.keys(exp.over).length ? ` · ${formatTotals(exp.over)} fazla dahil` : ''}`} />
               <TotalsCard title="Kalan" totals={exp.remaining} sub={`${exp.remainingCount} dönem`} />
@@ -103,25 +103,18 @@ function OverviewPage() {
       <section aria-labelledby="mov-h" className="grid gap-2">
         <h2 id="mov-h" className="text-[15px] font-extrabold">{mName} para hareketleri <span className="text-subtle">({cash.movements.length})</span></h2>
         {cash.movements.length === 0 ? <Empty text={`${mName} içinde kayıtlı tahsilat veya ödeme yok.`} /> : (
-          <div className="overflow-x-auto border border-line">
-            <table className="w-full min-w-[760px] text-left text-[13px]">
-              <thead className="bg-surface text-[11px] uppercase tracking-[0.06em] text-subtle">
-                <tr>{['Tarih', 'Yön', 'Kaynak', 'Açıklama', 'Tür', 'Tutar'].map((h) => <th key={h} className="px-3 py-2">{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {cash.movements.map((m) => (
-                  <tr key={m.id} className="border-t border-line">
-                    <td className="px-3 py-2 tabular-nums">{fmtDate(m.date)}</td>
-                    <td className="px-3 py-2">{m.direction === 'in' ? <Badge tone="ok">Giren</Badge> : <Badge tone="info">Çıkan</Badge>}</td>
-                    <td className="px-3 py-2 text-subtle">{CASH_SOURCE_LABEL[m.source]}</td>
-                    <td className="px-3 py-2"><Link href={m.href} className="font-bold hover:text-yoca-lime">{m.title}</Link></td>
-                    <td className="px-3 py-2">{(m.direction === 'in' ? COLLECTION_KIND_LABEL : PAYMENT_KIND_LABEL)[m.kind] ?? m.kind}{m.kind === 'adjustment' && <span className="block text-[11px] text-subtle">nakit değil</span>}</td>
-                    <td className="px-3 py-2 tabular-nums">{m.kind === 'refund' ? '−' : ''}{formatMinor(m.amount, m.currency)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <AdminTable head={['Tarih', 'Yön', 'Kaynak', 'Açıklama', 'Tür', 'Tutar']} min={760} label={`${mName} para hareketleri`}>
+            {cash.movements.map((m) => (
+              <tr key={m.id}>
+                <td className="tabular-nums">{fmtDate(m.date)}</td>
+                <td>{m.direction === 'in' ? <Badge tone="ok">Giren</Badge> : <Badge tone="info">Çıkan</Badge>}</td>
+                <td className="text-subtle">{CASH_SOURCE_LABEL[m.source]}</td>
+                <td data-primary><Link href={m.href} className="admin-link">{m.title}</Link></td>
+                <td>{(m.direction === 'in' ? COLLECTION_KIND_LABEL : PAYMENT_KIND_LABEL)[m.kind] ?? m.kind}{m.kind === 'adjustment' && <span className="block text-[11px] text-subtle">nakit değil</span>}</td>
+                <td className="tabular-nums">{m.kind === 'refund' ? '−' : ''}{formatMinor(m.amount, m.currency)}</td>
+              </tr>
+            ))}
+          </AdminTable>
         )}
       </section>
     </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/admin/cockpit/Widgets';
-import { Badge, field, small } from '@/components/admin/ops/ui';
+import { Badge, field, small, ScrollArea } from '@/components/admin/ops/ui';
 import { fmtDay, fmtNumber } from '@/lib/cockpit/client';
 import { countryLabel, ctrText, groupSuggestions, keywordFiltersText, KEYWORD_LANGS, NO_DATA, POSITION_LABEL, positionText, SOURCE_LABEL, STATUS_LABEL, type KeywordSource, type KeywordStatus } from '@/lib/seoPanel/model';
 import type { SeoKeyword } from '@/components/admin/seo/types';
@@ -31,8 +31,8 @@ function KeywordForm({ draft, onCancel, onSave, busy }: { draft: Draft; onCancel
         <label className={`${lab} sm:col-span-2 lg:col-span-4`}>Not<input className={field} value={d.note} onChange={(e) => setD({ ...d, note: e.target.value })} maxLength={1000} /></label>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button type="submit" className="admin-btn admin-btn-primary !py-1.5 text-[12px]" disabled={busy}>Kaydet</button>
-        <button type="button" className="admin-btn !py-1.5 text-[12px]" onClick={onCancel}>Vazgeç</button>
+        <button type="submit" className="admin-btn admin-btn-primary admin-btn-sm" disabled={busy}>Kaydet</button>
+        <button type="button" className="admin-btn admin-btn-sm" onClick={onCancel}>Vazgeç</button>
       </div>
     </form>
   );
@@ -64,7 +64,7 @@ function KeywordCard({ k, busy, onEdit, onToggle, onDelete }: { k: SeoKeyword; b
     <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-[0.06em] text-subtle">{label}</p><p className="text-[15px] font-extrabold tabular-nums text-white">{value}</p></div>
   );
   return (
-    <li className="grid gap-2 rounded-sm border border-line bg-surface-deep/60 p-3" data-testid="seo-keyword-card">
+    <li className="grid gap-2 admin-box p-3" data-testid="seo-keyword-card">
       <div className="flex items-start justify-between gap-2">
         <p className="min-w-0 break-words font-semibold text-white">{k.keyword}</p>
         <Badge tone={k.status === 'active' ? 'ok' : 'muted'}>{STATUS_LABEL[k.status]}</Badge>
@@ -109,7 +109,7 @@ export function Keywords({ keywords, gscQueries, act, busy, connected, filters, 
             <ul className="grid gap-3 md:hidden" data-testid="seo-keyword-cards">
               {targets.map((k) => <KeywordCard key={k.id} k={k} busy={busy} onEdit={() => setEditing(toDraft(k))} onToggle={toggle(k)} onDelete={() => remove(k)} />)}
             </ul>
-            <div className="-mx-1 hidden overflow-x-auto md:block">
+            <div className="hidden md:block"><ScrollArea label="Anahtar kelimeler">
               <table className="w-full min-w-[1040px] text-left text-[13px]" data-testid="seo-keyword-table">
                 <thead><tr className="border-b border-line text-[11px] uppercase tracking-[0.06em] text-subtle">
                   {['Kelime', 'Dil', 'Hedef ülke', 'Hedef sayfa', 'Kaynak', 'Durum', 'Tıklama', 'Gösterim', 'TO', POSITION_LABEL, 'Önceki dönem', ''].map((h, i) => <th key={i} className={`px-1 py-2 font-bold ${i >= 6 && i < 11 ? 'text-right' : ''}`}>{h}</th>)}
@@ -133,7 +133,7 @@ export function Keywords({ keywords, gscQueries, act, busy, connected, filters, 
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ScrollArea></div>
           </>
         )}
       </Card>

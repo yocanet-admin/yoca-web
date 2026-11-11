@@ -59,9 +59,9 @@ export default function MissingLanguage({ locale, source, sourceSaved, onCreated
       ) : (
         <>
           {!sourceSaved && (
-            <div className="flex flex-wrap items-center gap-2 rounded-sm border border-yellow-400/40 bg-yellow-400/10 px-4 py-2 text-[13px] text-yellow-200">
+            <div className="admin-notice admin-notice-warn flex flex-wrap items-center gap-2">
               Kaynak ({source.locale.toUpperCase()}) sürümünde kaydedilmemiş düzenleme var. Çeviri kaydedilmiş metinden yapılır; önce kaynağı kaydedin.
-              <button type="button" className="admin-btn !px-2 !py-0.5 !text-[12px]" onClick={onOpenSource}>Kaynağa git</button>
+              <button type="button" className="admin-btn admin-btn-sm" onClick={onOpenSource}>Kaynağa git</button>
             </div>
           )}
 

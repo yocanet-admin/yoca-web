@@ -77,7 +77,7 @@ export default function NewsletterBox({ insightId, groupId, dirty }: { insightId
     await load();
   };
 
-  const small = 'admin-btn !px-2.5 !py-1 !text-[12px]';
+  const small = 'admin-btn admin-btn-sm';
   return (
     <div className="grid gap-2 text-[13px]">
       <p className="text-muted">

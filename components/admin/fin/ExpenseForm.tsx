@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { LabeledDate } from '@/components/admin/DateField';
 import { field, label } from '@/components/admin/ops/ui';
 import type { ExpenseInput } from '@/lib/fin/data';
 import { CATEGORIES, CATEGORY_LABEL, METHODS, METHOD_LABEL, RECURRENCES, RECURRENCE_LABEL, RECURRING_HINT, defaultFirstDue, type Category, type Expense, type FinParty, type Recurrence } from '@/lib/fin/model';
@@ -99,7 +100,7 @@ export function ExpenseForm({ initial: edit, prefill, parties, opsProviders, loc
             </select>
           </label>
         )}
-        <label className={label}>{kind === 'recurring' ? 'İlk vade (takibe başlanan dönem)' : 'Vade'}<input type="date" className={field} value={firstDue} onChange={(e) => setFirstDue(e.target.value)} /></label>
+        <LabeledDate label={kind === 'recurring' ? 'İlk vade (takibe başlanan dönem)' : 'Vade'} value={firstDue} onChange={(v) => setFirstDue(v)} />
         {locked && <p className="text-[12px] text-subtle sm:col-span-3">Dönemi oluşmuş giderin türü, sıklığı ve ilk vadesi değiştirilemez (geçmiş korunur). Takvim değişecekse bitiş tarihi verip yeni gider açın.</p>}
       </fieldset>
 
@@ -110,7 +111,7 @@ export function ExpenseForm({ initial: edit, prefill, parties, opsProviders, loc
             {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </label>
-        {kind === 'recurring' && <label className={label}>Bitiş (isteğe bağlı)<input type="date" className={field} value={endsOn} min={firstDue} onChange={(e) => setEndsOn(e.target.value)} /></label>}
+        {kind === 'recurring' && <LabeledDate label="Bitiş (isteğe bağlı)" value={endsOn} min={firstDue} onChange={(v) => setEndsOn(v)} />}
       </div>
       {isEdit && kind === 'recurring' && <p className="-mt-2 text-[12px] text-subtle">Tutar değişikliği yalnızca bundan sonra oluşacak dönemlere uygulanır; oluşmuş dönemler kendi tutarını korur (ödemesiz bir dönemin tutarı dönem satırından düzeltilebilir).</p>}
 

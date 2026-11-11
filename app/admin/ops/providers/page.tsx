@@ -154,7 +154,7 @@ function CreateProvider({ parties, onDone, onError }: { parties: Party[]; onDone
         <button type="submit" disabled={busy} className="admin-btn-primary">{busy ? 'Ekleniyor…' : '+ Ekle'}</button>
       </form>
       {dupes.length > 0 && (
-        <div className="grid gap-1.5 border border-yellow-400/40 bg-yellow-400/5 p-3 text-[13px] text-yellow-100">
+        <div className="admin-notice admin-notice-warn grid gap-1.5">
           <p>Benzer adla kayıt var — çift kayıt açmamak için mevcut firmayı kullanın:</p>
           <ul className="grid gap-1">
             {dupes.map((p) => (
@@ -339,7 +339,7 @@ function Accounts({ provider, accounts, services, onChange, onError }: { provide
 
   const warn = (v: string) => looksSecret(v) && <p className="text-[12px] font-semibold text-red-300">Bu bir şifre/anahtar gibi görünüyor — buraya yazmayın.</p>;
   const form = (
-    <form onSubmit={save} className="grid gap-3 border border-line p-3">
+    <form onSubmit={save} className="grid gap-3 admin-box p-3">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className={label}>Hesap adı *<input className={field} value={d.label} onChange={(e) => setD({ ...d, label: e.target.value })} placeholder="ör. Yoca ana hesap" autoFocus /></label>
         <label className={label}>Hesap / müşteri no<input className={field} value={d.account_ref} onChange={(e) => setD({ ...d, account_ref: e.target.value })} />{warn(d.account_ref)}</label>

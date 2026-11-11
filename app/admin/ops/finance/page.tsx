@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { PAY_TONE, RENEW_TONE } from '@/components/admin/ops/ServiceForm';
-import { Badge, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, small } from '@/components/admin/ops/ui';
+import { LabeledDate } from '@/components/admin/DateField';
+import { AdminTable, Badge, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, small } from '@/components/admin/ops/ui';
 import { loadOps, type OpsData, type Party } from '@/lib/ops/data';
 import {
   KIND_LABEL,
@@ -54,9 +55,9 @@ function addTo(acc: Record<string, Minor>, currency: string | null, v: Minor | n
 function TotalsLine({ title, lines, totals, unknown }: { title: string; lines?: MoneyLine[]; totals?: Record<string, Minor>; unknown?: number }) {
   const t = lines ? totalsByCurrency(lines) : { totals: totals ?? {}, unknown: unknown ?? 0 };
   return (
-    <div className="grid gap-0.5 border border-line px-3 py-2">
-      <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-subtle">{title}</span>
-      <span className="text-[15px] font-extrabold tabular-nums">{formatTotals(t.totals)}</span>
+    <div className="grid min-w-0 gap-1 rounded-[14px] border border-[var(--line,#262a31)] bg-[var(--tile,#15171c)] px-4 py-3">
+      <span className="text-[12px] font-bold text-[var(--ink-2,#c6c9cf)]">{title}</span>
+      <span className="text-[19px] font-extrabold leading-tight tabular-nums [overflow-wrap:anywhere]">{formatTotals(t.totals)}</span>
       {t.unknown > 0 && <span className="text-[12px] text-yellow-200">{t.unknown} kayıt tutarı bilinmiyor</span>}
     </div>
   );
@@ -115,19 +116,10 @@ function DateCell({ date, today }: { date: string | null; today: string }) {
 }
 
 function Table({ head, children, min = 820 }: { head: string[]; children: ReactNode; min?: number }) {
-  return (
-    <div className="overflow-x-auto border border-line">
-      <table className="w-full text-left text-[13px]" style={{ minWidth: min }}>
-        <thead className="bg-surface text-[11px] uppercase tracking-[0.06em] text-subtle">
-          <tr>{head.map((h, i) => <th key={i} className="px-3 py-2">{h}</th>)}</tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
-    </div>
-  );
+  return <AdminTable head={head} min={min}>{children}</AdminTable>;
 }
 
-const td = 'px-3 py-2.5 align-top';
+const td = 'align-top';
 const remainingText = (sum: PaySummary) => (sum.remaining !== null && sum.currency ? formatMinor(sum.remaining, sum.currency) : <Unknown>Bilinmiyor</Unknown>);
 
 /* ── Renewals ────────────────────────────────────────────────────── */
@@ -319,18 +311,18 @@ function Payments({ ctx, dir, currency, from, to, voided, setParams }: { ctx: Ct
   return (
     <div className="grid gap-4">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-        <label className="grid gap-1 text-[12px] font-semibold text-muted">Yön
-          <select className={`${field} !py-1.5 text-[13px]`} value={dir} onChange={(e) => setParams({ dir: e.target.value || null })}>
+        <label className="admin-label">Yön
+          <select className={field} value={dir} onChange={(e) => setParams({ dir: e.target.value || null })}>
             <option value="">Tümü</option><option value="in">Tahsilat (müşteriden)</option><option value="out">Sağlayıcıya ödeme</option>
           </select>
         </label>
-        <label className="grid gap-1 text-[12px] font-semibold text-muted">Para birimi
-          <select className={`${field} !py-1.5 text-[13px]`} value={currency} onChange={(e) => setParams({ currency: e.target.value || null })}>
+        <label className="admin-label">Para birimi
+          <select className={field} value={currency} onChange={(e) => setParams({ currency: e.target.value || null })}>
             <option value="">Tümü</option>{CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </label>
-        <label className="grid gap-1 text-[12px] font-semibold text-muted">Başlangıç<input type="date" className={`${field} !py-1.5 text-[13px]`} value={from} onChange={(e) => setParams({ from: e.target.value || null })} /></label>
-        <label className="grid gap-1 text-[12px] font-semibold text-muted">Bitiş<input type="date" className={`${field} !py-1.5 text-[13px]`} value={to} onChange={(e) => setParams({ to: e.target.value || null })} /></label>
+        <LabeledDate label="Başlangıç" value={from} max={to || null} today={ctx.today} onChange={(v) => setParams({ from: v || null })} />
+        <LabeledDate label="Bitiş" value={to} min={from || null} today={ctx.today} onChange={(v) => setParams({ to: v || null })} />
         <label className="flex items-center gap-2 self-end pb-2 text-[13px] text-soft"><input type="checkbox" className="accent-yoca-lime" checked={voided} onChange={(e) => setParams({ voided: e.target.checked ? '1' : null })} />İptal edilenler</label>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -416,7 +408,7 @@ function Calendar({ ctx, month }: { ctx: Ctx; month: string }) {
   const nav = (mm: string) => `${BASE}?view=calendar&month=${mm}`;
   const chip = (e: Entry, i: number) => (
     <li key={`${e.s.id}:${e.kind}:${i}`}>
-      <Link href={`${SVC}/${e.s.id}`} className="block truncate border border-line px-1 py-0.5 text-[11px] hover:border-yoca-lime" title={`${ENTRY[e.kind].label}: ${e.s.name}`}>
+      <Link href={`${SVC}/${e.s.id}`} className="block truncate rounded-[6px] border border-[var(--line-2,#343943)] bg-[var(--inset,#0d0f12)] px-1.5 py-0.5 text-[11px] hover:border-yoca-lime" title={`${ENTRY[e.kind].label}: ${e.s.name}`}>
         <span className={`font-bold ${ENTRY[e.kind].tone === 'bad' ? 'text-red-300' : ENTRY[e.kind].tone === 'warn' ? 'text-yellow-200' : ENTRY[e.kind].tone === 'ok' ? 'text-yoca-green' : 'text-sky-200'}`}>{ENTRY[e.kind].label}</span> · {e.s.name}
       </Link>
     </li>
@@ -432,12 +424,12 @@ function Calendar({ ctx, month }: { ctx: Ctx; month: string }) {
       {entries.length === 0 && <Empty text={`${monthLabel(month)} için tarih yok.`} />}
 
       {/* Desktop: month grid */}
-      <div className="hidden md:grid md:grid-cols-7 md:border-l md:border-t md:border-line">
-        {WEEKDAYS.map((w) => <div key={w} className="border-b border-r border-line bg-surface px-2 py-1 text-[11px] font-bold uppercase text-subtle">{w}</div>)}
+      <div className="hidden overflow-hidden rounded-[16px] border-l border-t border-[var(--line,#262a31)] bg-[var(--tile,#15171c)] md:grid md:grid-cols-7">
+        {WEEKDAYS.map((w) => <div key={w} className="border-b border-r border-[var(--line,#262a31)] bg-[var(--tile-2,#1c1f25)] px-2 py-2 text-[11px] font-extrabold uppercase tracking-[0.08em] text-subtle">{w}</div>)}
         {cells.map((d, i) => {
           const list = d ? byDay.get(d) ?? [] : [];
           return (
-            <div key={i} className={`min-h-[6.5rem] border-b border-r border-line p-1 ${!d ? 'bg-surface-deep/40' : d === ctx.today ? 'bg-yoca-lime/5' : ''}`}>
+            <div key={i} className={`min-h-[6.5rem] border-b border-r border-[var(--line,#262a31)] p-1.5 ${!d ? 'bg-[var(--inset,#0d0f12)]' : d === ctx.today ? 'bg-yoca-lime/5' : ''}`}>
               {d && <p className={`mb-1 text-[11px] font-bold tabular-nums ${d === ctx.today ? 'text-yoca-lime' : 'text-subtle'}`}>{Number(d.slice(8, 10))}</p>}
               {list.length > 0 && <ul className="grid gap-0.5">{list.slice(0, 4).map(chip)}{list.length > 4 && <li className="text-[11px] text-subtle">+{list.length - 4} daha</li>}</ul>}
             </div>
@@ -484,10 +476,10 @@ function FinanceInner() {
   return (
     <div className="grid gap-5">
       <PageHead title="Ödemeler ve yenilemeler" sub="Müşteriden tahsilat, sağlayıcıya ödeme ve sağlayıcıda yenileme ayrı ayrı izlenir; biri diğerini tamamlamaz. Toplamlar her para birimi için ayrıdır." />
-      <nav className="flex gap-1 overflow-x-auto border-b border-line" aria-label="Görünüm">
+      <nav className="admin-tabs" aria-label="Görünüm">
         {VIEWS.map(([k, l]) => (
           <Link key={k} href={`${BASE}?view=${k}`} aria-current={view === k ? 'page' : undefined}
-            className={`whitespace-nowrap border-b-2 px-3 py-2 text-[13px] font-bold ${view === k ? 'border-yoca-lime text-white' : 'border-transparent text-muted hover:text-white'}`}>{l}</Link>
+            className="admin-tab">{l}</Link>
         ))}
       </nav>
       {!data ? <p className="text-[14px] text-muted">Yükleniyor…</p> : !data.ready || !ctx ? <Flash tone="bad" message={data.error ?? 'Veriler yüklenemedi.'} /> : (

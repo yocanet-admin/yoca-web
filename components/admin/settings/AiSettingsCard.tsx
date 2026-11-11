@@ -118,16 +118,16 @@ export default function AiSettingsCard() {
         {data.mock.error && <Notice tone="warning">{data.mock.error}</Notice>}
 
         <div className="grid grid-cols-2 gap-3">
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">Metin varsayılanı
+          <label className="admin-label">Metin varsayılanı
             <select value={draft.textPreset} onChange={(e) => setDraft({ ...draft, textPreset: e.target.value as 'economy' })} className={field}><option value="economy">Ekonomik</option><option value="quality">Yüksek kalite</option></select>
           </label>
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">Görsel varsayılanı
+          <label className="admin-label">Görsel varsayılanı
             <select value={draft.imagePreset} onChange={(e) => setDraft({ ...draft, imagePreset: e.target.value as 'economy' })} className={field}><option value="economy">Ekonomik</option><option value="quality">Yüksek kalite</option></select>
           </label>
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">Aylık tahmini kullanım eşiği (USD, 0 = kapalı)
+          <label className="admin-label">Aylık tahmini kullanım eşiği (USD, 0 = kapalı)
             <input type="number" min={0} step="0.5" value={draft.monthlyBudgetUsd} onChange={(e) => setDraft({ ...draft, monthlyBudgetUsd: Number(e.target.value) })} className={field} />
           </label>
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">İstek başına en çok çıktı token
+          <label className="admin-label">İstek başına en çok çıktı token
             <input type="number" min={500} max={16000} value={draft.maxOutputTokens} onChange={(e) => setDraft({ ...draft, maxOutputTokens: Number(e.target.value) })} className={field} />
           </label>
         </div>
@@ -145,7 +145,7 @@ export default function AiSettingsCard() {
           <Notice tone="warning">{data.spendError ?? 'Kullanım okunamadı.'}</Notice>
         )}
 
-        <details className="rounded-sm border border-line p-3">
+        <details className="admin-box p-3">
           <summary className="cursor-pointer font-bold text-white">Gelişmiş: model kimlikleri ve fiyat tablosu</summary>
           <div className="mt-3 grid gap-3">
             <div className="grid grid-cols-2 gap-3">
@@ -156,10 +156,10 @@ export default function AiSettingsCard() {
               ))}
               <datalist id="ai-verified-models">{(draft.verified?.available ?? []).map((id) => <option key={id} value={id} />)}</datalist>
             </div>
-            <label className="grid gap-1 text-[12px] font-bold text-subtle">Fiyat tablosu — her satır: model | giriş | önbellekli giriş | çıkış | görsel giriş | görsel çıkış (USD / 1M token)
+            <label className="admin-label">Fiyat tablosu — her satır: model | giriş | önbellekli giriş | çıkış | görsel giriş | görsel çıkış (USD / 1M token)
               <textarea rows={6} value={priceText} onChange={(e) => setPriceText(e.target.value)} className={`${field} font-mono text-[12px]`} />
             </label>
-            <label className="grid gap-1 text-[12px] font-bold text-subtle">Fiyat kaynağı notu
+            <label className="admin-label">Fiyat kaynağı notu
               <input value={draft.pricesNote} onChange={(e) => setDraft({ ...draft, pricesNote: e.target.value })} className={field} />
             </label>
           </div>
