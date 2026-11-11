@@ -5,8 +5,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardLink } from '@/components/admin/cockpit/Widgets';
 import { Badge, Empty, EntityLink, Flash, PageHead, fmtDate, fmtDateTime } from '@/components/admin/ops/ui';
 import { db, loadOps, type OpsData } from '@/lib/ops/data';
-import { daysUntil, dueText, istanbulDay, missingInfo, payState, renewState, type PeriodRow, type Service } from '@/lib/ops/model';
+import { daysUntil, dueText, istanbulDay, payState, type Service } from '@/lib/ops/model';
 import { formatTotals, type Minor } from '@/lib/ops/money';
+import { renewalStats } from '@/lib/ops/renewals';
 
 /**
  * Yoca Operasyon — Genel bakış.
@@ -61,34 +62,14 @@ export default function OpsOverview() {
 
   const stats = useMemo(() => {
     if (!data?.ready) return null;
-    const live = data.services.filter((s) => !s.archived_at && s.status !== 'cancelled');
-    const openOf = new Map<string, PeriodRow>();
-    data.periods.forEach((p) => { if (p.status === 'open') openOf.set(p.service_id, p); });
+    // renewal figures: shared with the Kokpit card (lib/ops/renewals.ts, same rules as before)
+    const { live, within, overdue, awaiting, missing, autoUnverified } = renewalStats(data, today);
     const serviceById = new Map<string, Service>();
     data.services.forEach((s) => serviceById.set(s.id, s));
     const projectClient = new Map<string, string | null>();
     data.projects.forEach((p) => projectClient.set(p.id, p.client_id));
     const hasCustomer = new Set<string>();
     data.links.forEach((l) => { if (l.client_id || (l.project_id && projectClient.get(l.project_id))) hasCustomer.add(l.service_id); });
-
-    const within: Record<7 | 30 | 90, number> = { 7: 0, 30: 0, 90: 0 };
-    let overdue = 0, awaiting = 0, missing = 0, autoUnverified = 0;
-    for (const s of live) {
-      const open = openOf.get(s.id) ?? null;
-      const state = renewState(s, open, data.payments, today);
-      const end = open?.ends_on ?? s.end_on;
-      if (end && state !== 'verified' && state !== 'perpetual' && state !== 'once') {
-        const d = daysUntil(end, today);
-        if (d >= 0 && d <= 7) within[7] += 1;
-        if (d >= 0 && d <= 30) within[30] += 1;
-        if (d >= 0 && d <= 90) within[90] += 1;
-      }
-      if (state === 'overdue') overdue += 1;
-      if (state === 'awaiting_verification') awaiting += 1;
-      if (state === 'awaiting_verification' && s.auto_renew === 'on') autoUnverified += 1;
-      const miss = missingInfo(s);
-      if (miss.includes('Bitiş tarihi') || miss.includes('Ekip sorumlusu')) missing += 1;
-    }
 
     // Provider costs due this month (Yoca pays; services the customer pays directly are excluded).
     const costExpected: Record<string, Minor> = {}, costOpen: Record<string, Minor> = {};

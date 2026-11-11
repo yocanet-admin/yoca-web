@@ -45,11 +45,13 @@ export function finFriendly(message: string): string {
 /**
  * Loads the register. First makes sure the periods up to `horizon` days ahead
  * exist (idempotent; a period is never created twice and starts unpaid).
+ * `roll: false` only reads (the Kokpit summary card: opening the cockpit writes nothing;
+ * the daily cron and the Finans screens keep creating the periods).
  */
-export async function loadFinance(horizon = 45): Promise<FinData> {
+export async function loadFinance(horizon = 45, options: { roll?: boolean } = {}): Promise<FinData> {
   const supabase = getAdminClient();
   if (!supabase) return { ...EMPTY, error: 'Oturum yok.' };
-  const roll = await supabase.rpc('fin_roll_periods', { p_until: addDays(istanbulDay(), horizon) });
+  const roll = options.roll === false ? { error: null } : await supabase.rpc('fin_roll_periods', { p_until: addDays(istanbulDay(), horizon) });
   if (roll.error && /function|does not exist|schema cache/i.test(roll.error.message)) {
     return { ...EMPTY, error: 'Giderler tabloları yok: supabase/upgrade-v25-expenses.sql çalıştırılmalı.' };
   }

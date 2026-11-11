@@ -9,6 +9,7 @@ import { getAdminClient } from '@/lib/adminClient';
 import AdminPrivacyNotice from '@/components/admin/AdminPrivacyNotice';
 import { clearDocBackups } from '@/lib/documents/backup';
 import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, patchOpenGroups, resolveOpenGroups, toggleGroup, type OpenGroups } from '@/lib/admin/navState';
+import t from '@/components/admin/tangram/tangram.module.css';
 
 /**
  * Yoca — admin shell (Client Component).
@@ -24,6 +25,10 @@ import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, patchOpenGrou
  * Finans, Site içeriği, Sistem); every group folds open/closed from its
  * title. First visit: only the current page's group is open; later the user's
  * own choices come back (this browser, per user). See lib/admin/navState.ts.
+ *
+ * Look (approved Tangram design, components/admin/tangram): a separate island
+ * sidebar on desktop, a top bar + slide-down menu on phones, black canvas.
+ * Only the frame changed; the screens inside keep their own markup.
  */
 
 const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: string; icon: string }> }> = [
@@ -353,11 +358,6 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const home = isFinance ? FINANCE_HOME : '/admin';
   const current = NAV_ITEMS.find((item) => isActive(item.href, pathname));
 
-  const linkClass = (active: boolean, variant: 'sidebar' | 'drawer') =>
-    `flex items-center gap-2.5 whitespace-nowrap rounded-sm px-3 text-[14px] font-semibold motion-safe:transition-colors ${variant === 'drawer' ? 'py-2.5' : 'py-2'} ${
-      active ? 'bg-yoca-lime text-black' : 'text-muted hover:bg-surface hover:text-white'
-    }`;
-
   const navLink = (item: (typeof NAV_ITEMS)[number], variant: 'sidebar' | 'drawer') => {
     const active = isActive(item.href, pathname);
     return (
@@ -367,51 +367,44 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         aria-current={active ? 'page' : undefined}
         // The drawer also closes when the current page is chosen again (no navigation).
         onClick={variant === 'drawer' ? () => setMenuOpen(false) : undefined}
-        className={linkClass(active, variant)}
+        className={`${t.navItem} ${active ? t.navItemActive : ''}`}
       >
-        <span aria-hidden="true" className="text-[13px]">
+        <span aria-hidden="true" className={t.navIcon}>
           {item.icon}
         </span>
-        {item.label}
+        <span className={t.navItemLabel}>{item.label}</span>
       </Link>
     );
   };
 
   const navLinks = (variant: 'sidebar' | 'drawer') => (
-    <nav aria-label="Admin" className="grid gap-3">
-      {!isFinance && <div className="grid">{navLink(HOME_ITEM, variant)}</div>}
+    <nav aria-label="Admin" className={t.nav}>
+      {!isFinance && <div className={t.navGroup}>{navLink(HOME_ITEM, variant)}</div>}
       {groups.map((group) => {
         const open = openGroups[group.title] === true;
         const listId = `admin-nav-${variant}-${group.title.toLocaleLowerCase('tr').replace(/[^a-z0-9]+/g, '-')}`;
         const hidesCurrent = !open && currentGroup === group.title;
         return (
-          <div key={group.title} className="grid gap-1">
+          <div key={group.title} className={t.navGroup}>
             <button
               type="button"
               onClick={() => toggle(group.title)}
               aria-expanded={open}
               aria-controls={listId}
-              className={`flex w-full items-center gap-2 rounded-sm px-3 text-left text-[11px] font-bold uppercase tracking-[0.12em] motion-safe:transition-colors ${
-                variant === 'drawer' ? 'min-h-11 py-2.5' : 'min-h-9 py-2'
-              } ${hidesCurrent ? 'text-soft' : 'text-subtle'} hover:bg-surface hover:text-white`}
+              className={`${t.groupBtn} ${hidesCurrent ? t.groupBtnCurrent : ''}`}
             >
-              <span lang="tr" className="min-w-0 flex-1 truncate">{group.title}</span>
+              <span lang="tr" className={t.groupLabel}>{group.title}</span>
               {hidesCurrent && (
                 <>
-                  <span aria-hidden="true" className="h-2 w-2 flex-none rounded-full bg-yoca-lime" />
+                  <span aria-hidden="true" className={t.groupDot} />
                   <span className="sr-only">(geçerli sayfa bu grupta)</span>
                 </>
               )}
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                className={`h-3.5 w-3.5 flex-none motion-safe:transition-transform ${open ? 'rotate-180' : ''}`}
-              >
+              <svg aria-hidden="true" viewBox="0 0 16 16" className={`${t.chev} ${open ? t.chevOpen : ''}`}>
                 <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
-            {/* `hidden` alone would lose to the grid class: hide with the class as well */}
-            <div id={listId} hidden={!open} className={open ? 'grid gap-1' : 'hidden'}>
+            <div id={listId} hidden={!open} className={open ? t.groupList : 'hidden'}>
               {group.items.map((item) => navLink(item, variant))}
             </div>
           </div>
@@ -420,21 +413,21 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     </nav>
   );
 
+  const userEmail = session.user.email ?? '';
   const accountBlock = (
-    <div className="grid gap-2">
-      <p className="truncate text-[12px] text-subtle">{session.user.email}{isFinance ? ' · Finans sorumlusu' : ''}</p>
-      <div className="flex gap-2">
-        <Link
-          href="/"
-          className="rounded-sm border border-line px-3 py-1.5 text-[12px] font-bold text-muted transition-colors hover:text-white"
-        >
+    <div className={t.account}>
+      <div className={t.accountWho}>
+        <span aria-hidden="true" className={t.avatar}>{userEmail.slice(0, 2).toLocaleUpperCase('tr') || '··'}</span>
+        <span className={t.accountText}>
+          <strong title={userEmail}>{userEmail}</strong>
+          {access?.role && <span>{isFinance ? 'Finans sorumlusu' : 'Yönetici'}</span>}
+        </span>
+      </div>
+      <div className={t.accountActions}>
+        <Link href="/" className={`${t.btn} ${t.btnSmall}`}>
           Siteye Dön
         </Link>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="rounded-sm border border-line px-3 py-1.5 text-[12px] font-bold text-muted transition-colors hover:border-red-400 hover:text-red-400"
-        >
+        <button type="button" onClick={handleLogout} className={`${t.btn} ${t.btnSmall}`}>
           Çıkış
         </button>
       </div>
@@ -442,63 +435,59 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="relative z-[7] flex min-h-screen max-lg:flex-col">
+    <div className={t.shell}>
       {/* Mobile / tablet: compact top bar + slide-down menu */}
-      <div className="sticky top-0 z-40 lg:hidden">
-        <div className="flex h-14 items-center justify-between gap-3 border-b border-line bg-surface-deep/95 px-4 backdrop-blur">
+      <div className={t.topbar}>
+        <div className={t.topbarRow}>
           <Link href={home} className="flex-none" aria-label={isFinance ? 'Finans' : 'Kokpit'}>
-            <img src="/brand/yoca-logo-primary.svg" alt="Yoca" width={104} height={26} className="h-6 w-auto" />
+            <img src="/brand/yoca-logo-primary.svg" alt="Yoca" width={96} height={26} />
           </Link>
-          <span className="min-w-0 flex-1 truncate text-center text-[13px] font-bold text-soft">{current?.label ?? 'Yönetim'}</span>
+          <span className={t.topbarTitle}>{current?.label ?? 'Yönetim'}</span>
           <button
             type="button"
             onClick={() => setMenuOpen((open) => !open)}
             aria-expanded={menuOpen}
             aria-controls="admin-mobile-menu"
-            className="flex-none rounded-sm border border-line px-3 py-1.5 text-[13px] font-bold text-muted transition-colors hover:text-white"
+            className={`${t.btn} ${t.btnSmall}`}
           >
             <span aria-hidden="true">{menuOpen ? '✕' : '☰'}</span> {menuOpen ? 'Kapat' : 'Menü'}
           </button>
         </div>
         {menuOpen && (
           <>
-            <button
-              type="button"
-              aria-label="Menüyü kapat"
-              onClick={() => setMenuOpen(false)}
-              className="fixed inset-x-0 bottom-0 top-14 z-0 cursor-default bg-black/60"
-            />
-            <div
-              id="admin-mobile-menu"
-              className="absolute inset-x-0 top-full z-10 grid max-h-[calc(100dvh-3.5rem)] gap-6 overflow-y-auto border-b border-line bg-surface-deep p-5 shadow-2xl"
-            >
+            <button type="button" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} className={t.scrim} />
+            <div id="admin-mobile-menu" className={t.drawer}>
               {navLinks('drawer')}
-              <div className="border-t border-line pt-4">{accountBlock}</div>
+              {accountBlock}
             </div>
           </>
         )}
       </div>
 
-      {/* Desktop sidebar */}
-      <aside className="hidden w-64 flex-none flex-col border-r border-line bg-surface-deep/90 p-5 lg:flex">
-        <Link href={home} className="mb-6 block flex-none">
-          <img src="/brand/yoca-logo-primary.svg" alt="Yoca" width={120} height={30} className="h-7 w-auto" />
-        </Link>
-        {navLinks('sidebar')}
-        <div className="mt-auto pt-6">{accountBlock}</div>
-      </aside>
-      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-10">
-        {warnings.length > 0 && (
-          <div role="alert" className="mb-6 grid gap-2 rounded-sm border border-red-400/60 bg-red-500/10 p-4 text-[14px] leading-relaxed text-red-200">
-            <p className="font-bold text-red-300">Yapılandırma hatası</p>
-            {warnings.map((text) => (
-              <p key={text}>{text}</p>
-            ))}
+      <div className={t.frame}>
+        {/* Desktop island sidebar */}
+        <aside className={t.island}>
+          <div className={t.brand}>
+            <Link href={home}>
+              <img src="/brand/yoca-logo-primary.svg" alt="Yoca" width={104} height={28} />
+            </Link>
           </div>
-        )}
-        {children}
-        <AdminPrivacyNotice />
-      </main>
+          <div className={t.navScroll}>{navLinks('sidebar')}</div>
+          {accountBlock}
+        </aside>
+        <main className={t.main}>
+          {warnings.length > 0 && (
+            <div role="alert" className="mb-6 grid gap-2 rounded-sm border border-red-400/60 bg-red-500/10 p-4 text-[14px] leading-relaxed text-red-200">
+              <p className="font-bold text-red-300">Yapılandırma hatası</p>
+              {warnings.map((text) => (
+                <p key={text}>{text}</p>
+              ))}
+            </div>
+          )}
+          {children}
+          <AdminPrivacyNotice />
+        </main>
+      </div>
     </div>
   );
 }
