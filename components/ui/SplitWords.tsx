@@ -1,6 +1,7 @@
 'use client';
 
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import { EASE_YOCA, VIEWPORT_ONCE } from '@/lib/motion';
 
 /**
@@ -50,7 +51,7 @@ export default function SplitWords({
   className,
   breakSentences = true,
 }: SplitWordsProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const sentences = breakSentences ? toSentences(text) : [text];
   // Words carry their sentence index so line breaks land between sentences.
   const words: Array<{ word: string; sentence: number }> = [];

@@ -2,7 +2,8 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { useRef } from 'react';
-import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion';
+import { motion, useScroll, useTransform } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import { EASE_YOCA } from '@/lib/motion';
 
 /**
@@ -24,7 +25,7 @@ interface ParallaxMediaProps {
 }
 
 export default function ParallaxMedia({ src, alt = '', width, height, className, video, priority }: ParallaxMediaProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] });
   const y = useTransform(scrollYProgress, [0, 1], [14, -14]);

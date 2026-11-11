@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { motion, useMotionValue, useReducedMotion, useSpring } from 'framer-motion';
+import { motion, useMotionValue, useSpring } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 
 /**
  * Yoca — Ambient & Theme Engine.
@@ -13,7 +14,7 @@ import { motion, useMotionValue, useReducedMotion, useSpring } from 'framer-moti
  * All layers are pointer-events-none and respect prefers-reduced-motion.
  */
 export default function AmbientBackground() {
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [spotlightOn, setSpotlightOn] = useState(false);
 
   const mouseX = useMotionValue(0);

@@ -1,6 +1,7 @@
 'use client';
 
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import { EASE_YOCA, VIEWPORT_ONCE } from '@/lib/motion';
 
 /**
@@ -15,7 +16,7 @@ interface FlowDiagramProps {
 }
 
 export default function FlowDiagram({ steps, tone = 'dark' }: FlowDiagramProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const line = tone === 'light' ? 'bg-[rgba(5,5,5,0.16)]' : 'bg-line';
   const fill = tone === 'light' ? 'bg-yoca-green' : 'bg-yoca-lime';
   const label = tone === 'light' ? 'text-[#050505]' : 'text-soft';

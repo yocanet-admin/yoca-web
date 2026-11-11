@@ -1,6 +1,7 @@
 'use client';
 
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import { EASE_YOCA } from '@/lib/motion';
 
 /**
@@ -12,7 +13,7 @@ import { EASE_YOCA } from '@/lib/motion';
  */
 
 export default function ProductMotif({ productKey }: { productKey: string }) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const pop = (i: number) => ({
     initial: reduced ? false : { opacity: 0, scale: 0.6 },
     whileInView: { opacity: 1, scale: 1 },

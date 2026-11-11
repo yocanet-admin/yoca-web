@@ -1,7 +1,8 @@
 'use client';
 
 import { useRef } from 'react';
-import { motion, useAnimationFrame, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform, useVelocity } from 'framer-motion';
+import { motion, useAnimationFrame, useMotionValue, useScroll, useSpring, useTransform, useVelocity } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 
 /**
  * Yoca — kinetic brand band (motion signature).
@@ -49,7 +50,7 @@ function Track({ words, direction, velocity, reduced }: { words: string[]; direc
 }
 
 export default function BrandBand({ line }: BrandBandProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const words = line.split('.').map((w) => w.trim()).filter(Boolean);
   const { scrollY } = useScroll();
   const rawVelocity = useVelocity(scrollY);

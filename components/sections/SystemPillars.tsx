@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import type { Dict } from '@/lib/i18n';
 import { EASE_YOCA } from '@/lib/motion';
 import SplitWords from '@/components/ui/SplitWords';
@@ -30,7 +31,7 @@ const ANCHORS = ['brand', 'growth', 'scale'];
 const TONE = ['bg-[#050505]', 'bg-yoca-green', 'bg-yoca-lime'];
 
 export default function SystemPillars({ t, base }: SystemPillarsProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const [hovered, setHovered] = useState<number | null>(null);
   const [scrolled, setScrolled] = useState(0);
   const active = hovered ?? scrolled;

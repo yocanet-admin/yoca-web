@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import type { Dict } from '@/lib/i18n';
 import { EASE_YOCA } from '@/lib/motion';
 
@@ -147,7 +148,7 @@ function Preview({ index, reduced, flow }: { index: number; reduced: boolean; fl
 }
 
 export default function ServicesIndex({ t, flows, base }: ServicesIndexProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const [active, setActive] = useState(0);
 
   return (

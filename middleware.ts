@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { insightSlugFromPath } from '@/lib/insightAlternates';
+import { serviceExists, serviceSlugFromPath, workSlugFromPath, workVerdict } from '@/lib/detailRoutes';
 import { isAppLocale, LOCALE_COOKIE, pickLocale, type AppLocale } from '@/lib/localeDetect';
 
 /**
@@ -22,6 +23,10 @@ import { isAppLocale, LOCALE_COOKIE, pickLocale, type AppLocale } from '@/lib/lo
  *   page WITH a real 404 status (notFound() inside the streamed page would
  *   answer 200 + noindex). Draft previews (?preview=) skip the check; any
  *   lookup error fails open (the page itself still shows not-found).
+ * - /{locale}/services/{slug} and /{locale}/work/{slug} get the same real 404
+ *   for a slug that certainly has no page (lib/detailRoutes.ts): services
+ *   from the fixed list, work from an anon lookup of an active row plus the
+ *   code project slugs. Anything uncertain fails open to the page.
  */
 
 
@@ -34,23 +39,16 @@ const isLocale = (value: string | undefined): value is AppLocale => isAppLocale(
 
 const NOT_FOUND_PATH = '/__yoca-not-found';
 
-/** true = published row exists, false = definitely missing, null = unknown (fail open). */
-async function insightExists(locale: AppLocale, slug: string): Promise<boolean | null> {
+/** Anon REST lookup: true = a matching row exists, false = none, null = unknown (fail open). */
+async function anyRow(table: string, filters: Record<string, string>): Promise<boolean | null> {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!base || !key) return null;
-  const params = new URLSearchParams({
-    select: 'id',
-    locale: `eq.${locale}`,
-    slug: `eq.${slug}`,
-    status: 'eq.PUBLISHED',
-    publish_at: `lte.${new Date().toISOString()}`,
-    limit: '1',
-  });
+  const params = new URLSearchParams({ ...filters, limit: '1' });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 1500);
   try {
-    const res = await fetch(`${base.replace(/\/$/, '')}/rest/v1/insights?${params.toString()}`, {
+    const res = await fetch(`${base.replace(/\/$/, '')}/rest/v1/${table}?${params.toString()}`, {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
       signal: controller.signal,
       cache: 'no-store',
@@ -63,6 +61,23 @@ async function insightExists(locale: AppLocale, slug: string): Promise<boolean |
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** true = published row exists, false = definitely missing, null = unknown (fail open). */
+function insightExists(locale: AppLocale, slug: string): Promise<boolean | null> {
+  return anyRow('insights', {
+    select: 'id',
+    locale: `eq.${locale}`,
+    slug: `eq.${slug}`,
+    status: 'eq.PUBLISHED',
+    publish_at: `lte.${new Date().toISOString()}`,
+  });
+}
+
+/** Work detail: see workVerdict (lib/detailRoutes.ts). */
+async function workExists(slug: string): Promise<boolean | null> {
+  if (workVerdict(slug, false) !== false) return null; // a code project: only the page can decide, skip the lookup
+  return workVerdict(slug, await anyRow('case_studies', { select: 'id', slug: `eq.${slug}`, is_active: 'eq.true' }));
 }
 
 export async function middleware(request: NextRequest) {
@@ -92,6 +107,10 @@ export async function middleware(request: NextRequest) {
       const exists = await insightExists(segment, slug);
       if (exists === false) url.pathname = NOT_FOUND_PATH;
     }
+    const serviceSlug = serviceSlugFromPath(rest);
+    if (serviceSlug !== null && !serviceExists(serviceSlug)) url.pathname = NOT_FOUND_PATH;
+    const workSlug = workSlugFromPath(rest);
+    if (workSlug !== null && (await workExists(workSlug)) === false) url.pathname = NOT_FOUND_PATH;
 
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('x-yoca-locale', segment);

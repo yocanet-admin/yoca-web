@@ -1,6 +1,7 @@
 'use client';
 
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import { EASE_YOCA } from '@/lib/motion';
 
 /**
@@ -20,7 +21,7 @@ const INK = '#050505';
 const FAINT = 'rgba(5,5,5,0.14)';
 
 export default function SystemsDiagram({ active, labels }: SystemsDiagramProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const level = reduced ? 2 : active;
   const t = { duration: 0.6, ease: EASE_YOCA };
 

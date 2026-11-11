@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useReducedMotion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 
 /**
  * Yoca — moving index line.
@@ -11,7 +11,7 @@ import { useReducedMotion } from 'framer-motion';
  */
 
 export default function MovingIndex({ line }: { line: string }) {
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = usePrefersReducedMotion();
   const words = line
     .split('.')
     .map((word) => word.trim())

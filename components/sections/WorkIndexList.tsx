@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useRef, useState } from 'react';
-import { motion, useMotionValue, useReducedMotion, useSpring } from 'framer-motion';
+import { motion, useMotionValue, useSpring } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import type { CaseStudy } from '@/lib/workData';
 import { EASE_YOCA, VIEWPORT_ONCE } from '@/lib/motion';
 import ProjectCover from '@/components/work/ProjectCover';
@@ -23,7 +24,7 @@ interface WorkIndexListProps {
 }
 
 export default function WorkIndexList({ studies, base, viewCase, status }: WorkIndexListProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const listRef = useRef<HTMLOListElement>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const px = useMotionValue(0);

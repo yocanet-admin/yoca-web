@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import type { Dict } from '@/lib/i18n';
 import type { Locale } from '@/types';
 import { EASE_YOCA } from '@/lib/motion';
@@ -50,7 +51,7 @@ function track(event: string, params: Record<string, unknown> = {}) {
 }
 
 export default function OverviewShell({ locale, base, address, t }: ShellProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);

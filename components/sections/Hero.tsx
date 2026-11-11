@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useRef } from 'react';
-import { motion, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform } from 'framer-motion';
+import { motion, useMotionValue, useScroll, useSpring, useTransform } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import HeroSymbol from '@/components/ui/HeroSymbol';
 import SplitWords from '@/components/ui/SplitWords';
 import Magnetic from '@/components/ui/Magnetic';
@@ -28,7 +29,7 @@ interface HeroProps {
 }
 
 export default function Hero({ t, base, rail = [] }: HeroProps) {
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = usePrefersReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
   // Scroll parallax: the mark drifts up and leans as the hero leaves the viewport.
   const { scrollYProgress } = useScroll({ target: sectionRef, offset: ['start start', 'end start'] });

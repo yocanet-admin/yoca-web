@@ -1,6 +1,7 @@
 'use client';
 
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 
 /**
  * Yoca — living system diagram (hero visual).
@@ -54,7 +55,7 @@ function keyframesFor(node: NodeSpec, axis: 0 | 1): number[] {
 }
 
 export default function HeroSystemDiagram() {
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   if (prefersReducedMotion) {
     // Static: the connected system state, no motion.

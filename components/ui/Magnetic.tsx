@@ -1,7 +1,8 @@
 'use client';
 
 import { useRef, type ReactNode } from 'react';
-import { motion, useMotionValue, useReducedMotion, useSpring } from 'framer-motion';
+import { motion, useMotionValue, useSpring } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 
 /**
  * Yoca — magnetic wrapper for primary actions.
@@ -9,7 +10,7 @@ import { motion, useMotionValue, useReducedMotion, useSpring } from 'framer-moti
  * and springs back on leave. Pointer devices only; no-op under reduced motion.
  */
 export default function Magnetic({ children, strength = 0.28, className }: { children: ReactNode; strength?: number; className?: string }) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
   const x = useMotionValue(0);
   const y = useMotionValue(0);
