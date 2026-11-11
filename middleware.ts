@@ -76,6 +76,21 @@ function insightExists(locale: AppLocale, slug: string): Promise<boolean | null>
   });
 }
 
+/**
+ * Vercel Deployment Protection (previews and *.vercel.app) also guards this
+ * internal call: without the visitor's own access it answers with a login
+ * redirect (or 401) and every check would fall open. Only the protection credentials the visitor already
+ * sent to this same deployment are passed on (no other cookie, nothing new).
+ */
+function protectionHeaders(request: NextRequest): HeadersInit {
+  const headers: Record<string, string> = {};
+  const jwt = request.cookies.get('_vercel_jwt')?.value;
+  if (jwt) headers.cookie = `_vercel_jwt=${jwt}`;
+  const bypass = request.headers.get('x-vercel-protection-bypass');
+  if (bypass) headers['x-vercel-protection-bypass'] = bypass;
+  return headers;
+}
+
 /** Work detail: asks the server route (lib/detailRoutes.ts → workVerdictFromApi). */
 async function workExists(request: NextRequest, locale: AppLocale, slug: string): Promise<boolean | null> {
   const url = new URL('/api/work-visibility', request.url);
@@ -83,7 +98,7 @@ async function workExists(request: NextRequest, locale: AppLocale, slug: string)
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 1500);
   try {
-    const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+    const res = await fetch(url, { headers: protectionHeaders(request), redirect: 'manual', signal: controller.signal, cache: 'no-store' });
     if (!res.ok) return null;
     return workVerdictFromApi(((await res.json()) as { state?: unknown }).state);
   } catch {
