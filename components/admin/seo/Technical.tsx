@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Card, StatusBadge } from '@/components/admin/cockpit/Widgets';
-import { Badge, small } from '@/components/admin/ops/ui';
+import { Badge, small, ScrollArea } from '@/components/admin/ops/ui';
 import { fmtDate } from '@/lib/cockpit/client';
 import { FIELD_LABEL, FIELD_SCOPE_LABEL, KEY_PAGES, LAB_LABEL, NO_FIELD } from '@/lib/seoPanel/pagespeed';
 import type { AuditFinding, AuditRun, PsiRow } from '@/components/admin/seo/types';
@@ -58,7 +58,7 @@ export function Audit({ audit, onRun, busy, hosts }: { audit: { run: AuditRun; f
               </li>
             ))}
           </ul>
-          <div className="-mx-1 hidden overflow-x-auto md:block">
+          <div className="hidden md:block"><ScrollArea label="Teknik bulgular">
             <table className="w-full min-w-[640px] text-left text-[13px]" data-testid="seo-findings">
               <thead><tr className="border-b border-line text-[11px] uppercase tracking-[0.06em] text-subtle"><th className="px-1 py-2">Önem</th><th className="px-1 py-2">Kontrol</th><th className="px-1 py-2">Sayfa</th><th className="px-1 py-2">Bulgu</th></tr></thead>
               <tbody>
@@ -72,7 +72,7 @@ export function Audit({ audit, onRun, busy, hosts }: { audit: { run: AuditRun; f
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollArea></div>
         </div>
       )}
     </Card>

@@ -15,7 +15,9 @@ import {
 import { FIN_STATE_TONE, MONTH_RE, type Totals } from '@/lib/fin/model';
 import { toCsv } from '@/lib/ops/csv';
 import { dueText, istanbulDay } from '@/lib/ops/model';
-import { formatAmount, formatTotals } from '@/lib/ops/money';
+import { formatAmount, formatMinor, formatTotals } from '@/lib/ops/money';
+import { Chevron } from '@/components/admin/tangram/ui';
+import t from '@/components/admin/tangram/tangram.module.css';
 
 /**
  * Yoca Finans — Gelirler. Manual receivables (not tied to Operasyon or to a
@@ -82,6 +84,8 @@ function IncomePage() {
   if (!data) return <p className="text-[14px] text-subtle">Yükleniyor…</p>;
   if (!data.ready) return <Flash tone="bad" message={data.error ?? 'Gelirler yüklenemedi.'} />;
   const mName = monthName(month);
+  const expectedSub = `${ov.count} kayıt${ov.unknownCount ? ` · ${ov.unknownCount} kaydın tutarı bekleniyor` : ''}`;
+  const collectedSub = `${mName} gelirlerine kaydedilen net tahsilat (iadeler düşülür); tahsilat tarihine göre değil${Object.keys(ov.over).length ? ` · ${formatTotals(ov.over)} fazla tahsilat dahil` : ''}${Object.keys(ov.collectedUnknown).length ? ` · ${formatTotals(ov.collectedUnknown)} tutarı bilinmeyen kayıtlara` : ''}`;
 
   return (
     <div className="grid gap-6">
@@ -98,13 +102,42 @@ function IncomePage() {
         {month !== thisMonth && <button type="button" className={small} onClick={() => goMonth(thisMonth)}>Bu aya dön</button>}
       </div>
 
-      <section aria-label="Gelir dönem takibi" className="-mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <TotalsCard title={`Beklenen · ${mName}`} totals={ov.total} sub={`${ov.count} kayıt${ov.unknownCount ? ` · ${ov.unknownCount} kaydın tutarı bekleniyor` : ''}`} />
-        <TotalsCard title={`Tahsil edilen · ${mName}`} totals={ov.collected} sub={`${mName} gelirlerine kaydedilen net tahsilat (iadeler düşülür); tahsilat tarihine göre değil${Object.keys(ov.over).length ? ` · ${formatTotals(ov.over)} fazla tahsilat dahil` : ''}${Object.keys(ov.collectedUnknown).length ? ` · ${formatTotals(ov.collectedUnknown)} tutarı bilinmeyen kayıtlara` : ''}`} tone="ok" />
+      <section aria-label="Gelir dönem takibi" className={`-mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4 ${t.moneyDesk}`}>
+        <TotalsCard title={`Beklenen · ${mName}`} totals={ov.total} sub={expectedSub} />
+        <TotalsCard title={`Tahsil edilen · ${mName}`} totals={ov.collected} sub={collectedSub} tone="ok" />
         <TotalsCard title={`Kalan alacak · ${mName}`} totals={ov.remaining} sub={`${ov.remainingCount} kayıt`} />
         <TotalsCard title="Geciken alacak · Tüm aylar · bugün itibarıyla" totals={ov.overdue} sub={`${ov.overdueCount} kayıt · tutarı bilinmeyenler hariç`} tone={ov.overdueCount ? 'bad' : undefined} />
       </section>
-      <p className="-mt-3 text-[12px] text-subtle">Dönem takibi: kartlar yalnızca {mName} dönemine ait gelirleri sayar (Operasyon: müşteri tahsilat vadesinin ayı). Gerçek tahsilat tarihine göre giren para Finans › Genel bakış’taki nakit hareketindedir. Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Tutarı bilinmeyen kayıtlar toplamlara 0 olarak eklenmez.{noMonth ? ` Vadesi girilmemiş ${noMonth} Operasyon kaydı aylara dahil değil (Tüm aylar’da görünür).` : ''}</p>
+
+      {/* phones: the same figures in the compact Giderler layout; the long explanations are in the disclosure below */}
+      <section aria-label="Gelirler (özet)" className={t.sumMob}>
+        <div className={t.sumHead}>
+          <span>{mName}</span>
+          <a href="#gelirler-kayitlar" className={t.sumJump} onClick={(e) => { e.preventDefault(); const el = document.getElementById('gelirler-kayitlar'); el?.scrollIntoView({ block: 'start' }); el?.focus({ preventScroll: true }); }}>Kayıtlara geç ({shown.length}) ↓</a>
+        </div>
+        <div className={t.sumGrid}>
+          <SumCell title="Beklenen" totals={ov.total} sub={`${ov.count} kayıt${ov.unknownCount ? ` · ${ov.unknownCount} tutarı yok` : ''}`} />
+          <SumCell title="Tahsil edilen" totals={ov.collected} sub="net · dönem esası" />
+          <SumCell title="Kalan" totals={ov.remaining} sub={`${ov.remainingCount} kayıt`} />
+        </div>
+        <div className={`${t.sumRow} ${ov.overdueCount ? t.sumBad : ''}`}>
+          <span className={t.sumRowTitle}>{ov.overdueCount > 0 && <span aria-hidden="true">✕</span>} Geciken alacak · tüm aylar · bugün itibarıyla</span>
+          <strong className={t.num}>{formatTotals(ov.overdue)}</strong>
+          <small>{ov.overdueCount} kayıt · tutarı bilinmeyenler hariç</small>
+          {ov.overdueCount > 0 && <button type="button" className={`${t.btn} ${t.btnSmall} ${t.sumRowBtn}`} onClick={() => setParam({ state: 'overdue', kapsam: 'tum' })}>Listele</button>}
+        </div>
+      </section>
+
+      <details className={`${t.explain} -mt-2`}>
+        <summary><Chevron /> Bu kartlar nasıl hesaplanır?</summary>
+        <ul className={t.explainList}>
+          <li><strong>“Beklenen” ({mName}):</strong> {expectedSub}.</li>
+          <li><strong>“Tahsil edilen” ({mName}):</strong> {collectedSub}.</li>
+          <li><strong>“Kalan alacak” ({mName}):</strong> {ov.remainingCount} kayıt.</li>
+          <li><strong>“Geciken alacak” (tüm aylar, bugün itibarıyla):</strong> {ov.overdueCount} kayıt; tutarı bilinmeyenler hariç.</li>
+        </ul>
+        <p>Dönem takibi: kartlar yalnızca {mName} dönemine ait gelirleri sayar (Operasyon: müşteri tahsilat vadesinin ayı). Gerçek tahsilat tarihine göre giren para Finans › Genel bakış’taki nakit hareketindedir. Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Tutarı bilinmeyen kayıtlar toplamlara 0 olarak eklenmez.{noMonth ? ` Vadesi girilmemiş ${noMonth} Operasyon kaydı aylara dahil değil (Tüm aylar’da görünür).` : ''}</p>
+      </details>
 
       <section aria-label="Filtreler" className="grid grid-cols-2 gap-3 admin-box p-3 lg:grid-cols-4">
         <label className="admin-label">Kategori
@@ -140,11 +173,27 @@ function IncomePage() {
         </span>
       </div>
 
+      <div id="gelirler-kayitlar" tabIndex={-1} className="grid scroll-mt-20 outline-none">
       {shown.length === 0 ? <Empty text={items.length ? 'Bu filtrelere uyan kayıt yok.' : 'Henüz gelir yok. “Yeni gelir” ile ilk alacağı ekleyin; Operasyon’daki müşteri tahsilatları burada kendiliğinden görünür.'} /> : (
         <AdminTable head={['Dönem / vade', 'Gelir / hizmet', 'Kategori', 'Müşteri / ödeyen', 'Beklenen', 'Tahsil edilen', 'Kalan', 'Durum', '']} min={980} label="Gelirler">
           {shown.map((it) => <Row key={it.key} it={it} today={today} />)}
         </AdminTable>
       )}
+      </div>
+    </div>
+  );
+}
+
+/** Compact summary cell (phones), the same piece as Giderler's: one line per currency, never added together. */
+const lines = (x: Totals) => { const keys = Object.keys(x).sort(); return keys.length ? keys.map((c) => formatMinor(x[c], c)) : ['—']; };
+function SumCell({ title, totals, sub }: { title: string; totals: Totals; sub: string }) {
+  return (
+    <div className={t.sumCell}>
+      <span className={t.sumCellTitle}>{title}</span>
+      <ul className={`${t.sumLines} ${t.num}`} aria-label={`${title}: para birimine göre`}>
+        {lines(totals).map((l) => <li key={l}>{l}</li>)}
+      </ul>
+      <small>{sub}</small>
     </div>
   );
 }

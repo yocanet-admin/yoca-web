@@ -61,6 +61,11 @@ insert into ops_services (id, name, kind, status, provider_id, owner_party, owne
   ('22222222-0000-4000-8000-000000000003', 'TEST E-posta paketi', 'email', 'pending', '11111111-0000-4000-8000-000000000004', 'client', '11111111-0000-4000-8000-000000000002', 'client', '11111111-0000-4000-8000-000000000002', 'yoca', current_date - 4, 'yearly', 12, 'unknown', 60, 'AZN', 120, 'AZN', null),
   ('22222222-0000-4000-8000-000000000004', 'TEST Eski SSL', 'ssl', 'expired', null, 'unknown', null, 'unknown', null, 'unknown', null, null, null, 'unknown', null, null, null, null, null);
 update ops_services set archived_at = now() where id = '22222222-0000-4000-8000-000000000004';
+-- Like the app (create / renewal keep them equal): the record's end date = the open period's end.
+-- "TEST E-posta paketi" keeps an EMPTY record end date on purpose while its open period has one:
+-- the list must say "Eksik: Hizmet kaydında bitiş tarihi" and mark the shown date as the open period's.
+update ops_services set end_on = current_date + 12, start_on = current_date - 353 where id = '22222222-0000-4000-8000-000000000001';
+update ops_services set end_on = current_date + 3, start_on = current_date - 27 where id = '22222222-0000-4000-8000-000000000002';
 insert into ops_periods (service_id, starts_on, ends_on, due_on, status, expected_cost, cost_currency, expected_price, price_currency) values
   ('22222222-0000-4000-8000-000000000001', current_date - 353, current_date + 12, current_date + 12, 'open', 18.5, 'USD', 950, 'TRY'),
   ('22222222-0000-4000-8000-000000000002', current_date - 27, current_date + 3, current_date + 3, 'open', 24, 'EUR', null, null),

@@ -6,6 +6,9 @@
 // panel head, the page never scrolls sideways, no native <input type="date"> (dates use the Turkish dark
 // DateField), tables are framed (admin-table) and become cards on phones. Also: the finance user still
 // reaches only the Finans screens; the new-document dialog opens, Escape/Vazgeç closes it and focus returns.
+// Exceptions checked on purpose: the Hizmetler filter group folds on phones; the Insights scheduling field is
+// DateField + hour/minute (local value, same format as before); a wide inner table (CSV preview) scrolls
+// sideways inside its own named, focusable area instead of becoming cards, and the page itself does not.
 // It writes nothing except one draft document created through the app's own API when none exists.
 const { chromium } = require('playwright');
 const { execFileSync } = require('node:child_process');
@@ -134,6 +137,77 @@ async function login(browser, email, pw, viewport) {
     const input = page.getByLabel('Bitiş (başlangıç) (gg.aa.yyyy)');
     await input.fill(''); await input.press('Tab'); await page.waitForTimeout(400);
     check('Tarih silinince filtre kalkıyor', !/[?&]from=/.test(page.url()), page.url());
+    await ctx.close();
+  }
+
+  // Hizmetler on a phone: search stays visible, the long filter group folds behind "Filtreler"
+  {
+    const { ctx, page } = await login(browser, 'admin@test.local', 'itest-admin-pw', { width: 390, height: 844 });
+    await page.goto(`${BASE}/admin/ops/services`); await page.waitForTimeout(2500);
+    const toggle = page.locator('button[aria-controls="hizmet-filtreler"]');
+    const box = page.locator('#hizmet-filtreler');
+    const search = page.getByLabel('Hizmet ara');
+    check('390px Hizmetler: arama görünür, filtre grubu kapalı', (await search.isVisible()) && (await toggle.getAttribute('aria-expanded')) === 'false' && !(await box.isVisible()));
+    await toggle.click();
+    check('390px Hizmetler: “Filtreler” açılınca grup görünüyor', (await toggle.getAttribute('aria-expanded')) === 'true' && (await box.isVisible()));
+    await page.goto(`${BASE}/admin/ops/services?status=active`); await page.waitForTimeout(2500);
+    const label = (await page.locator('button[aria-controls="hizmet-filtreler"]').textContent()) ?? '';
+    check('390px Hizmetler: kapalıyken etkin filtre sayısı ve adı görünüyor', /Filtreler · 1: Hizmet durumu/.test(label) && !(await page.locator('#hizmet-filtreler').isVisible()), label);
+    await ctx.close();
+  }
+  // Hizmetler 1440: the desktop filter group is not folded
+  {
+    const { ctx, page } = await login(browser, 'admin@test.local', 'itest-admin-pw', { width: 1440, height: 900 });
+    await page.goto(`${BASE}/admin/ops/services`); await page.waitForTimeout(2500);
+    check('1440px Hizmetler: filtre grubu açık, katlama düğmesi yok', (await page.locator('#hizmet-filtreler').isVisible()) && !(await page.locator('button[aria-controls="hizmet-filtreler"]').isVisible()));
+    // missing label names the record field when the shown date is the open period's
+    const row = page.locator('main tr', { hasText: 'TEST E-posta paketi' }).first();
+    const rowText = (await row.innerText()).replace(/\s+/g, ' ');
+    check('Eksik etiketi hangi alanın eksik olduğunu söylüyor (hizmet kaydı bitişi; gösterilen tarih açık dönemin)', /Hizmet kaydında bitiş tarihi/.test(rowText) && /açık dönemin bitişi/.test(rowText), rowText.slice(0, 200));
+    const dom = (await page.locator('main tr', { hasText: 'TEST kuzey-anadolu' }).first().innerText()).replace(/\s+/g, ' ');
+    check('Kayıt ve dönem bitişi aynı olan hizmette bitiş eksiği yok', !/bitiş tarihi/i.test(dom), dom.slice(0, 200));
+    // CSV preview (client-side only, nothing is created): wide preview scrolls inside its own frame
+    await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(300);
+    await page.getByRole('button', { name: 'CSV içe aktar' }).first().click();
+    await page.locator('section[aria-label="CSV içe aktar"] input[type="file"]').setInputFiles({ name: 'test.csv', mimeType: 'text/csv', buffer: Buffer.from('name,kind,note\nTEST önizleme-alan-adi.test,domain,Yalnız önizleme\n') });
+    await page.waitForTimeout(800);
+    const region = page.getByRole('region', { name: /İçe aktarma önizlemesi/ });
+    const r = await region.evaluate((el) => ({ label: el.getAttribute('aria-label'), tab: el.tabIndex, sw: el.scrollWidth, cw: el.clientWidth, page: document.documentElement.scrollWidth - document.documentElement.clientWidth })).catch((e) => ({ err: e.message }));
+    check('İç tablo kendi alanında yana kayıyor; alan odaklanabilir ve “yana kaydırılabilir” diye adlandırılmış; sayfa taşmıyor', r.sw > r.cw && r.tab === 0 && /yana kaydırılabilir/.test(r.label ?? '') && r.page <= 0, JSON.stringify(r));
+    check('Kaydırma ipucu görünüyor', await page.getByText('↔ Tablo yana kaydırılabilir').first().isVisible());
+    await ctx.close();
+  }
+
+  // Insights scheduling: dark date field + hour/minute; preview top bar in the shared look
+  if (ids.insight) {
+    const { ctx, page } = await login(browser, 'admin@test.local', 'itest-admin-pw', { width: 1440, height: 900 });
+    await page.goto(`${BASE}/admin/insights/${ids.insight}`); await page.waitForTimeout(3500);
+    await page.getByRole('button', { name: 'Yayın', exact: true }).click(); await page.waitForTimeout(400);
+    const group = page.getByRole('group', { name: 'Zamanla (yerel saat)' });
+    check('Zamanlama alanı görünür; yerel tarih-saat girişi yok', (await group.isVisible()) && (await page.locator('main input[type="datetime-local"]').count()) === 0);
+    const btn = page.getByRole('button', { name: 'Zamanla', exact: true });
+    await group.getByLabel('Zamanla (yerel saat): tarih (gg.aa.yyyy)').fill('15.01.2031');
+    await group.getByLabel('Zamanla (yerel saat): tarih (gg.aa.yyyy)').press('Tab');
+    const onlyDate = await btn.isDisabled();
+    await group.getByLabel('Zamanla (yerel saat): saat').selectOption('09');
+    const noMinute = await btn.isDisabled();
+    await group.getByLabel('Zamanla (yerel saat): dakika').selectOption('30');
+    check('Zamanla yalnız tarih, saat ve dakika birlikte seçilince etkin', onlyDate && noMinute && !(await btn.isDisabled()), `${onlyDate}/${noMinute}`);
+    // the confirm text shows the local value the field emits; dismissing it sends nothing
+    let asked = '';
+    page.once('dialog', (d) => { asked = d.message(); void d.dismiss(); });
+    await btn.click(); await page.waitForTimeout(400);
+    check('Alan yerel değeri eski biçimde veriyor (2031-01-15 09:30), onay reddedilince işlem yok', asked.includes('2031-01-15 09:30 için zamanlansın'), asked);
+    check('Takvim düğmesi koyu Türkçe tarih bileşeninden', (await group.getByRole('button', { name: 'Zamanla (yerel saat): tarih: takvimi aç' }).count()) === 1);
+    await page.getByRole('button', { name: 'Önizle', exact: true }).first().click(); await page.waitForTimeout(800);
+    const dlg = page.getByRole('dialog', { name: 'Önizleme' });
+    const seg = dlg.getByRole('group', { name: 'Önizleme genişliği' });
+    const mobile = seg.getByRole('button', { name: 'Mobil (390 px)' });
+    await mobile.click();
+    const bar = await dlg.evaluate((el) => ({ tabs: el.querySelectorAll('.admin-tabs .admin-tab').length, primary: Boolean(el.querySelector('.admin-btn-primary')) }));
+    check('Önizleme üst çubuğu ortak görünümde (sekme grubu + birincil Kapat)', bar.tabs === 2 && bar.primary && (await mobile.getAttribute('aria-pressed')) === 'true', JSON.stringify(bar));
+    await dlg.getByRole('button', { name: 'Kapat' }).click();
+    check('Önizleme Kapat ile kapanıyor', (await page.getByRole('dialog', { name: 'Önizleme' }).count()) === 0);
     await ctx.close();
   }
 

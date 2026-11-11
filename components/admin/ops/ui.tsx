@@ -136,6 +136,36 @@ export function AdminTable({ head, children, min = 820, cards = true, className 
   );
 }
 
+/**
+ * Inner tables (detail screens, import previews) keep their columns and scroll
+ * sideways inside their own area; the page never does. When the content is
+ * wider than the area: a visible hint, a visible scrollbar, and the area is a
+ * focusable, labelled region so it can also be scrolled with the keyboard.
+ */
+export function ScrollArea({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [over, setOver] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setOver(el.scrollWidth > el.clientWidth + 1);
+    check();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div className="grid min-w-0 gap-1">
+      <div ref={ref} role="region" aria-label={over ? `${label} (yana kaydırılabilir)` : label} tabIndex={over ? 0 : undefined} className={`admin-scroll ${className}`}>
+        {children}
+      </div>
+      {over && <p className="admin-hint" aria-hidden="true">↔ Tablo yana kaydırılabilir</p>}
+    </div>
+  );
+}
+
 export function Unknown({ children = 'Bilinmiyor' }: { children?: ReactNode }) {
   return <span className="italic text-subtle">{children}</span>;
 }

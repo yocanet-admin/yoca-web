@@ -5,7 +5,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { StatusBadges } from '@/components/admin/ops/ServiceForm';
 import { LabeledDate } from '@/components/admin/DateField';
-import { Badge, Details, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, label as labelCls, small } from '@/components/admin/ops/ui';
+import { Badge, Details, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, label as labelCls, small, ScrollArea } from '@/components/admin/ops/ui';
 import { IMPORT_FIELDS, guessMapping, parseCsv, toCsv, validateImport, type ImportField, type ImportRow } from '@/lib/ops/csv';
 import { createService, loadOps, type OpsData, type Party, type Project } from '@/lib/ops/data';
 import {
@@ -21,6 +21,7 @@ import {
   dueText,
   istanbulDay,
   missingInfo,
+  missingText,
   payState,
   renewState,
   type PaySummary,
@@ -77,7 +78,7 @@ function buildRows(data: OpsData, today: string): Row[] {
       renew: renewState(s, open, pays, today),
       pin: open ? payState(open, pays, 'in', today) : null,
       pout: open ? payState(open, pays, 'out', today) : null,
-      missing: missingInfo(s),
+      missing: missingInfo(s).map((m) => missingText(m, open?.ends_on)),
       domain,
     };
   });
@@ -91,6 +92,7 @@ function EndCell({ r, today }: { r: Row; today: string }) {
     <span className="grid">
       <span className="tabular-nums">{fmtDate(r.end)}</span>
       <span className={`text-[11px] ${left < 0 ? 'text-red-300' : left <= 30 ? 'text-yellow-200' : 'text-subtle'}`}>{dueText(r.end, today)}</span>
+      {!r.s.end_on && r.open?.ends_on && <span className="text-[11px] text-subtle">açık dönemin bitişi</span>}
     </span>
   );
 }
@@ -156,6 +158,10 @@ function ServicesInner() {
   }, [rows, f.q, f.within, f.archived, f.kind, f.status, f.owner, f.renew, f.missing, f.autorenew, f.client, f.provider, f.from, f.to, f.sort, today, projectClient]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const active = ['kind', 'status', 'owner', 'renew', 'within', 'missing', 'autorenew', 'client', 'provider', 'from', 'to', 'archived', 'q'].filter((k) => params.get(k));
+  // phones: the long filter group folds under "Filtreler" (search and sort stay visible); its summary shows what is active
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const FILTER_NAME: Record<string, string> = { kind: 'Tür', status: 'Hizmet durumu', owner: 'Ekip sorumlusu', renew: 'Yenileme', within: 'Bitiş', missing: 'Eksik bilgi', autorenew: 'Otomatik yenileme', client: 'Müşteri', provider: 'Sağlayıcı', from: 'Bitiş (başlangıç)', to: 'Bitiş (son)', archived: 'Arşiv' };
+  const activeLabels = active.filter((k) => k !== 'q').map((k) => FILTER_NAME[k] ?? k);
   const owners = useMemo(() => Array.from(new Set((data?.services ?? []).map((s) => (s.team_owner ?? '').trim()).filter(Boolean))).sort(), [data]);
   const customers = (data?.parties ?? []).filter((p) => !p.roles.includes('provider') || p.roles.includes('customer'));
   const providers = (data?.parties ?? []).filter((p) => p.roles.includes('provider'));
@@ -216,6 +222,11 @@ function ServicesInner() {
             </select>
           </label>
         </div>
+        <button type="button" className="admin-btn admin-btn-sm justify-start md:hidden" aria-expanded={filtersOpen} aria-controls="hizmet-filtreler" onClick={() => setFiltersOpen((v) => !v)}>
+          <span aria-hidden="true">{filtersOpen ? '▴' : '▾'}</span>
+          <span className="min-w-0 truncate">Filtreler{activeLabels.length ? ` · ${activeLabels.length}: ${activeLabels.join(', ')}` : ''}</span>
+        </button>
+        <div id="hizmet-filtreler" className={`${filtersOpen ? 'grid' : 'hidden'} gap-3 md:grid`}>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           {sel('kind', 'Tür', SERVICE_KINDS.map((k) => [k, KIND_LABEL[k]]))}
           {sel('status', 'Hizmet durumu', SERVICE_STATUSES.map((k) => [k, SERVICE_STATUS_LABEL[k]]))}
@@ -232,6 +243,7 @@ function ServicesInner() {
           <label className="flex items-center gap-2"><input type="checkbox" className="admin-check" checked={f.autorenew === 'unverified'} onChange={(e) => setParams({ autorenew: e.target.checked ? 'unverified' : null })} />Otomatik yenileme doğrulanmamış</label>
           <label className="flex items-center gap-2"><input type="checkbox" className="admin-check" checked={f.archived} onChange={(e) => setParams({ archived: e.target.checked ? '1' : null })} />Yalnızca arşivdekiler</label>
           {active.length > 0 && <button type="button" className={small} onClick={() => { setQ(''); router.replace(BASE, { scroll: false }); }}>Filtreleri temizle</button>}
+        </div>
         </div>
       </section>
 
@@ -467,7 +479,7 @@ function ImportPanel({ data, onImported, onClose }: { data: OpsData; onImported:
             <button type="button" className={small} disabled={busy} onClick={() => setPicked({})}>Seçimi temizle</button>
           </div>
 
-          <div className="max-h-[60vh] overflow-auto border border-line">
+          <ScrollArea label="İçe aktarma önizlemesi" className="max-h-[60vh] overflow-y-auto rounded-[12px] border border-[var(--line,#262a31)]">
             <table className="w-full min-w-[880px] text-left text-[12px]">
               <thead className="sticky top-0 bg-surface text-[11px] uppercase tracking-[0.06em] text-subtle">
                 <tr>
@@ -501,7 +513,7 @@ function ImportPanel({ data, onImported, onClose }: { data: OpsData; onImported:
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollArea>
 
           <div className="flex flex-wrap items-center gap-3">
             <button type="button" className="admin-btn-primary" disabled={busy || !mappedOk || !chosen.length} onClick={run}>{busy ? progress || 'Kaydediliyor…' : `Seçili ${chosen.length} kaydı ekle`}</button>

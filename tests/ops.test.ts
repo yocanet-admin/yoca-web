@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { formatAmount, formatMinor, minorToDb, parseAmount, toMinor, totalsByCurrency } from '../lib/ops/money';
-import { addMonths, daysUntil, duplicateService, istanbulDay, missingInfo, payState, renewState, suggestNextEnd, type Payment, type PeriodRow, type Service } from '../lib/ops/model';
+import { addMonths, daysUntil, duplicateService, istanbulDay, missingInfo, missingText, payState, renewState, suggestNextEnd, type Payment, type PeriodRow, type Service } from '../lib/ops/model';
 import { planReminders } from '../lib/ops/reminders';
 import { guessMapping, parseCsv, toCsv, validateImport } from '../lib/ops/csv';
 
@@ -77,6 +77,10 @@ test('partial payments, refunds, voids, overdue, other currency kept apart', () 
 test('missing info is listed; unknown end date is not "süresiz"', () => {
   assert.deepEqual(missingInfo({ end_on: null, is_perpetual: false, period: 'yearly', team_owner: null, provider_id: null, kind: 'domain' }), ['Bitiş tarihi', 'Ekip sorumlusu', 'Sağlayıcı']);
   assert.deepEqual(missingInfo({ end_on: null, is_perpetual: true, period: null, team_owner: 'a@b', provider_id: 'x', kind: 'saas' }), []);
+  // display only: the record's own end date vs the open period's end (rule unchanged)
+  assert.equal(missingText('Bitiş tarihi', '2026-11-23'), 'Hizmet kaydında bitiş tarihi');
+  assert.equal(missingText('Bitiş tarihi', null), 'Bitiş tarihi');
+  assert.equal(missingText('Ekip sorumlusu', '2026-11-23'), 'Ekip sorumlusu');
 });
 
 const svc = (p: Partial<Service> = {}): Service => ({ id: 's1', name: 'example.com', kind: 'domain', status: 'active', provider_id: null, provider_account_id: null, panel_url: null, start_on: null, end_on: '2026-12-31', is_perpetual: false, due_on: null, cancel_by: null, period: 'yearly', period_months: null, auto_renew: 'unknown', owner_party: 'client', owner_client_id: null, payer_party: 'client', payer_client_id: null, renewer_party: 'yoca', team_owner: null, cost_amount: null, cost_currency: null, price_amount: null, price_currency: null, details: {}, custom_fields: [], reminder_days: null, cancel_reminder_days: null, customer_notify: false, customer_recipients: [], tags: [], note: null, archived_at: null, created_by: null, created_at: '', updated_at: '', ...p });

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Badge, Flash, field, fmtDate, small } from '@/components/admin/ops/ui';
+import { Badge, Flash, field, fmtDate, small, ScrollArea } from '@/components/admin/ops/ui';
 import { importRequest, listImportRows, resolveImportRow, type ImportRowRecord } from '@/lib/fin/data';
 import { ACTION_LABEL, type ImportAction, type PlanRow } from '@/lib/fin/importPlan';
 import { CATEGORY_LABEL, METHOD_LABEL } from '@/lib/fin/model';
@@ -95,7 +95,7 @@ export function ImportPanel({ onApplied }: { onApplied: () => void }) {
 
           <div className="admin-card grid gap-2 p-4 text-[13px]">
             <h3 className="text-[14px] font-extrabold">Kontrol toplamları (TRY)</h3>
-            <div className="overflow-x-auto">
+            <ScrollArea label="Kontrol toplamları">
               <table className="w-full min-w-[560px] text-left">
                 <thead className="text-[11px] uppercase tracking-[0.06em] text-subtle"><tr><th className="py-1">Kalem</th><th>Excel hücresi</th><th>Satırlardan hesaplanan</th><th>Uyum</th></tr></thead>
                 <tbody className="tabular-nums">
@@ -104,7 +104,7 @@ export function ImportPanel({ onApplied }: { onApplied: () => void }) {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ScrollArea>
             <p className="text-[12px] text-subtle">{preview.totals.computed.knownCount} satırın tutarı biliniyor; tutarı eksik {preview.totals.computed.missingCount} satır toplamlara katılmadı (sıfır sayılmadı).</p>
             <div className="grid gap-1 border-t border-line pt-2">
               <p className="font-bold">Aktarımdan sonra sistemde ({monthName(preview.month)}, yeni satırlar)</p>

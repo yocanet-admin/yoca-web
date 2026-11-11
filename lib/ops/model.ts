@@ -270,6 +270,16 @@ export function missingInfo(s: Pick<Service, 'end_on' | 'is_perpetual' | 'period
   return out;
 }
 
+/**
+ * Display text of one missingInfo() item. "Bitiş tarihi" is the service
+ * record's own end date (Bitiş — dönem sonu). Lists show the open period's end
+ * first, so when the record's date is empty but the open period has one, the
+ * text says which date is missing. The rule itself (missingInfo) is unchanged.
+ */
+export function missingText(item: string, openPeriodEnd: string | null | undefined): string {
+  return item === 'Bitiş tarihi' && openPeriodEnd ? 'Hizmet kaydında bitiş tarihi' : item;
+}
+
 /** "Kalan 12 gün" / "3 gün geçti" / "Bugün". */
 export function dueText(date: string | null, today: string): string {
   if (!date) return 'Tarih bilinmiyor';

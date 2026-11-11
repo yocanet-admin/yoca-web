@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/admin/cockpit/Widgets';
-import { Badge, field, small } from '@/components/admin/ops/ui';
+import { Badge, field, small, ScrollArea } from '@/components/admin/ops/ui';
 import { fmtDay, fmtNumber } from '@/lib/cockpit/client';
 import { countryLabel, ctrText, groupSuggestions, keywordFiltersText, KEYWORD_LANGS, NO_DATA, POSITION_LABEL, positionText, SOURCE_LABEL, STATUS_LABEL, type KeywordSource, type KeywordStatus } from '@/lib/seoPanel/model';
 import type { SeoKeyword } from '@/components/admin/seo/types';
@@ -109,7 +109,7 @@ export function Keywords({ keywords, gscQueries, act, busy, connected, filters, 
             <ul className="grid gap-3 md:hidden" data-testid="seo-keyword-cards">
               {targets.map((k) => <KeywordCard key={k.id} k={k} busy={busy} onEdit={() => setEditing(toDraft(k))} onToggle={toggle(k)} onDelete={() => remove(k)} />)}
             </ul>
-            <div className="-mx-1 hidden overflow-x-auto md:block">
+            <div className="hidden md:block"><ScrollArea label="Anahtar kelimeler">
               <table className="w-full min-w-[1040px] text-left text-[13px]" data-testid="seo-keyword-table">
                 <thead><tr className="border-b border-line text-[11px] uppercase tracking-[0.06em] text-subtle">
                   {['Kelime', 'Dil', 'Hedef ülke', 'Hedef sayfa', 'Kaynak', 'Durum', 'Tıklama', 'Gösterim', 'TO', POSITION_LABEL, 'Önceki dönem', ''].map((h, i) => <th key={i} className={`px-1 py-2 font-bold ${i >= 6 && i < 11 ? 'text-right' : ''}`}>{h}</th>)}
@@ -133,7 +133,7 @@ export function Keywords({ keywords, gscQueries, act, busy, connected, filters, 
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ScrollArea></div>
           </>
         )}
       </Card>

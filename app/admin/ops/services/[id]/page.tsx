@@ -5,7 +5,7 @@ import { LabeledDate } from '@/components/admin/DateField';
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ServiceForm, { EMAIL_RE, PAY_TONE, RENEW_TONE, StatusBadges, looksSecret } from '@/components/admin/ops/ServiceForm';
-import { Badge, DateOr, Documents, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, fmtDateTime, label as labelCls, small } from '@/components/admin/ops/ui';
+import { Badge, DateOr, Documents, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, fmtDateTime, label as labelCls, small, ScrollArea } from '@/components/admin/ops/ui';
 import {
   addPayment,
   archiveRow,
@@ -35,6 +35,7 @@ import {
   dueText,
   istanbulDay,
   missingInfo,
+  missingText,
   payState,
   renewState,
   suggestNextEnd,
@@ -513,7 +514,7 @@ function PaymentsSection({ service, data, say, reload }: { service: Service; dat
   return (
     <Section title="Ödeme kayıtları" id="odemeler" action={<label className="flex items-center gap-2 text-[12px] text-muted"><input type="checkbox" className="accent-yoca-lime" checked={showVoided} onChange={(e) => setShowVoided(e.target.checked)} />İptal edilenleri göster</label>}>
       {pays.length === 0 ? <p className="text-[13px] text-subtle">Ödeme kaydı yok. Kayıtlar “Dönem geçmişi”ndeki dönemden eklenir.</p> : (
-        <div className="overflow-x-auto">
+        <ScrollArea label="Ödeme kayıtları">
           <table className="w-full min-w-[760px] text-left text-[12px]">
             <thead className="text-[11px] uppercase tracking-[0.06em] text-subtle">
               <tr><th className="py-1.5 pe-3">Tarih</th><th className="py-1.5 pe-3">Yön</th><th className="py-1.5 pe-3">Tür</th><th className="py-1.5 pe-3 text-right">Tutar</th><th className="py-1.5 pe-3">Yöntem · ref</th><th className="py-1.5 pe-3">Dönem</th><th className="py-1.5 pe-3">Durum</th><th className="py-1.5" /></tr>
@@ -549,7 +550,7 @@ function PaymentsSection({ service, data, say, reload }: { service: Service; dat
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
       )}
       <p className="text-[11px] text-subtle">Ödeme kayıtları silinmez; yanlış kayıt “İptal et (void)” ile nedeni yazılarak iptal edilir ya da düzeltme/iade kaydı eklenir.</p>
     </Section>
@@ -799,7 +800,7 @@ function NotificationsSection({ notes, error, today, onForward, say, reload }: {
     <Section title="Bildirim geçmişi" id="bildirimler">
       {error && <Flash tone="warn" message={`Bazı kayıtlar okunamadı: ${error}`} />}
       {notes.length === 0 ? <p className="text-[12px] text-subtle">Bu hizmet için planlanmış, gönderilmiş veya iletilmiş bildirim yok.</p> : (
-        <div className="overflow-x-auto">
+        <ScrollArea label="Bildirim geçmişi">
           <table className="w-full min-w-[760px] text-left text-[12px]">
             <thead className="text-[11px] uppercase tracking-[0.06em] text-subtle">
               <tr><th className="py-1.5 pe-3">Tür</th><th className="py-1.5 pe-3">Zaman</th><th className="py-1.5 pe-3">Hedef tarih</th><th className="py-1.5 pe-3">Durum</th><th className="py-1.5 pe-3">Ayrıntı</th><th className="py-1.5 pe-3">Gönderildi</th><th className="py-1.5" /></tr>
@@ -839,7 +840,7 @@ function NotificationsSection({ notes, error, today, onForward, say, reload }: {
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
       )}
     </Section>
   );
@@ -896,7 +897,7 @@ function ServiceDetailInner({ id }: { id: string }) {
       renew: renewState(service, open, pays, today),
       pin: open ? payState(open, pays, 'in', today) : null,
       pout: open ? payState(open, pays, 'out', today) : null,
-      missing: missingInfo(service),
+      missing: missingInfo(service).map((m) => missingText(m, open?.ends_on)),
       licenses: data.licenses.filter((l) => l.service_id === id),
     };
   }, [data, service, id, today]);

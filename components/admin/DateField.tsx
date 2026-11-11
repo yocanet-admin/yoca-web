@@ -164,3 +164,49 @@ export function LabeledDate({ label, className = '', ...rest }: { label: string;
     </div>
   );
 }
+
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
+/**
+ * Local date + time (the value of an <input type="datetime-local">:
+ * "yyyy-MM-ddTHH:mm", the browser's local time). The date is the dark Turkish
+ * DateField; hour and minute are two selects. The value is emitted only when
+ * date, hour and minute are all chosen (otherwise ''), exactly like the native
+ * field, so callers convert it as before (e.g. localInputToIso).
+ */
+export function DateTimeField({ label, value, onChange, id }: { label: string; value: string; onChange: (local: string) => void; id?: string }) {
+  const auto = useId();
+  const base = id ?? auto;
+  const [d, setD] = useState(value.slice(0, 10));
+  const [h, setH] = useState(value.slice(11, 13));
+  const [m, setM] = useState(value.slice(14, 16));
+  useEffect(() => {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) { setD(value.slice(0, 10)); setH(value.slice(11, 13)); setM(value.slice(14, 16)); }
+  }, [value]);
+  const emit = (nd: string, nh: string, nm: string) => onChange(isIso(nd) && nh && nm ? `${nd}T${nh}:${nm}` : '');
+  const sel = 'h-10 rounded-[10px] border border-[var(--line-2,#343943)] bg-[var(--inset,#0d0f12)] px-2 text-[13px] font-semibold tabular-nums text-soft outline-none focus:border-yoca-lime focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yoca-lime';
+  return (
+    <div className="admin-label" role="group" aria-labelledby={`${base}-legend`}>
+      <span id={`${base}-legend`}>{label}</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-[11rem] flex-1">
+          <DateField label={`${label}: tarih`} today="" value={d} onChange={(v) => { setD(v); emit(v, h, m); }} />
+        </div>
+        <div className="flex items-center gap-1">
+          <label className="sr-only" htmlFor={`${base}-h`}>{label}: saat</label>
+          <select id={`${base}-h`} className={sel} value={h} onChange={(e) => { setH(e.target.value); emit(d, e.target.value, m); }}>
+            <option value="">sa</option>
+            {HOURS.map((x) => <option key={x} value={x}>{x}</option>)}
+          </select>
+          <span aria-hidden="true" className="font-bold text-subtle">:</span>
+          <label className="sr-only" htmlFor={`${base}-m`}>{label}: dakika</label>
+          <select id={`${base}-m`} className={sel} value={m} onChange={(e) => { setM(e.target.value); emit(d, h, e.target.value); }}>
+            <option value="">dk</option>
+            {MINUTES.map((x) => <option key={x} value={x}>{x}</option>)}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}

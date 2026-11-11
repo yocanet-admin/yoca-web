@@ -1,6 +1,7 @@
 'use client';
 
 /* eslint-disable @next/next/no-img-element */
+import { DateTimeField } from '@/components/admin/DateField';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getAdminClient } from '@/lib/adminClient';
@@ -532,7 +533,7 @@ export default function InsightEditor({ id, embedded = false, onState, reloadTok
                 {!row.id ? <p className="text-[12px] text-yellow-300">Önce kaydedin.</p> : (
                   <div className="flex flex-wrap items-end gap-2">
                     <button type="button" className="admin-btn-primary" disabled={publishing || dirty || row.status === 'PUBLISHED'} onClick={() => publishAction('publish')}>Şimdi yayınla</button>
-                    <label className={label}>Zamanla (yerel saat)<input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className={field} /></label>
+                    <DateTimeField label="Zamanla (yerel saat)" value={scheduleAt} onChange={setScheduleAt} />
                     <button type="button" className="admin-btn" disabled={publishing || dirty || !scheduleAt} onClick={() => publishAction('schedule')}>Zamanla</button>
                     {(row.status === 'PUBLISHED' || row.status === 'SCHEDULED') && <button type="button" className="admin-btn" disabled={publishing || dirty} onClick={() => publishAction('unpublish')}>Yayından kaldır</button>}
                     {!embedded && !row.source_insight_id && siblings.some((s) => s.source_insight_id === row.id) && <button type="button" className="admin-btn" disabled={publishing || dirty} onClick={publishAll} title="Kaynak yazıyı ve dil kontrolü işaretlenmiş çevirileri yayınlar">Tüm dilleri yayınla</button>}
