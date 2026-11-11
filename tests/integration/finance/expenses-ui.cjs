@@ -134,7 +134,8 @@ async function login(ctx, email, pw, start = '/admin/ops') {
   // mobile
   const m = await b.newContext({ ...require('playwright').devices['iPhone 13'], reducedMotion: 'reduce' });
   const mp = await login(m, 'finance@test.local', 'itest-finance-pw', '/admin/expenses');
-  await mp.getByText(/^Ödenen · /).waitFor();
+  // phones show the compact summary (the desktop cards are hidden there)
+  await mp.locator('section[aria-label="Genel bakış (özet)"]').waitFor();
   await mp.screenshot({ path: `${OUT}/8-mobil-genel-bakis.png`, fullPage: true });
   const wide = await mp.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   check('mobile: no horizontal page scroll', !wide);
@@ -143,7 +144,8 @@ async function login(ctx, email, pw, start = '/admin/ops') {
   const actx = await b.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
   const ap = await login(actx, 'admin@test.local', 'itest-admin-pw', '/admin/expenses');
   await ap.getByText(/^Ödenen · /).waitFor();
-  const anav = await ap.locator('aside nav').innerText();
+  // textContent: group titles are shown upper-case by CSS, innerText would return them so
+  const anav = await ap.locator('aside nav').textContent();
   check('admin: full menu plus the new Finans / Giderler entry', /Operasyon/.test(anav) && /Kokpit/.test(anav) && /Giderler/.test(anav));
   await ap.goto(`http://localhost:3190/admin/expenses/ops/${OPS_PERIOD}`);
   await ap.getByText('Kaynak: Operasyon').first().waitFor();

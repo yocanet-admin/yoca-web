@@ -1,21 +1,23 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Badge, Empty, Flash, PageHead, field, fmtDate, small } from '@/components/admin/ops/ui';
-import { Remaining, SourceBadge, StateBadge, money } from '@/components/admin/fin/parts';
+import { Badge, Empty, Flash, fmtDate } from '@/components/admin/ops/ui';
 import { ImportPanel } from '@/components/admin/fin/ImportPanel';
 import { MonthPicker } from '@/components/admin/fin/MonthPicker';
 import { FinanceNav } from '@/components/admin/fin/FinanceNav';
+import { DateField } from '@/components/admin/DateField';
+import { Chevron, Status, type Tone } from '@/components/admin/tangram/ui';
+import t from '@/components/admin/tangram/tangram.module.css';
 import { loadFinance, type FinData } from '@/lib/fin/data';
 import {
-  CATEGORIES, CATEGORY_LABEL, CSV_HEADER, FIN_STATE_LABEL, MONTH_RE, RECURRENCE_LABEL, buildItems, csvRows, filterItems, listTotals, monthBounds, overview,
-  type Filter, type Item, type Totals,
+  CATEGORIES, CATEGORY_LABEL, CSV_HEADER, FIN_STATE_LABEL, MONTH_RE, RECURRENCE_LABEL, buildItems, csvRows, filterItems, listTotals, monthBounds, overview, stateText,
+  type FinState, type Filter, type Item, type Totals,
 } from '@/lib/fin/model';
 import { toCsv } from '@/lib/ops/csv';
 import { daysUntil, dueText, istanbulDay } from '@/lib/ops/model';
-import { formatAmount, formatTotals } from '@/lib/ops/money';
+import { formatAmount, formatMinor, formatTotals } from '@/lib/ops/money';
 
 /**
  * Yoca — Giderler (overview + list). Recurring and one-off expenses together
@@ -26,25 +28,26 @@ import { formatAmount, formatTotals } from '@/lib/ops/money';
  * ahead of time for the next month never enter this month's totals. "Geciken"
  * is the only point-in-time card (as of today, every month).
  * Filters live in the URL (shareable): ?ay=&kapsam=tum&cat=&state=&prov=&from=&to=&src=&q=&view=
+ *
+ * Layout: approved Tangram design (components/admin/tangram). Calculations,
+ * data and actions unchanged: a payment is recorded on the period's own page
+ * ("Ödeme kaydet" opens it). Red overdue styling only for the "overdue" state;
+ * a period awaiting a payment date or without an amount reads "Vade tarihi geçti".
  */
 
 const BASE = '/admin/expenses';
 const STATE_OPTIONS: Array<[string, string]> = [['open', 'Ödenmemiş'], ['', 'Tümü'], ['pending', FIN_STATE_LABEL.pending], ['partial', FIN_STATE_LABEL.partial], ['overdue', FIN_STATE_LABEL.overdue], ['paid', FIN_STATE_LABEL.paid], ['review', FIN_STATE_LABEL.review], ['over', FIN_STATE_LABEL.over], ['unknown', FIN_STATE_LABEL.unknown], ['cancelled', FIN_STATE_LABEL.cancelled]];
-
-function Card({ title, totals, sub, tone }: { title: string; totals: Totals; sub?: string; tone?: 'bad' | 'warn' }) {
-  return (
-    <div className={`grid gap-0.5 border px-3 py-2.5 ${tone === 'bad' ? 'border-red-500/50' : tone === 'warn' ? 'border-yellow-400/40' : 'border-line'}`}>
-      <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-subtle">{title}</span>
-      <span className="text-[16px] font-extrabold tabular-nums">{formatTotals(totals)}</span>
-      {sub && <span className="text-[12px] text-subtle">{sub}</span>}
-    </div>
-  );
-}
+const STATE_TONE: Record<FinState, Tone> = { pending: 'info', partial: 'warn', paid: 'good', overdue: 'bad', over: 'warn', unknown: 'muted', review: 'warn', cancelled: 'muted' };
+const STATE_ICON: Record<FinState, string> = { pending: '○', partial: '½', paid: '●', overdue: '✕', over: '▲', unknown: '?', review: '◷', cancelled: '–' };
+const lines = (x: Totals) => { const keys = Object.keys(x).sort(); return keys.length ? keys.map((c) => formatMinor(x[c], c)) : ['—']; };
+const money = (v: bigint | null, currency: string | null) => (v !== null && currency ? formatMinor(v, currency) : '—');
+const fmtShort = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
 
 function ExpensesPage() {
   const router = useRouter();
   const params = useSearchParams();
   const [data, setData] = useState<FinData | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const today = istanbulDay();
   useEffect(() => { void loadFinance().then(setData); }, []);
 
@@ -65,6 +68,7 @@ function ExpensesPage() {
   // List scope: a custom due-date range if given, otherwise the selected month (or every month on request).
   const custom = Boolean(f.from || f.to);
   const allMonths = !custom && params.get('kapsam') === 'tum';
+  const userFrom = f.from ?? '', userTo = f.to ?? '';
   if (!custom && !allMonths) { const b = monthBounds(month); f.from = b.from; f.to = b.to; }
 
   const items = useMemo(() => (data?.ready ? buildItems({ ...data, today }) : []), [data, today]);
@@ -92,91 +96,171 @@ function ExpensesPage() {
   const monthText = (m: string) => new Intl.DateTimeFormat('tr-TR', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${m}-15T12:00:00Z`));
   const monthName = monthText(month);
   const goMonth = (m: string) => setParam({ ay: m === thisMonth ? '' : m, from: '', to: '', kapsam: '' });
-  const scopeText = custom ? `Vade ${f.from ? fmtDate(f.from) : '…'} – ${f.to ? fmtDate(f.to) : '…'}` : allMonths ? 'Tüm aylar' : monthName;
+  const scopeText = custom ? `Vade ${userFrom ? fmtDate(userFrom) : '…'} – ${userTo ? fmtDate(userTo) : '…'}` : allMonths ? 'Tüm aylar' : monthName;
+  const listOverdue = () => setParam({ view: '', state: 'overdue', from: '', to: '', kapsam: 'tum' });
+  const activeLabels = [
+    f.category ? CATEGORY_LABEL[f.category as keyof typeof CATEGORY_LABEL] ?? f.category : '',
+    params.get('state') && params.get('state') !== 'open' ? (STATE_OPTIONS.find(([v]) => v === (f.state ?? ''))?.[1] ?? '') : '',
+    f.provider ? providers.find(([id]) => id === f.provider)?.[1] ?? f.provider : '',
+    f.source ? (f.source === 'ops' ? 'Operasyon' : 'Giderler') : '',
+    custom ? `Vade ${userFrom ? fmtShort(userFrom) : '…'}–${userTo ? fmtShort(userTo) : '…'}` : '',
+    f.q ? `“${f.q.length > 12 ? `${f.q.slice(0, 12)}…` : f.q}”` : '',
+  ].filter(Boolean);
+  const isOverdueView = f.state === 'overdue' && allMonths;
+  const explanation = `Aylık kartlar yalnızca vadesi ${monthName} içinde olan dönemleri sayar; sonraki ay için önceden açılan dönemler o ayın toplamına girer. “Ödenen”, bu dönemlere kaydedilen net ödemedir (iadeler düşülür); ödemenin hangi tarihte yapıldığına bakılmaz. Fazla ödeme olduğu gibi gösterilir, toplamlar eşitlensin diye değiştirilmez. Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Operasyon sağlayıcı ödemeleri tek kayıt olarak sayılır; vadesi bilinmeyen kayıtlar aylık toplamlara girmez. Tutarı beklenen dönemler toplamlara katılmaz.${ov.reviewCount ? ` Kaynakta “Ödendi” işaretli ama ödeme tarihi beklenen ${ov.reviewCount} dönem (${formatTotals(ov.review)}) ayrı gösterilir: ödeme sayılmaz, gecikmeye girmez.` : ''}`;
+  const paidSub = `${monthName} dönemlerine kaydedilen net ödemeler (iadeler düşülür); ödeme tarihine göre değil${Object.keys(ov.over).length ? ` · ${formatTotals(ov.over)} fazla ödeme dahil` : ''}${Object.keys(ov.paidUnknown).length ? ` · ${formatTotals(ov.paidUnknown)} tutarı bilinmeyen dönemlere` : ''}`;
 
   return (
-    <div className="grid gap-6">
-      <PageHead kicker="Finans"
-        title="Giderler"
-        sub="Düzenli ve tek seferlik giderler ile Operasyon’daki sağlayıcı ödemeleri. Kayıt ve takip içindir; banka işlemi veya otomatik ödeme yapmaz."
-        actions={<>
-          <Link href={`${BASE}/new`} className="admin-btn admin-btn-primary">Yeni gider</Link>
-          <button type="button" className="admin-btn" onClick={exportCsv} disabled={!shown.length}>CSV indir ({shown.length})</button>
-        </>}
-      />
+    <div className={t.screen}>
+      <header className={t.head}>
+        <div className={t.headText}>
+          <p className={t.kicker}>Finans</p>
+          <h1 className={t.h1}>Giderler</h1>
+          <p className={t.lede}>Düzenli ve tek seferlik giderler ile Operasyon’daki sağlayıcı ödemeleri. Kayıt ve takip içindir; banka işlemi veya otomatik ödeme yapmaz.</p>
+        </div>
+        <div className={t.headActions}>
+          <button type="button" className={t.btn} onClick={exportCsv} disabled={!shown.length}>CSV indir ({shown.length})</button>
+          <Link href={`${BASE}/new`} className={`${t.btn} ${t.btnPrimary}`}>+ Yeni gider</Link>
+        </div>
+      </header>
 
-      <FinanceNav active="expenses" />
-      <div className="flex flex-wrap items-center gap-2">
-        <MonthPicker value={month} onChange={goMonth} thisMonth={thisMonth} />
-        {month !== thisMonth && <button type="button" className={small} onClick={() => goMonth(thisMonth)}>Bu aya dön</button>}
+      <div className={t.finNav}>
+        <div className={t.finNavSkin}><FinanceNav active="expenses" /></div>
+        <div className={`${t.periodRow} ${t.pickerSkin}`}>
+          <MonthPicker value={month} onChange={goMonth} thisMonth={thisMonth} />
+          {month !== thisMonth && <button type="button" className={`${t.btn} ${t.btnSmall} ${t.btnGhost}`} onClick={() => goMonth(thisMonth)}>Bu aya dön</button>}
+        </div>
       </div>
-      <section aria-label="Genel bakış" className={`-mt-3 grid gap-3 sm:grid-cols-2 ${ov.reviewCount ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>
-        <Card title={`Gider · ${monthName}`} totals={ov.total} sub={`${ov.count} dönem${ov.unknownCount ? ` · ${ov.unknownCount} dönemin tutarı bekleniyor` : ''}`} />
-        <Card title={`Ödenen · ${monthName}`} totals={ov.paid} sub={`${monthName} dönemlerine kaydedilen net ödemeler (iadeler düşülür); ödeme tarihine göre değil${Object.keys(ov.over).length ? ` · ${formatTotals(ov.over)} fazla ödeme dahil` : ''}${Object.keys(ov.paidUnknown).length ? ` · ${formatTotals(ov.paidUnknown)} tutarı bilinmeyen dönemlere` : ''}`} />
-        <Card title={`Kalan · ${monthName}`} totals={ov.remaining} sub={`${ov.remainingCount} dönem`} />
-        {ov.reviewCount > 0 && <Card title="Ödendi işaretli · tarih bekleniyor" totals={ov.review} sub={`${ov.reviewCount} dönem · ödeme sayılmaz, gecikmeye girmez`} tone="warn" />}
-        <Card title="Geciken · Tüm aylar · bugün itibarıyla" totals={ov.overdue} sub={`${ov.overdueCount} dönem · ödeme tarihi bekleyen ve tutarı bilinmeyen dönemler hariç`} tone={ov.overdueCount ? 'bad' : undefined} />
-      </section>
-      <p className="-mt-3 text-[12px] text-subtle">Aylık kartlar yalnızca vadesi {monthName} içinde olan dönemleri sayar; sonraki ay için önceden açılan dönemler o ayın toplamına girer. “Ödenen”, bu dönemlere kaydedilen net ödemedir (iadeler düşülür); ödemenin hangi tarihte yapıldığına bakılmaz. Fazla ödeme olduğu gibi gösterilir, toplamlar eşitlensin diye değiştirilmez. Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Operasyon sağlayıcı ödemeleri tek kayıt olarak sayılır; vadesi bilinmeyen kayıtlar aylık toplamlara girmez. Tutarı beklenen dönemler toplamlara katılmaz.{ov.reviewCount ? ` Kaynakta “Ödendi” işaretli ama ödeme tarihi beklenen ${ov.reviewCount} dönem (${formatTotals(ov.review)}) ayrı gösterilir: ödeme sayılmaz, gecikmeye girmez.` : ''}</p>
 
-      <div className="flex flex-wrap gap-2" role="tablist">
-        {([['periods', 'Dönemler ve ödemeler'], ['defs', 'Gider tanımları'], ['import', 'Aktarım']] as const).map(([k, t]) => (
-          <button key={k} type="button" role="tab" aria-selected={view === k} className={`${small} ${view === k ? '!border-yoca-lime !text-yoca-lime' : ''}`} onClick={() => setParam({ view: k === 'periods' ? '' : k })}>{t}</button>
+      <section aria-label="Genel bakış" className={`${t.money} ${ov.reviewCount ? '' : t.money4} ${t.moneyDesk}`}>
+        <MoneyCard title={`Gider · ${monthName}`} totals={ov.total} sub={`${ov.count} dönem${ov.unknownCount ? ` · ${ov.unknownCount} dönemin tutarı bekleniyor` : ''}`} />
+        <MoneyCard title={`Ödenen · ${monthName}`} totals={ov.paid} sub={paidSub} />
+        <MoneyCard title={`Kalan · ${monthName}`} totals={ov.remaining} sub={`${ov.remainingCount} dönem`} />
+        {ov.reviewCount > 0 && <MoneyCard tone="warn" icon="◷" title="Ödendi işaretli · tarih bekleniyor" totals={ov.review} sub={`${ov.reviewCount} dönem · ödeme sayılmaz, gecikmeye girmez`} />}
+        <MoneyCard last tone={ov.overdueCount ? 'bad' : undefined} icon={ov.overdueCount ? '✕' : undefined} title="Geciken · Tüm aylar · bugün itibarıyla" totals={ov.overdue}
+          sub={`${ov.overdueCount} dönem · ödeme tarihi bekleyen ve tutarı bilinmeyen dönemler hariç`}
+          action={ov.overdueCount ? <button type="button" className={`${t.btn} ${t.btnSmall}`} onClick={listOverdue}>Gecikenleri listele</button> : null} />
+      </section>
+
+      {/* phones: the same figures, compact; the long explanations stay in the disclosure below */}
+      <section aria-label="Genel bakış (özet)" className={t.sumMob}>
+        <div className={t.sumHead}>
+          <span>{monthName}</span>
+          {view === 'periods' && <a href="#giderler-kayitlar" className={t.sumJump} onClick={(e) => { e.preventDefault(); const el = document.getElementById('giderler-kayitlar'); el?.scrollIntoView({ block: 'start' }); el?.focus({ preventScroll: true }); }}>Kayıtlara geç ({shown.length}) ↓</a>}
+        </div>
+        <div className={t.sumGrid}>
+          <SumCell title="Gider" totals={ov.total} sub={`${ov.count} dönem${ov.unknownCount ? ` · ${ov.unknownCount} tutarı yok` : ''}`} />
+          <SumCell title="Ödenen" totals={ov.paid} sub="net · dönem esası" />
+          <SumCell title="Kalan" totals={ov.remaining} sub={`${ov.remainingCount} dönem`} />
+        </div>
+        {ov.reviewCount > 0 && (
+          <div className={`${t.sumRow} ${t.sumWarn}`}>
+            <span className={t.sumRowTitle}><span aria-hidden="true">◷</span> Ödendi işaretli · tarih bekleniyor</span>
+            <strong className={t.num}>{formatTotals(ov.review)}</strong>
+            <small>{ov.reviewCount} dönem · ödeme sayılmaz, gecikmeye girmez</small>
+          </div>
+        )}
+        <div className={`${t.sumRow} ${ov.overdueCount ? t.sumBad : ''}`}>
+          <span className={t.sumRowTitle}>{ov.overdueCount > 0 && <span aria-hidden="true">✕</span>} Geciken · tüm aylar · bugün itibarıyla</span>
+          <strong className={t.num}>{formatTotals(ov.overdue)}</strong>
+          <small>{ov.overdueCount} dönem</small>
+          {ov.overdueCount > 0 && <button type="button" className={`${t.btn} ${t.btnSmall} ${t.sumRowBtn}`} onClick={listOverdue}>Listele</button>}
+        </div>
+      </section>
+
+      <details className={t.explain}>
+        <summary><Chevron /> Bu kartlar nasıl hesaplanır?</summary>
+        <ul className={t.explainList}>
+          <li><strong>“Gider” kartı ({monthName}):</strong> {ov.count} dönem{ov.unknownCount ? `; ${ov.unknownCount} dönemin tutarı bekleniyor (toplama katılmaz)` : ''}.</li>
+          <li><strong>“Ödenen” kartı ({monthName}):</strong> {paidSub}.</li>
+          <li><strong>“Kalan” kartı ({monthName}):</strong> {ov.remainingCount} dönem.</li>
+          {ov.reviewCount > 0 && <li><strong>“Ödendi işaretli” kartı:</strong> {ov.reviewCount} dönem ({formatTotals(ov.review)}); ödeme sayılmaz, gecikmeye girmez.</li>}
+          <li><strong>“Geciken” kartı (tüm aylar, bugün itibarıyla):</strong> {ov.overdueCount} dönem; ödeme tarihi bekleyen ve tutarı bilinmeyen dönemler hariç.</li>
+        </ul>
+        <p>{explanation}</p>
+      </details>
+
+      <div className={t.seg} role="tablist" aria-label="Giderler görünümü" style={{ justifySelf: 'start' }}>
+        {([['periods', 'Dönemler ve ödemeler'], ['defs', 'Gider tanımları'], ['import', 'Aktarım']] as const).map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={view === k} className={t.segBtn} onClick={() => setParam({ view: k === 'periods' ? '' : k })}>{label}</button>
         ))}
       </div>
 
       {view === 'import' ? <ImportPanel onApplied={() => void loadFinance().then(setData)} /> : view === 'defs' ? <Definitions data={data} items={items} /> : (
         <>
-          <section aria-label="Filtreler" className="grid grid-cols-2 gap-3 border border-line p-3 lg:grid-cols-4 xl:grid-cols-7">
-            <label className="grid gap-1 text-[12px] font-semibold text-muted">Kategori
-              <select className={field} value={f.category} onChange={(e) => setParam({ cat: e.target.value })}>
+          <button type="button" className={`${t.btn} ${t.btnSmall} ${t.filterToggle}`} aria-expanded={filtersOpen} aria-controls="giderler-filtreler" onClick={() => setFiltersOpen((v) => !v)}>
+            <Chevron className={filtersOpen ? t.chevOpen : ''} />
+            <span className={t.filterToggleText}>Filtreler{activeLabels.length ? ` · ${activeLabels.length}: ${activeLabels.join(', ')}` : ''}</span>
+          </button>
+          <section id="giderler-filtreler" aria-label="Filtreler" className={`${t.filters} ${filtersOpen ? '' : t.filtersCollapsed}`}>
+            <label className={t.field}>Kategori
+              <select className={`${t.input} ${f.category ? t.filterActive : ''}`} value={f.category} onChange={(e) => setParam({ cat: e.target.value })}>
                 <option value="">Tümü</option>{CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}<option value="ops">{CATEGORY_LABEL.ops}</option>
               </select>
             </label>
-            <label className="grid gap-1 text-[12px] font-semibold text-muted">Durum
-              <select className={field} value={f.state} onChange={(e) => setParam({ state: e.target.value })}>
-                {STATE_OPTIONS.map(([v, t]) => <option key={v || 'all'} value={v}>{t}</option>)}
+            <label className={t.field}>Durum
+              <select className={`${t.input} ${f.state !== 'open' ? t.filterActive : ''}`} value={f.state} onChange={(e) => setParam({ state: e.target.value })}>
+                {STATE_OPTIONS.map(([v, label]) => <option key={v || 'all'} value={v}>{label}</option>)}
               </select>
             </label>
-            <label className="grid gap-1 text-[12px] font-semibold text-muted">Sağlayıcı / firma
-              <select className={field} value={f.provider} onChange={(e) => setParam({ prov: e.target.value })}>
+            <label className={t.field}>Sağlayıcı / firma
+              <select className={`${t.input} ${f.provider ? t.filterActive : ''}`} value={f.provider} onChange={(e) => setParam({ prov: e.target.value })}>
                 <option value="">Tümü</option>{providers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
               </select>
             </label>
-            <label className="grid gap-1 text-[12px] font-semibold text-muted">Vade başı<input type="date" className={field} value={f.from} onChange={(e) => setParam({ from: e.target.value, to: f.to ?? '', kapsam: '' })} /></label>
-            <label className="grid gap-1 text-[12px] font-semibold text-muted">Vade sonu<input type="date" className={field} value={f.to} onChange={(e) => setParam({ to: e.target.value, from: f.from ?? '', kapsam: '' })} /></label>
-            <label className="grid gap-1 text-[12px] font-semibold text-muted">Kaynak
-              <select className={field} value={f.source ?? ''} onChange={(e) => setParam({ src: e.target.value })}>
+            <label className={t.field}>Kaynak
+              <select className={`${t.input} ${f.source ? t.filterActive : ''}`} value={f.source ?? ''} onChange={(e) => setParam({ src: e.target.value })}>
                 <option value="">Tümü</option><option value="fin">Giderler</option><option value="ops">Operasyon</option>
               </select>
             </label>
-            <label className="grid gap-1 text-[12px] font-semibold text-muted">Ara<input className={field} value={f.q} onChange={(e) => setParam({ q: e.target.value })} placeholder="açıklama, firma…" /></label>
+            {/* as before: the fields show the effective range (the month's bounds unless a custom range is set) */}
+            <div className={`${t.field} ${t.dateWrap} ${custom && userFrom ? t.dateActive : ''}`}><span aria-hidden="true">Vade başı</span><DateField label="Vade başı" value={f.from ?? ''} max={f.to || null} today={today} onChange={(v) => setParam({ from: v, to: f.to ?? '', kapsam: '' })} /></div>
+            <div className={`${t.field} ${t.dateWrap} ${custom && userTo ? t.dateActive : ''}`}><span aria-hidden="true">Vade sonu</span><DateField label="Vade sonu" value={f.to ?? ''} min={f.from || null} today={today} onChange={(v) => setParam({ to: v, from: f.from ?? '', kapsam: '' })} /></div>
+            <label className={`${t.field} ${t.filterWide}`}>Ara<input className={`${t.input} ${f.q ? t.filterActive : ''}`} value={f.q} onChange={(e) => setParam({ q: e.target.value })} placeholder="açıklama, firma…" /></label>
           </section>
 
-          <div className="flex flex-wrap gap-3 text-[13px]">
-            <span className="font-semibold">{scopeText}</span>
-            <span className="text-subtle">{shown.length} dönem</span>
-            <span>Tutar: <strong className="tabular-nums">{formatTotals(shownTotals.amount)}</strong></span>
-            <span>Kalan: <strong className="tabular-nums">{formatTotals(shownTotals.remaining)}</strong></span>
-            {Object.keys(shownTotals.review).length > 0 && <span>Ödeme tarihi bekleyen: <strong className="tabular-nums">{formatTotals(shownTotals.review)}</strong></span>}
-            {shownTotals.unknown > 0 && <span className="text-yellow-200">{shownTotals.unknown} dönemin tutarı bekleniyor (toplama katılmadı)</span>}
-            <span className="ms-auto flex gap-2">
-              <button type="button" className={small} onClick={() => setParam({ from: '', to: '', kapsam: '' })}>Seçili ay</button>
-              <button type="button" className={small} onClick={() => setParam({ from: '', to: '', kapsam: 'tum' })}>Tüm aylar</button>
-              <button type="button" className={small} onClick={() => setParam({ state: 'overdue', from: '', to: '', kapsam: 'tum' })}>Gecikenler</button>
-              <button type="button" className={small} onClick={() => router.replace(month === thisMonth ? BASE : `${BASE}?ay=${month}`)}>Filtreleri temizle</button>
+          <div id="giderler-kayitlar" tabIndex={-1} className={t.resultBar}>
+            <span className={t.resultScope}>{scopeText}</span>
+            <span className={t.resultMuted}>{shown.length} dönem</span>
+            <span>Tutar: <strong className={t.num}>{formatTotals(shownTotals.amount)}</strong></span>
+            <span>Kalan: <strong className={t.num}>{formatTotals(shownTotals.remaining)}</strong></span>
+            {Object.keys(shownTotals.review).length > 0 && <span>Ödeme tarihi bekleyen: <strong className={t.num}>{formatTotals(shownTotals.review)}</strong></span>}
+            {shownTotals.unknown > 0 && <span className={t.resultWarn}><span aria-hidden="true">? </span>{shownTotals.unknown} dönemin tutarı bekleniyor (toplama katılmadı)</span>}
+            <span className={t.quick}>
+              <button type="button" className={`${t.btn} ${t.btnSmall} ${!custom && !allMonths ? t.quickOn : ''}`} aria-pressed={!custom && !allMonths} onClick={() => setParam({ from: '', to: '', kapsam: '' })}>Seçili ay</button>
+              <button type="button" className={`${t.btn} ${t.btnSmall} ${allMonths && !isOverdueView ? t.quickOn : ''}`} aria-pressed={allMonths && !isOverdueView} onClick={() => setParam({ from: '', to: '', kapsam: 'tum' })}>Tüm aylar</button>
+              <button type="button" className={`${t.btn} ${t.btnSmall} ${isOverdueView ? t.quickOn : ''}`} aria-pressed={isOverdueView} onClick={() => setParam({ state: 'overdue', from: '', to: '', kapsam: 'tum' })}>Gecikenler</button>
+              <button type="button" className={`${t.btn} ${t.btnSmall} ${t.btnGhost}`} onClick={() => router.replace(month === thisMonth ? BASE : `${BASE}?ay=${month}`)}>Filtreleri temizle</button>
             </span>
           </div>
 
-          {shown.length === 0 ? <Empty text={items.length ? 'Bu filtrelere uyan dönem yok.' : 'Henüz gider yok. “Yeni gider” ile ilk düzenli veya tek seferlik gideri ekleyin.'} /> : (
-            <div className="overflow-x-auto border border-line">
-              <table className="w-full min-w-[980px] text-left text-[13px]">
-                <thead className="bg-surface text-[11px] uppercase tracking-[0.06em] text-subtle">
-                  <tr>{['Vade', 'Gider / hizmet', 'Kategori', 'Sağlayıcı / firma', 'Tutar', 'Ödenen', 'Kalan', 'Durum', ''].map((h) => <th key={h} className="px-3 py-2">{h}</th>)}</tr>
-                </thead>
-                <tbody>{shown.map((it) => <Row key={it.key} it={it} today={today} />)}</tbody>
-              </table>
+          {shown.length === 0 ? (
+            <div className={t.empty}>
+              <span className={t.emptyIcon} aria-hidden="true">∅</span>
+              <p>{items.length ? 'Bu filtrelere uyan dönem yok.' : 'Henüz gider yok. “Yeni gider” ile ilk düzenli veya tek seferlik gideri ekleyin.'}</p>
+              {items.length > 0 && <button type="button" className={`${t.btn} ${t.btnSmall}`} onClick={() => router.replace(month === thisMonth ? BASE : `${BASE}?ay=${month}`)}>Filtreleri temizle</button>}
             </div>
+          ) : (
+            <>
+              <div className={`${t.tableWrap} ${t.desktopOnly}`}>
+                <table className={t.table}>
+                  <colgroup>
+                    <col style={{ width: 104 }} /><col /><col style={{ width: 128 }} />
+                    <col style={{ width: 112 }} /><col style={{ width: 104 }} /><col style={{ width: 108 }} /><col style={{ width: 140 }} /><col style={{ width: 140 }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th scope="col">Vade</th><th scope="col">Gider / hizmet · kategori</th><th scope="col">Sağlayıcı / firma</th>
+                      <th scope="col" className={t.right}>Tutar</th><th scope="col" className={t.right}>Ödenen</th><th scope="col" className={t.right}>Kalan</th><th scope="col">Durum</th><th scope="col"><span className="sr-only">İşlem</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>{shown.map((it) => <Row key={it.key} it={it} today={today} />)}</tbody>
+                </table>
+              </div>
+              <ul className={`${t.cards} ${t.mobileOnly}`}>
+                {shown.map((it) => <MobileCard key={it.key} it={it} today={today} />)}
+              </ul>
+            </>
           )}
         </>
       )}
@@ -185,30 +269,110 @@ function ExpensesPage() {
 }
 
 const href = (it: Item) => (it.source === 'ops' ? `${BASE}/ops/${it.periodId}` : `${BASE}/${it.expenseId}?period=${it.periodId}`);
+const canPay = (it: Item) => !['paid', 'over', 'cancelled'].includes(it.summary.state) && it.summary.state !== 'unknown';
+
+function MoneyCard({ title, totals, sub, tone, icon, last, action }: { title: string; totals: Totals; sub?: string; tone?: 'warn' | 'bad'; icon?: string; last?: boolean; action?: ReactNode }) {
+  return (
+    <div className={`${t.moneyCard} ${tone === 'bad' ? t.moneyBad : tone === 'warn' ? t.moneyWarn : ''} ${last ? t.moneyLast : ''}`}>
+      <span className={t.moneyTitle}>{icon && <span aria-hidden="true" style={{ color: tone === 'bad' ? 'var(--bad)' : 'var(--warn)' }}>{icon}</span>}<span>{title}</span></span>
+      <ul className={`${t.moneyLines} ${t.num}`} aria-label={`${title}: para birimine göre`}>
+        {lines(totals).map((l) => <li key={l}>{l}</li>)}
+      </ul>
+      {sub && <p className={t.moneySub}>{sub}</p>}
+      {action}
+    </div>
+  );
+}
+
+function SumCell({ title, totals, sub }: { title: string; totals: Totals; sub: string }) {
+  return (
+    <div className={t.sumCell}>
+      <span className={t.sumCellTitle}>{title}</span>
+      <ul className={`${t.sumLines} ${t.num}`} aria-label={`${title}: para birimine göre`}>
+        {lines(totals).map((l) => <li key={l}>{l}</li>)}
+      </ul>
+      <small>{sub}</small>
+    </div>
+  );
+}
+
+function Due({ it, today }: { it: Item; today: string }) {
+  const st = it.summary.state;
+  const open = !['paid', 'over', 'cancelled'].includes(st);
+  if (!it.dueOn) return <span className={t.dueText}>Vade bilinmiyor</span>;
+  const d = daysUntil(it.dueOn, today);
+  // red only for what the finance rules call overdue; "review" / unknown amount past the date stay neutral
+  const note = !open ? null
+    : d < 0 ? (st === 'overdue'
+      ? <span className={t.dueLateText}><span aria-hidden="true">✕ </span>{dueText(it.dueOn, today)}</span>
+      : <span className={t.dueText}>Vade tarihi geçti</span>)
+    : <span className={d <= 7 ? t.dueSoonText : t.dueText}>{dueText(it.dueOn, today)}</span>;
+  return (
+    <span className={t.dueCell}>
+      <strong>{fmtDate(it.dueOn)}</strong>
+      {note}
+    </span>
+  );
+}
+
+function Meta({ it, withCategory = false }: { it: Item; withCategory?: boolean }) {
+  return (
+    <span className={t.cellMeta}>
+      {it.source === 'ops'
+        ? <span className={`${t.srcTag} ${t.srcOps}`} title="Kayıt Operasyon'daki sağlayıcı ödemesidir; burada ikinci kez tutulmaz.">Kaynak: Operasyon</span>
+        : <span className={t.srcTag}>Giderler</span>}
+      <span>{[withCategory ? it.categoryText : '', it.recurrence ? RECURRENCE_LABEL[it.recurrence as keyof typeof RECURRENCE_LABEL] : it.source === 'fin' ? 'Tek seferlik' : '', it.periodText].filter(Boolean).join(' · ')}</span>
+    </span>
+  );
+}
 
 function Row({ it, today }: { it: Item; today: string }) {
-  const td = 'px-3 py-2.5 align-top';
-  const d = it.dueOn ? daysUntil(it.dueOn, today) : null;
-  const open = !['paid', 'over', 'cancelled'].includes(it.summary.state);
+  const st = it.summary;
   return (
-    <tr className="border-t border-line">
-      <td className={td}>
-        {it.dueOn ? <span className="grid"><span className="tabular-nums">{fmtDate(it.dueOn)}</span>{open && <span className={`text-[11px] ${d !== null && d < 0 ? 'text-red-300' : d !== null && d <= 7 ? 'text-yellow-200' : 'text-subtle'}`}>{dueText(it.dueOn, today)}</span>}</span> : <span className="text-subtle">Vade bilinmiyor</span>}
-      </td>
-      <td className={td}>
-        <span className="grid gap-0.5">
-          <Link href={href(it)} className="font-semibold text-soft underline-offset-2 hover:underline">{it.title}</Link>
-          <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-subtle"><SourceBadge source={it.source} />{[it.recurrence ? RECURRENCE_LABEL[it.recurrence as keyof typeof RECURRENCE_LABEL] : it.source === 'fin' ? 'Tek seferlik' : '', it.periodText].filter(Boolean).join(' · ')}</span>
-        </span>
-      </td>
-      <td className={td}>{it.categoryText}</td>
-      <td className={td}>{it.provider ?? <span className="text-subtle">—</span>}</td>
-      <td className={`${td} tabular-nums`}>{it.amount ? formatAmount(it.amount, it.currency) : <span className="text-subtle">Tutar bekleniyor</span>}</td>
-      <td className={`${td} tabular-nums`}>{money(it.summary.paid, it.currency)}</td>
-      <td className={td}><Remaining it={it} /></td>
-      <td className={td}><StateBadge s={it.summary} /></td>
-      <td className={td}>{open && it.summary.state !== 'unknown' ? <Link href={href(it)} className={small}>Ödeme kaydet</Link> : <Link href={href(it)} className={small}>Aç</Link>}</td>
+    <tr className={st.state === 'cancelled' ? t.rowCancelled : undefined}>
+      <td><Due it={it} today={today} /></td>
+      <td><span className={t.cellTitle}><Link href={href(it)} className="underline-offset-2 hover:underline"><strong>{it.title}</strong></Link><Meta it={it} withCategory /></span></td>
+      <td>{it.provider ?? <span className={t.dueText}>—</span>}</td>
+      <td className={t.right}>{it.amount ? <span className={t.amt}>{formatAmount(it.amount, it.currency)}</span> : <span className={`${t.amt} ${t.amtMuted}`}>Tutar bekleniyor</span>}</td>
+      <td className={t.right}><span className={`${t.amt} ${st.paid === BigInt(0) ? t.amtMuted : ''}`}>{money(st.paid, it.currency)}</span></td>
+      <td className={t.right}><span className={`${t.amt} ${st.remaining === null ? t.amtMuted : ''}`}>{st.remaining === null ? '—' : money(st.remaining, it.currency)}</span></td>
+      <td className={t.statusCell}><Status tone={STATE_TONE[st.state]} icon={STATE_ICON[st.state]}>{stateText(st)}</Status></td>
+      <td className={t.actionCell}><Link href={href(it)} className={`${t.btn} ${t.btnSmall}`}>{canPay(it) ? 'Ödeme kaydet' : 'Aç'}</Link></td>
     </tr>
+  );
+}
+
+function MobileCard({ it, today }: { it: Item; today: string }) {
+  const [open, setOpen] = useState(false);
+  const st = it.summary;
+  const id = `gider-kart-${it.key.replace(/[^a-z0-9]/gi, '')}`;
+  return (
+    <li className={t.card}>
+      <div className={t.cardTop}>
+        <Link href={href(it)}><strong>{it.title}</strong></Link>
+        <Status tone={STATE_TONE[st.state]} icon={STATE_ICON[st.state]}>{stateText(st)}</Status>
+      </div>
+      <Due it={it} today={today} />
+      <div className={t.cardAmounts}>
+        <div className={t.cardAmount}><span>Tutar</span>{it.amount ? <b className={t.amt}>{formatAmount(it.amount, it.currency)}</b> : <b className={`${t.amt} ${t.amtMuted}`}>Tutar bekleniyor</b>}</div>
+        <div className={t.cardAmount}><span>Kalan</span><b className={`${t.amt} ${st.remaining === null ? t.amtMuted : ''}`}>{st.remaining === null ? '—' : money(st.remaining, it.currency)}</b></div>
+      </div>
+      {open && (
+        <dl id={id} className={t.details}>
+          <div><dt>Ödenen</dt><dd className={t.num}>{money(st.paid, it.currency)}</dd></div>
+          <div><dt>Kategori</dt><dd>{it.categoryText}</dd></div>
+          <div><dt>Sağlayıcı / firma</dt><dd>{it.provider ?? '—'}</dd></div>
+          <div><dt>Kaynak</dt><dd>{it.source === 'ops' ? 'Operasyon (burada ikinci kez tutulmaz)' : 'Giderler'}</dd></div>
+          <div><dt>Tür / dönem</dt><dd>{[it.recurrence ? RECURRENCE_LABEL[it.recurrence as keyof typeof RECURRENCE_LABEL] : it.source === 'fin' ? 'Tek seferlik' : '', it.periodText].filter(Boolean).join(' · ') || '—'}</dd></div>
+        </dl>
+      )}
+      <div className={t.cardActions}>
+        <button type="button" className={`${t.btn} ${t.btnSmall} ${t.btnGhost}`} aria-expanded={open} aria-controls={id} onClick={() => setOpen((v) => !v)}>
+          <Chevron className={open ? t.chevOpen : ''} /> {open ? 'Ayrıntıyı gizle' : 'Ayrıntılar'}
+        </button>
+        <Link href={href(it)} className={`${t.btn} ${t.btnSmall}`}>{canPay(it) ? 'Ödeme kaydet' : 'Aç'}</Link>
+      </div>
+    </li>
   );
 }
 

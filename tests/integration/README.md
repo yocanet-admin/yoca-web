@@ -51,6 +51,8 @@ FAKE_NOW="2026-11-07 09:00:00" bash tests/integration/start.sh
 | Gelirler arayüzü (masaüstü, mobil, klavye, ay seçici) | `finance/income-ui.cjs` | sabit |
 | Cron: dönemler ekran açılmadan, özet, kısmi hata, mükerrer gönderim yok | `finance/cron-roll.mts` | gerçek |
 
+`panel/panel-ui.cjs` (gerçek saat; Finans paketinden sonra): Kokpit ve Giderler'in Tangram düzeni, ortak panel kabuğu (menü grupları, iki sekme eşleşmesi, mobil menü), finans rolü sınırları, Kokpit'in sitelere istek göndermemesi ve Giderler dönemlerini yazmaması, boş/hatalı durumlar, Kokpit kartının Operasyon ve Giderler ile aynı sayıları göstermesi, ziyaretçi grafiklerinin dolu / eksik günlü / sıfır değerli Vercel yanıtlarıyla görünümü (yanıtlar `tests/vercelStub.ts` taklidinden gerçek sunucu koduyla üretilir; hiçbir istek Vercel'e gitmez), Giderler tablosunun 1440–1024 px genişlikleri ve mobil sabit üst çubuk. Çalıştırma: `bash tests/integration/start.sh && node tests/integration/panel/panel-ui.cjs "$ITEST_OUT"`.
+
 `finance/expense-docs.mts`: mevcut gider belgelerinin okunması ve gider yoluna yükleme (migration uyumu kontrolü için tek başına; Giderler paketlerinden hemen sonra, aylık görünüm paketinden önce çalıştırın).
 
 ## Bir migration'ı mevcut production koduyla denemek
