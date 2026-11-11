@@ -25,6 +25,8 @@ export default function CaseStudyVideo({ src, mp4Src, poster, alt, className }: 
   const [near, setNear] = useState(false);
   const [failed, setFailed] = useState(false);
   const visible = useRef(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   // WebM (VP9) first, H.264 MP4 for browsers without VP9 (older Safari / iOS).
   const mp4 = mp4Src ?? (src.endsWith('.webm') ? src.replace(/\.webm$/, '.mp4') : undefined);
 
@@ -59,7 +61,9 @@ export default function CaseStudyVideo({ src, mp4Src, poster, alt, className }: 
   }, [near]);
 
   // Reduced motion, or no playable source: show the poster as a still image.
-  if (reduced || failed) {
+  // `mounted` keeps the first client render identical to the server HTML
+  // (useReducedMotion is null on the server) — no hydration mismatch.
+  if ((mounted && reduced) || failed) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={poster} alt={alt} width={1600} height={900} loading="lazy" className={`block h-auto w-full ${className ?? ''}`} />;
   }

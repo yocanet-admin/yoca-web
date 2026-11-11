@@ -103,16 +103,14 @@ function Fragment({
   const x = useTransform(sx, [-1, 1], [fragment.depth / 14, -fragment.depth / 14]);
   const y = useTransform(sy, [-1, 1], [fragment.depth / 18, -fragment.depth / 18]);
 
-  if (reduced) {
-    return <polygon points={fragment.points} fill={fragment.fill} />;
-  }
-
+  // Same markup with or without reduced motion (hydration-safe): reduced
+  // motion simply starts in the assembled state and does not follow the pointer.
   return (
-    <motion.g style={{ x, y }}>
+    <motion.g style={reduced ? undefined : { x, y }}>
       <motion.polygon
         points={fragment.points}
         fill={fragment.fill}
-        initial={{ opacity: 0, x: fragment.from.x, y: fragment.from.y, rotate: fragment.from.r }}
+        initial={reduced ? false : { opacity: 0, x: fragment.from.x, y: fragment.from.y, rotate: fragment.from.r }}
         animate={{ opacity: 1, x: 0, y: 0, rotate: 0 }}
         transition={{ duration: 1.1, delay: 0.25 + fragment.delay, ease: EASE_YOCA }}
         style={{ transformOrigin: 'center', transformBox: 'fill-box' }}

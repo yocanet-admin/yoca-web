@@ -62,19 +62,6 @@ export default function SplitWords({
   const core = (word: string) => word.replace(/^[\s.,;:!?"'()\[\]{}«»،؛؟\-–—]+|[\s.,;:!?"'()\[\]{}«»،؛؟\-–—]+$/g, '');
   const isEmphasis = (word: string) => emphasis.some((e) => core(word) === core(e));
 
-  if (reduced) {
-    return (
-      <span className={className}>
-        {words.map(({ word, sentence }, index) => (
-          <span key={index}>
-            {isEmphasis(word) ? <span className="underline decoration-yoca-lime decoration-[0.045em] underline-offset-[0.06em]">{word}</span> : word}
-            {index < words.length - 1 ? (multi && words[index + 1].sentence !== sentence ? <br /> : ' ') : ''}
-          </span>
-        ))}
-      </span>
-    );
-  }
-
   const wordVariants = {
     hidden: { y: '125%' },
     visible: (index: number) => ({
@@ -86,8 +73,11 @@ export default function SplitWords({
   // The observer must watch the un-clipped wrapper: words start translated
   // out of their overflow-hidden boxes, so observing them directly would
   // never report an intersection.
-  const trigger_props =
-    trigger === 'load'
+  // Same markup with or without reduced motion (hydration-safe); reduced
+  // motion simply starts in the final state.
+  const trigger_props = reduced
+    ? { initial: false as const, animate: 'visible' }
+    : trigger === 'load'
       ? { initial: 'hidden', animate: 'visible' }
       : { initial: 'hidden', whileInView: 'visible', viewport: VIEWPORT_ONCE };
 
