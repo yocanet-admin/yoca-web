@@ -195,22 +195,22 @@ export default function ImageStudio(props: Props) {
   return (
     <div className="grid gap-3 text-[13px]">
       <p className="text-[12px] text-muted">Görseller özel (herkese kapalı) depoda tutulur; herkese açık bir kopya oluşturulmaz; ziyaretçi bir görseli yalnız yayındaki bir sürüm onu kullandığı sürece görür. Yapay zekâ görselleri müşteri işi, ekip fotoğrafı ya da kanıt olarak sunulmaz; başlık sonradan gerçek yazı tipiyle eklenir. Yapay zekâ görsellerine ve kırpımlarına Yoca logosu sağ alt köşeye sunucuda, gerçek logo dosyasından eklenir (model logo çizmez); düzenleme ve kırpma logosuz asıl görselden yapılır.</p>
-      <div className="grid gap-2 border border-line p-3">
+      <div className="grid gap-2 admin-box p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="font-bold text-white">Kapak özeti</p>
-          <button type="button" className="admin-btn !px-2 !py-1 !text-[12px]" disabled={!!busy || !props.title} onClick={suggestBrief}>Makaleden öner</button>
+          <button type="button" className="admin-btn admin-btn-sm" disabled={!!busy || !props.title} onClick={suggestBrief}>Makaleden öner</button>
         </div>
         {autoNote && <p className="text-[11px] text-subtle">Özet makaleden otomatik önerildi. Üretmeden önce düzenleyebilir ya da kendi tarifinizi yazabilirsiniz.</p>}
         <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={3} className={field} placeholder="Ne görünecek? Ör. Siyah zeminde, randevu kartlarının sırayla dizildiği bir masa; tek yeşil işaret. (Kendi tarifinizi de yazabilirsiniz.)" />
         <div className="grid grid-cols-2 gap-2">
-          <label className="grid gap-1 text-[12px] font-semibold text-muted">Yaklaşım
+          <label className="admin-label">Yaklaşım
             <select value={approach} onChange={(e) => setApproach(e.target.value as 'photo')} className={field}>
               <option value="photo">Fotoğraf</option>
               <option value="illustration">İllüstrasyon</option>
               <option value="diagram">Diyagram (yazısız)</option>
             </select>
           </label>
-          <label className="grid gap-1 text-[12px] font-semibold text-muted">Alt metin (görseli tarif edin)
+          <label className="admin-label">Alt metin (görseli tarif edin)
             <input value={alt} onChange={(e) => setAlt(e.target.value)} className={field} maxLength={300} />
           </label>
         </div>
@@ -248,11 +248,11 @@ export default function ImageStudio(props: Props) {
                 </p>
                 <AltEditor value={img.alt_text} onSave={(t) => saveAlt(img.id, t)} disabled={!!busy} />
                 <div className="flex flex-wrap gap-1.5">
-                  <button type="button" className="admin-btn !px-2 !py-1 !text-[12px]" disabled={!!busy || img.selected} onClick={() => selectCover(img.id)}>Kapak olarak kullan</button>
-                  <button type="button" className="admin-btn !px-2 !py-1 !text-[12px]" disabled={!img.alt_text} title={img.alt_text ? '' : 'Önce alt metin yazın'} onClick={() => props.onInsert(imageMarkdown(img.id, img.alt_text))}>Yazı içine ekle</button>
-                  <button type="button" className="admin-btn !px-2 !py-1 !text-[12px]" disabled={!!busy} onClick={() => setEditFor(editFor === img.id ? null : img.id)}>Talimatla düzenle</button>
+                  <button type="button" className="admin-btn admin-btn-sm" disabled={!!busy || img.selected} onClick={() => selectCover(img.id)}>Kapak olarak kullan</button>
+                  <button type="button" className="admin-btn admin-btn-sm" disabled={!img.alt_text} title={img.alt_text ? '' : 'Önce alt metin yazın'} onClick={() => props.onInsert(imageMarkdown(img.id, img.alt_text))}>Yazı içine ekle</button>
+                  <button type="button" className="admin-btn admin-btn-sm" disabled={!!busy} onClick={() => setEditFor(editFor === img.id ? null : img.id)}>Talimatla düzenle</button>
                   {CROPS.map((c) => (
-                    <button key={c.key} type="button" className="admin-btn !px-2 !py-1 !text-[12px]" disabled={!!busy || crops.some((x) => x.crop === c.key)} onClick={() => makeCrop(img, c.w, c.h, c.key)}>{c.label}</button>
+                    <button key={c.key} type="button" className="admin-btn admin-btn-sm" disabled={!!busy || crops.some((x) => x.crop === c.key)} onClick={() => makeCrop(img, c.w, c.h, c.key)}>{c.label}</button>
                   ))}
                 </div>
                 {editFor === img.id && (
@@ -285,7 +285,7 @@ function AltEditor({ value, onSave, disabled }: { value: string; onSave: (t: str
   return (
     <div className="flex gap-1.5">
       <input value={text} onChange={(e) => setText(e.target.value)} className="admin-input !text-[12px]" placeholder="Alt metin: görselde ne görünüyor?" maxLength={300} />
-      <button type="button" className="admin-btn !px-2 !py-1 !text-[12px]" disabled={disabled || text === value} onClick={() => onSave(text)}>Kaydet</button>
+      <button type="button" className="admin-btn admin-btn-sm" disabled={disabled || text === value} onClick={() => onSave(text)}>Kaydet</button>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { AdminTable } from '@/components/admin/ops/ui';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { adminFetch } from '@/lib/insightsAdmin';
@@ -55,13 +56,16 @@ export default function AdminNewsletter() {
 
   return (
     <div className="grid gap-5">
-      <div>
-        <h1 className="text-2xl font-extrabold tracking-tight">Bülten</h1>
-        <p className="mt-1 max-w-[80ch] text-[13px] text-muted">
+      <header className="admin-head">
+        <div className="admin-head-text">
+        <p className="admin-kicker">Site içeriği</p>
+        <h1 className="admin-h1">Bülten</h1>
+        <p className="admin-lede">
           Ziyaretçi Insights sayfasından veya site altbilgisinden kaydolur, e-postadaki bağlantıyla onaylar (çift onay). Yalnızca <strong className="text-white">Aktif</strong> adreslere gönderilir. Göndermek için yayınlanmış bir yazının <em>Yayın</em> sekmesinde önce “Bana deneme gönder”, sonra “Bültene gönder”. Her e-postada tek tıkla ayrılma bağlantısı vardır.
         </p>
         {!data.mailer && <p className="mt-2 text-[13px] text-yellow-300">E-posta gönderimi kurulu değil (RESEND_API_KEY).</p>}
-      </div>
+        </div>
+      </header>
 
       <div className="grid gap-3 sm:grid-cols-4">
         <div className="admin-card"><p className="text-[12px] text-subtle">Aktif</p><p className="text-2xl font-extrabold">{active}</p><p className="text-[11px] text-subtle">{Object.entries(data.counts.active).map(([l, n]) => `${l.toUpperCase()} ${n}`).join(' · ')}</p></div>
@@ -91,27 +95,22 @@ export default function AdminNewsletter() {
           {(['active', 'pending', 'unsubscribed', 'all'] as const).map((f) => (
             <button key={f} type="button" onClick={() => setFilter(f)} className={`px-3 py-1.5 text-[12px] font-bold ${filter === f ? 'bg-yoca-lime text-black' : 'border border-line text-muted hover:text-white'}`}>{f === 'all' ? 'Tümü' : STATUS[f].label}</button>
           ))}
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="E-posta ara" className="admin-input !w-[220px] !py-1.5 !text-[13px]" />
-          <button type="button" className="admin-btn !px-3 !py-1.5 !text-[12px]" onClick={exportCsv} disabled={!rows.length}>CSV indir ({rows.length})</button>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="E-posta ara" aria-label="E-posta ara" className="admin-input !w-[220px] max-w-full" />
+          <button type="button" className="admin-btn admin-btn-sm" onClick={exportCsv} disabled={!rows.length}>CSV indir ({rows.length})</button>
         </div>
         {rows.length === 0 ? <p className="text-[12px] text-subtle">Bu filtrede abone yok.</p> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-start text-[13px]">
-              <thead><tr className="text-[11px] uppercase tracking-wide text-subtle"><th className="py-2 text-start">E-posta</th><th className="text-start">Dil</th><th className="text-start">Durum</th><th className="text-start">Kaynak</th><th className="text-start">Kayıt</th><th className="text-start">Onay / ayrılma</th></tr></thead>
-              <tbody>
-                {rows.map((s) => (
-                  <tr key={s.id} className="border-t border-line">
-                    <td className="py-2 pe-3" dir="ltr">{s.email}</td>
-                    <td className="pe-3">{s.locale.toUpperCase()}</td>
-                    <td className="pe-3"><span className={`border px-2 py-0.5 text-[11px] font-bold ${STATUS[s.status].cls}`}>{STATUS[s.status].label}</span></td>
-                    <td className="pe-3 text-subtle">{s.source ?? '—'}</td>
-                    <td className="pe-3 text-subtle">{fmt(s.created_at)}</td>
-                    <td className="text-subtle">{s.status === 'unsubscribed' ? fmt(s.unsubscribed_at) : fmt(s.confirmed_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <AdminTable head={['E-posta', 'Dil', 'Durum', 'Kaynak', 'Kayıt', 'Onay / ayrılma']} min={640} label="Aboneler">
+            {rows.map((s) => (
+              <tr key={s.id}>
+                <td dir="ltr">{s.email}</td>
+                <td>{s.locale.toUpperCase()}</td>
+                <td><span className={`rounded-[6px] border px-2 py-0.5 text-[11px] font-bold ${STATUS[s.status].cls}`}>{STATUS[s.status].label}</span></td>
+                <td className="text-subtle">{s.source ?? '—'}</td>
+                <td className="text-subtle">{fmt(s.created_at)}</td>
+                <td className="text-subtle">{s.status === 'unsubscribed' ? fmt(s.unsubscribed_at) : fmt(s.confirmed_at)}</td>
+              </tr>
+            ))}
+          </AdminTable>
         )}
         <p className="text-[11px] text-subtle">Son 500 kayıt gösterilir. Kayıt sırasında gösterilen onay metni, zamanı ve IP adresinin özeti (SHA-256, adresin kendisi değil) her aboneyle birlikte saklanır.</p>
       </div>

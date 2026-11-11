@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useCellLabels } from '@/components/admin/ops/ui';
 import { getAdminClient } from '@/lib/adminClient';
 import { adminFetch, STATUS_LABELS, slugify } from '@/lib/insightsAdmin';
 import { GROUP_LOCALES, LANG_STATE_LABEL, LOCALE_NAME, groupInsights, langState, matchesFilter, memberFor, type ArticleGroup, type GroupLocale, type LangState } from '@/lib/insightGroup';
@@ -109,6 +110,8 @@ export default function AdminInsights() {
 
   const groups = useMemo(() => groupInsights(rows), [rows]);
   const visible = groups.filter((g) => matchesFilter(g, { locale: filterLocale, state: filterState }));
+  const tableRef = useRef<HTMLTableElement>(null);
+  useCellLabels(tableRef);
   const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('tr-TR', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
   const toggle = (gid: string) => setExpanded((cur) => { const n = new Set(cur); if (n.has(gid)) n.delete(gid); else n.add(gid); return n; });
   const filterNote = filterLocale !== 'all' && filterState !== 'all'
@@ -118,12 +121,13 @@ export default function AdminInsights() {
 
   return (
     <div className="grid gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">İçerik / Insights</h1>
-          <p className="mt-1 text-[13px] text-muted">Her satır bir yazı; dilleri yanında. Yapay zekâ yalnızca taslak üretir; yayın kararı sizindir.</p>
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Site içeriği</p>
+          <h1 className="admin-h1">İçerik / Insights</h1>
+          <p className="admin-lede">Her satır bir yazı; dilleri yanında. Yapay zekâ yalnızca taslak üretir; yayın kararı sizindir.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="admin-head-actions">
           <label className="sr-only" htmlFor="flt-lang">Dil</label>
           <select id="flt-lang" value={filterLocale} onChange={(e) => setFilterLocale(e.target.value as GroupLocale | 'all')} className="admin-input !w-auto">
             <option value="all">Tüm diller</option>
@@ -136,9 +140,9 @@ export default function AdminInsights() {
           </select>
           <Link href="/admin/insights/new" className="admin-btn-primary">+ Yeni içerik</Link>
         </div>
-      </div>
+      </header>
 
-      {message && <p className="rounded-sm border border-yoca-green/40 bg-yoca-green/10 px-4 py-2 text-[13px] text-yoca-green">{message}</p>}
+      {message && <p className="admin-notice admin-notice-good">{message}</p>}
       {filterNote && <p className="text-[12px] text-subtle">Filtre: {filterNote} · {visible.length} yazı</p>}
 
       {loading ? (
@@ -151,11 +155,11 @@ export default function AdminInsights() {
       ) : visible.length === 0 ? (
         <div className="admin-card text-[14px] text-muted">Filtreye uyan yazı yok.</div>
       ) : (
-        <div className="admin-card overflow-x-auto !p-0">
-          <table className="w-full min-w-[980px] text-[13px]">
-            <thead className="text-start text-[11px] uppercase tracking-[0.1em] text-subtle">
-              <tr className="[&>th]:px-4 [&>th]:py-3 [&>th]:text-start">
-                <th>Yazı</th><th>Diller</th><th>Kategori</th><th>Yazar</th><th>Güncelleme</th><th>İlk yayın</th><th></th>
+        <div className="admin-table-wrap admin-table-cards-lg">
+          <table ref={tableRef} className="admin-table min-w-[980px]" aria-label="Yazılar">
+            <thead>
+              <tr>
+                <th>Yazı</th><th>Diller</th><th>Kategori</th><th>Yazar</th><th>Güncelleme</th><th>İlk yayın</th><th><span className="sr-only">İşlemler</span></th>
               </tr>
             </thead>
             <tbody>
@@ -179,9 +183,9 @@ function GroupRow({ g, categories, open, onToggle, fmt, actions }: {
   const p = g.primary;
   return (
     <Fragment>
-      <tr className="border-t border-line align-middle [&>td]:px-4 [&>td]:py-3">
-        <td className="max-w-[340px]">
-          <Link href={`/admin/insights/${p.id}`} className="font-bold text-white hover:text-yoca-lime" dir={g.titleLocale === 'ar' ? 'rtl' : 'ltr'}>{g.title || '(başlıksız)'}</Link>
+      <tr className="align-middle">
+        <td className="max-w-[340px]" data-primary>
+          <Link href={`/admin/insights/${p.id}`} className="admin-link" dir={g.titleLocale === 'ar' ? 'rtl' : 'ltr'}>{g.title || '(başlıksız)'}</Link>
           <p className="truncate text-[11px] text-subtle">/{p.locale}/insights/{p.slug}{g.titleLocale !== 'tr' ? ` · başlık ${g.titleLocale.toUpperCase()} (Türkçe sürüm yok)` : ''}</p>
           {g.warnings.map((w) => <p key={w} className="mt-1 text-[11px] text-yellow-200">! {w}</p>)}
         </td>
@@ -192,7 +196,7 @@ function GroupRow({ g, categories, open, onToggle, fmt, actions }: {
               const st = langState(m);
               const href = m ? `/admin/insights/${m.id}` : `/admin/insights/${p.id}?lang=${l}`;
               return (
-                <Link key={l} href={href} aria-label={`${LOCALE_NAME[l]}: ${LANG_STATE_LABEL[st]} — ${m ? 'düzenle' : 'çeviri oluştur'}`} className={`whitespace-nowrap border px-2 py-1 text-[11px] font-bold hover:border-white ${STATE_STYLE[st]}`}>
+                <Link key={l} href={href} aria-label={`${LOCALE_NAME[l]}: ${LANG_STATE_LABEL[st]} — ${m ? 'düzenle' : 'çeviri oluştur'}`} className={`whitespace-nowrap rounded-[6px] border px-2 py-1 text-[11px] font-bold hover:border-white ${STATE_STYLE[st]}`}>
                   {l.toUpperCase()} · {LANG_STATE_LABEL[st]}{(g.byLocale[l]?.length ?? 0) > 1 ? ` (+${(g.byLocale[l]?.length ?? 1) - 1})` : ''}
                 </Link>
               );
@@ -203,16 +207,16 @@ function GroupRow({ g, categories, open, onToggle, fmt, actions }: {
         <td>{p.author_name}</td>
         <td className="whitespace-nowrap text-muted">{fmt(g.updatedAt)}</td>
         <td className="whitespace-nowrap text-muted">{fmt(g.firstPublishedAt)}</td>
-        <td className="whitespace-nowrap text-end">
-          <div className="flex justify-end gap-1.5">
-            <Link href={`/admin/insights/${p.id}`} className="admin-btn !px-2.5 !py-1">Aç</Link>
-            <button type="button" onClick={onToggle} aria-expanded={open} className="admin-btn !px-2.5 !py-1">Dil sürümleri {open ? '▴' : '▾'}</button>
+        <td className="whitespace-nowrap md:text-end" data-actions>
+          <div className="flex flex-wrap gap-1.5 md:justify-end">
+            <Link href={`/admin/insights/${p.id}`} className="admin-btn admin-btn-sm">Aç</Link>
+            <button type="button" onClick={onToggle} aria-expanded={open} className="admin-btn admin-btn-sm">Dil sürümleri {open ? '▴' : '▾'}</button>
           </div>
         </td>
       </tr>
       {open && g.members.map((row) => (
-        <tr key={row.id} className="border-t border-line/50 bg-white/[0.02] align-middle text-[12px] [&>td]:px-4 [&>td]:py-2">
-          <td className="ps-8">
+        <tr key={row.id} className="bg-white/[0.02] align-middle text-[12px]">
+          <td className="md:!ps-8" data-primary>
             <span className="me-2 font-bold uppercase">{row.locale}</span>
             <Link href={`/admin/insights/${row.id}`} className="text-white hover:text-yoca-lime" dir={row.locale === 'ar' ? 'rtl' : 'ltr'}>{row.title || '(başlıksız)'}</Link>
             <p className="truncate text-[11px] text-subtle">/{row.locale}/insights/{row.slug}</p>
@@ -221,16 +225,16 @@ function GroupRow({ g, categories, open, onToggle, fmt, actions }: {
           <td colSpan={2} className="text-muted">{row.source_insight_id ? `Çeviri${row.language_reviewed ? ' · dil kontrolü ✓' : ' · dil kontrolü bekliyor'}` : 'Kaynak'}</td>
           <td className="whitespace-nowrap text-muted">{fmt(row.updated_at)}</td>
           <td className="whitespace-nowrap text-muted">{fmt(row.publish_at)}</td>
-          <td className="whitespace-nowrap text-end">
-            <div className="flex flex-wrap justify-end gap-1.5">
-              <Link href={`/admin/insights/${row.id}`} className="admin-btn !px-2.5 !py-1">Düzenle</Link>
-              <button type="button" onClick={() => actions.duplicate(row)} className="admin-btn !px-2.5 !py-1">Çoğalt</button>
+          <td className="whitespace-nowrap md:text-end" data-actions>
+            <div className="flex flex-wrap gap-1.5 md:justify-end">
+              <Link href={`/admin/insights/${row.id}`} className="admin-btn admin-btn-sm">Düzenle</Link>
+              <button type="button" onClick={() => actions.duplicate(row)} className="admin-btn admin-btn-sm">Çoğalt</button>
               {row.status === 'PUBLISHED' || row.status === 'SCHEDULED' ? (
-                <button type="button" onClick={() => actions.setStatus(row, 'DRAFT')} className="admin-btn !px-2.5 !py-1">Yayından kaldır</button>
+                <button type="button" onClick={() => actions.setStatus(row, 'DRAFT')} className="admin-btn admin-btn-sm">Yayından kaldır</button>
               ) : (
-                <button type="button" onClick={() => actions.setStatus(row, 'PUBLISHED')} className="admin-btn !px-2.5 !py-1">Yayınla</button>
+                <button type="button" onClick={() => actions.setStatus(row, 'PUBLISHED')} className="admin-btn admin-btn-sm">Yayınla</button>
               )}
-              <button type="button" onClick={() => actions.remove(row)} className="admin-btn !border-red-500/40 !px-2.5 !py-1 !text-red-300">Sil</button>
+              <button type="button" onClick={() => actions.remove(row)} className="admin-btn admin-btn-sm admin-btn-danger">Sil</button>
             </div>
           </td>
         </tr>

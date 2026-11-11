@@ -244,8 +244,8 @@ export default function MultilangPanel({ article, dirty, siblings, preset, busy,
   const tr = job?.translation;
   const dir = active === 'ar' ? 'rtl' : 'ltr';
   const field = 'admin-input !text-[13px]';
-  const label = 'grid gap-1 text-[12px] font-semibold text-muted';
-  const small = 'admin-btn !px-2.5 !py-1 !text-[12px]';
+  const label = 'admin-label';
+  const small = 'admin-btn admin-btn-sm';
   const anyReady = targets.some((l) => jobs[l]?.status === 'ready');
   const totalCost = targets.reduce<number | null>((sum, l) => (sum === null || jobs[l]?.cost === null ? null : sum + (jobs[l]?.cost ?? 0)), 0);
   const blocked = !article.id || dirty || !article.body_md.trim() || !article.title.trim();
@@ -253,7 +253,7 @@ export default function MultilangPanel({ article, dirty, siblings, preset, busy,
   return (
     <div className="grid gap-3 text-[13px]">
       <p className="text-muted">Kaynak dil: <strong className="text-white">{NAME[article.locale]}</strong>. {onlyLocales?.length ? 'Yalnızca' : 'Tek düğmeyle'} {targets.map((l) => NAME[l]).join(', ')} hazırlanır: tüm alanlar (SEO, OG, SSS, etiketler, kapak metni, slug) çevrilir, her dilde yazım kalıpları incelenir ve en az değişiklikle düzenleme önerilir. Kaydedene kadar hiçbir şey yazılmaz; kaydedilenler taslaktır.</p>
-      <div className="grid gap-1 border border-line p-2 text-[12px]">
+      <div className="grid gap-1 admin-box p-2 text-[12px]">
         <p>Tahmini maliyet: <strong className="text-white">{estimate === null ? 'bilinmiyor (modelin fiyatı tabloda yok — istek engellenir)' : `~$${estimate.toFixed(3)}`}</strong> <span className="text-subtle">· {targets.length} dil × 3 istek · {info?.model ?? '…'}</span></p>
         {info?.spent !== null && info?.spent !== undefined && info.budget ? <p className="text-subtle">Bu ay tahmini: ${info.spent.toFixed(3)} / eşik ${info.budget}</p> : null}
         {overBudget && <p className="font-bold text-yellow-300">Bu işlemle aylık tahmini kullanım eşiği aşılabilir. Eşik aşılırsa sonraki yapay zekâ istekleri durur (eşik kesin bir harcama sınırı değildir).</p>}
@@ -293,7 +293,7 @@ export default function MultilangPanel({ article, dirty, siblings, preset, busy,
                 <label className={label}>Slug<input value={tr.slug} onChange={(e) => setTr(active, { slug: e.target.value })} className={field} disabled={job?.status === 'saved'} /></label>
               </div>
               <label className={label}>Meta açıklama ({tr.metaDescription.length}/155)<textarea dir={dir} value={tr.metaDescription} onChange={(e) => setTr(active, { metaDescription: e.target.value })} rows={2} className={field} disabled={job?.status === 'saved'} /></label>
-              <details className="border border-line p-2 text-[12px]">
+              <details className="admin-box p-2 text-[12px]">
                 <summary className="cursor-pointer font-bold text-muted">OG, SSS ({tr.faq.length}), etiketler ({tr.tags.length}), kapak metni</summary>
                 <div className="mt-2 grid gap-1 text-muted" dir={dir}>
                   <p><span className="text-subtle">OG:</span> {tr.ogTitle || '—'} — {tr.ogDescription || '—'}</p>
@@ -310,7 +310,7 @@ export default function MultilangPanel({ article, dirty, siblings, preset, busy,
                 {job?.findings && (job.findings.length === 0 ? <p className="text-yoca-green">Listelenen kalıplardan biri bulunmadı.</p> : (
                   <ul className="grid max-h-64 gap-2 overflow-auto">
                     {job.findings.map((f, i) => (
-                      <li key={i} className="border border-line p-2">
+                      <li key={i} className="admin-box p-2">
                         <p className="text-[11px] font-bold uppercase tracking-wide text-yellow-300">{PATTERN_LABEL[f.pattern] ?? f.pattern}</p>
                         <p dir={dir} className="text-white">“{f.excerpt}”</p>
                         <p className="text-[12px] text-muted">Öneri: {f.suggestion}</p>
@@ -338,7 +338,7 @@ export default function MultilangPanel({ article, dirty, siblings, preset, busy,
                 {job?.editState === 'dismissed' && <p className="text-[12px] text-subtle">Düzenleme önerisi kapatıldı; çeviri olduğu gibi.</p>}
               </section>
 
-              <details className="border border-line p-2">
+              <details className="admin-box p-2">
                 <summary className="cursor-pointer text-[12px] font-bold text-muted">Gövde (elle düzenlenebilir)</summary>
                 <textarea dir={dir} value={tr.body} onChange={(e) => setTr(active, { body: e.target.value })} rows={14} className={`${field} mt-2 font-mono !text-[12px]`} disabled={job?.status === 'saved'} />
               </details>

@@ -63,12 +63,15 @@ export default function SignaturePage() {
 
   return (
     <div className="grid gap-6">
-      <header>
-        <h1 className="text-2xl font-extrabold tracking-tight">İmza</h1>
-        <p className="mt-1.5 max-w-[70ch] text-[14px] text-muted">
-          Yaptığımız sitelere eklenen “Built by YOCA” imzası. WordPress’te footer’a bir “Özel HTML” bloğu ekleyip
-          kodu olduğu gibi yapıştırın. Hizalamayı ve rengi aşağıdan seçin; önizlemeler koyu, açık ve kendi zemininizde nasıl görüneceğini gösterir.
-        </p>
+      <header className="admin-head">
+        <div className="admin-head-text">
+        <p className="admin-kicker">Site içeriği</p>
+        <h1 className="admin-h1">İmza</h1>
+          <p className="admin-lede">
+            Yaptığımız sitelere eklenen “Built by YOCA” imzası. WordPress’te footer’a bir “Özel HTML” bloğu ekleyip
+            kodu olduğu gibi yapıştırın. Hizalamayı ve rengi aşağıdan seçin; önizlemeler koyu, açık ve kendi zemininizde nasıl görüneceğini gösterir.
+          </p>
+        </div>
       </header>
 
       <section className="admin-card grid gap-4">

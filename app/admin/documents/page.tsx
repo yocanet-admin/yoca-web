@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { Badge, Empty, Flash, PageHead, field, label, small, fmtDate } from '@/components/admin/ops/ui';
+import { AdminTable, Badge, Empty, Flash, PageHead, field, label, small, fmtDate } from '@/components/admin/ops/ui';
 import { clientDisplay, docAction, draftPdf, loadDoc, loadList, moneyOf, newKey, storedPdf, type ClientLite, type DocList, type DocListRow, type ProjectLite } from '@/lib/documents/client';
 import { CurrencyOptions } from '@/components/admin/documents/fields';
 import { DOC_KINDS, KIND_DEF, KIND_LABEL, QUOTE_STATE_LABEL, STATUS_LABEL, type DocCurrency, type DocKind } from '@/lib/documents/model';
@@ -49,14 +49,14 @@ function NewDocument({ clients, projects, onClose, preset, defaultCurrency }: { 
     router.push(`/admin/documents/${r.id}${start === 'ai' ? '?ai=1' : ''}`);
   };
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="new-doc-title" className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4">
-      <div className="admin-card grid w-full max-w-lg gap-4 p-5">
+    <div role="dialog" aria-modal="true" aria-labelledby="new-doc-title" className="admin-backdrop">
+      <div className="admin-dialog max-w-lg">
         <h2 id="new-doc-title" className="text-lg font-extrabold">Yeni belge</h2>
         <fieldset className="grid gap-2">
           <legend className="mb-1 text-[13px] font-semibold text-muted">Tür</legend>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {DOC_KINDS.map((k) => (
-              <label key={k} className={`cursor-pointer border px-3 py-2 text-[13px] ${kind === k ? 'border-yoca-lime text-white' : 'border-line text-muted'}`}>
+              <label key={k} className={`cursor-pointer rounded-[10px] border px-3 py-2 text-[13px] font-bold focus-within:outline focus-within:outline-2 focus-within:outline-yoca-lime ${kind === k ? 'border-yoca-lime bg-yoca-lime/10 text-white' : 'border-[var(--line-2,#343943)] bg-[var(--inset,#0d0f12)] text-muted'}`}>
                 <input type="radio" name="kind" value={k} checked={kind === k} onChange={() => setKind(k)} className="sr-only" />
                 {KIND_LABEL[k].tr}
               </label>
@@ -224,26 +224,21 @@ function ListInner() {
       {rows.length === 0 ? (
         <Empty text={data.documents.length ? 'Bu filtrelerle eşleşen belge yok.' : 'Henüz belge yok.'} action={<button type="button" className="admin-btn admin-btn-primary" onClick={() => setCreating(true)}>+ Yeni belge</button>} />
       ) : (
-        <div className="relative overflow-x-auto border border-line">
-          <table className="w-full min-w-[860px] text-[13px]">
-            <thead className="bg-surface-secondary text-left text-[11px] uppercase tracking-[0.08em] text-subtle">
-              <tr><th className="px-3 py-2">Belge no</th><th className="px-3 py-2">Başlık</th><th className="px-3 py-2">Tür</th><th className="px-3 py-2">Müşteri / alıcı</th><th className="px-3 py-2">Tarih</th><th className="px-3 py-2">Durum</th><th className="px-3 py-2 text-right">Toplam</th><th className="px-3 py-2"><span className="sr-only">İşlemler</span></th></tr>
-            </thead>
-            <tbody>
+        <AdminTable label="Belgeler" min={860} head={['Belge no', 'Başlık', 'Tür', 'Müşteri / alıcı', 'Tarih', 'Durum', 'Toplam', <span key="ops" className="sr-only">İşlemler</span>]}>
               {rows.map((d) => {
                 const total = moneyOf(d.status === 'draft' ? d.total : d.final_total ?? d.total, d.currency);
                 const who = d.client_id ? clientName.get(d.client_id) : d.recipient_company || d.recipient_name;
                 return (
-                  <tr key={d.id} className="border-t border-line align-top">
-                    <td className="whitespace-nowrap px-3 py-2 font-mono text-[12px]"><Link href={`/admin/documents/${d.id}`} className="font-semibold text-white underline decoration-line underline-offset-2 hover:text-yoca-lime">{d.number}</Link></td>
-                    <td className="px-3 py-2">{d.title || <span className="italic text-subtle">Başlıksız</span>}</td>
-                    <td className="px-3 py-2 text-muted">{KIND_LABEL[d.kind].short}</td>
-                    <td className="px-3 py-2">{who || <span className="italic text-subtle">Alıcı yok</span>}{!d.client_id && who ? <span className="block text-[11px] text-subtle">müşteri kaydına bağlı değil</span> : null}</td>
-                    <td className="px-3 py-2 tabular-nums text-muted">{fmtDate(d.issue_date)}</td>
-                    <td className="px-3 py-2"><div className="flex flex-wrap gap-1"><Badge tone={STATUS_TONE[d.status]}>{STATUS_LABEL[d.status]}{d.status !== 'draft' && d.final_version ? ` · v${d.final_version}` : d.final_version ? ` · v${d.final_version} revize` : ''}</Badge>{d.quote_state ? <Badge tone={QUOTE_TONE[d.quote_state]}>{QUOTE_STATE_LABEL[d.quote_state]}</Badge> : null}</div></td>
-                    <td className="px-3 py-2 text-right tabular-nums">{total ?? (d.kind === 'quote' || d.kind === 'proforma' ? <span className="text-[12px] italic text-subtle">eksik fiyat</span> : <span className="text-subtle">—</span>)}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap justify-end gap-1">
+                  <tr key={d.id}>
+                    <td className="whitespace-nowrap font-mono text-[12px]"><Link href={`/admin/documents/${d.id}`} className="admin-link">{d.number}</Link></td>
+                    <td>{d.title || <span className="italic text-subtle">Başlıksız</span>}</td>
+                    <td className="text-muted">{KIND_LABEL[d.kind].short}</td>
+                    <td>{who || <span className="italic text-subtle">Alıcı yok</span>}{!d.client_id && who ? <span className="block text-[11px] text-subtle">müşteri kaydına bağlı değil</span> : null}</td>
+                    <td className="tabular-nums text-muted">{fmtDate(d.issue_date)}</td>
+                    <td><div className="flex flex-wrap gap-1"><Badge tone={STATUS_TONE[d.status]}>{STATUS_LABEL[d.status]}{d.status !== 'draft' && d.final_version ? ` · v${d.final_version}` : d.final_version ? ` · v${d.final_version} revize` : ''}</Badge>{d.quote_state ? <Badge tone={QUOTE_TONE[d.quote_state]}>{QUOTE_STATE_LABEL[d.quote_state]}</Badge> : null}</div></td>
+                    <td className="tabular-nums md:text-right">{total ?? (d.kind === 'quote' || d.kind === 'proforma' ? <span className="text-[12px] italic text-subtle">eksik fiyat</span> : <span className="text-subtle">—</span>)}</td>
+                    <td data-actions>
+                      <div className="flex flex-wrap gap-1 md:justify-end">
                         <Link href={`/admin/documents/${d.id}`} className={small}>{d.status === 'draft' ? 'Düzenle' : 'Aç'}</Link>
                         <button type="button" className={small} disabled={busy === d.id} onClick={() => duplicate(d)}>Çoğalt</button>
                         <button type="button" className={small} disabled={busy === d.id} onClick={() => download(d)}>PDF indir</button>
@@ -253,9 +248,7 @@ function ListInner() {
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+        </AdminTable>
       )}
       <p className="text-[12px] text-subtle">Daha önce indirdiğiniz veya e-postayla gönderdiğiniz PDF dosyaları değişmez. Yeni indirme, o anki şirket bilgileriyle üretilir; belgenin kalemleri, tutarları, alıcısı ve tarihi değişmez.</p>
       {bankAsk && <BankDecision number={bankAsk.doc.number} version={bankAsk.version} changes={bankAsk.changes} busy={busy === bankAsk.doc.id} canRevise={bankAsk.doc.status === 'final'} onClose={() => setBankAsk(null)} onKeep={() => void download(bankAsk.doc, true)} onRevise={() => void reviseForBank(bankAsk.doc)} />}

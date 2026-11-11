@@ -88,9 +88,9 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
         </div>
       </div>
 
-      {s.sample && <p className="border border-yellow-400/40 bg-yellow-400/10 p-2 text-[13px] text-yellow-100" role="note">ÖRNEK (sentetik) taslak: adlar kurgusaldır ve “ÖRNEK” ile işaretlenir. Uygulanırsa belge ÖRNEK olarak işaretlenir; kesinleştirilemez, gönderilemez ve müşteri kaydına (CRM) yazılmaz. Banka, IBAN, vergi, adres ve iletişim bilgisi uydurulmaz.</p>}
+      {s.sample && <p className="admin-notice admin-notice-warn" role="note">ÖRNEK (sentetik) taslak: adlar kurgusaldır ve “ÖRNEK” ile işaretlenir. Uygulanırsa belge ÖRNEK olarak işaretlenir; kesinleştirilemez, gönderilemez ve müşteri kaydına (CRM) yazılmaz. Banka, IBAN, vergi, adres ve iletişim bilgisi uydurulmaz.</p>}
       {s.currencyConflict && (
-        <div className="grid gap-2 border border-yellow-400/40 bg-yellow-400/10 p-3 text-[13px] text-yellow-100" role="alert">
+        <div className="admin-notice admin-notice-warn grid gap-2" role="alert">
           <p className="font-bold">Para birimi çakışması</p>
           <p>Talebinizde {s.currencyConflict.requested.map((x) => CURRENCY_LABEL[x]).join(', ')} geçiyor; teklifin para birimi {CURRENCY_LABEL[s.currencyConflict.selected]}. Yapay zekâ para birimini değiştirmez: önerilen fiyatlar {s.currencyConflict.selected} olarak hazırlandı. Başka para birimi istiyorsanız önce Belge bilgileri → Para birimi’ni değiştirip öneriyi yeniden isteyin.</p>
           {pricedItems && <label className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={acceptCurrency} onChange={(e) => setAcceptCurrency(e.target.checked)} /> Fiyatların {s.currencyConflict.selected} olduğunu onaylıyorum</label>}
@@ -103,17 +103,17 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="grid min-w-0 content-start gap-3">
           {sections.includes('title') && (
-            <div className="grid gap-2 border border-line p-3">{pick('title')}
+            <div className="grid gap-2 admin-box p-3">{pick('title')}
               <input aria-label="Önerilen başlık" className={field} value={s.title} onChange={(e) => onChange({ ...s, title: e.target.value })} />
             </div>
           )}
           {sections.includes('subject') && (
-            <div className="grid gap-2 border border-line p-3">{pick('subject')}
+            <div className="grid gap-2 admin-box p-3">{pick('subject')}
               <input aria-label="Önerilen konu" className={field} value={s.subject} onChange={(e) => onChange({ ...s, subject: e.target.value })} />
             </div>
           )}
           {sections.includes('recipient') && s.sampleRecipient && (
-            <div className="grid gap-2 border border-line p-3">{pick('recipient', <Badge tone="warn">ÖRNEK</Badge>)}
+            <div className="grid gap-2 admin-box p-3">{pick('recipient', <Badge tone="warn">ÖRNEK</Badge>)}
               {hasClient ? <p className="text-[12px] text-yellow-200">Belge müşteri kaydına bağlı: örnek alıcı uygulanmaz.</p> : (
                 <div className="grid gap-2 sm:grid-cols-2">
                   <label className={label}>Firma (kurgusal)<input className={field} value={s.sampleRecipient.company} onChange={(e) => onChange({ ...s, sampleRecipient: { ...s.sampleRecipient!, company: e.target.value } })} /></label>
@@ -124,7 +124,7 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
           )}
 
           {sections.includes('items') && (
-            <div className="grid gap-3 border border-line p-3" data-testid="review-items">
+            <div className="grid gap-3 admin-box p-3" data-testid="review-items">
               {pick('items', s.prices && pricedItems ? <Badge tone="warn">AI fiyat önerisi — kontrol edilmeli</Badge> : null)}
               {s.prices && (s.pricing.basis || s.pricing.assumptions.length > 0) && (
                 <div className="grid gap-1 text-[12px] text-muted">
@@ -144,7 +144,7 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
                 const others = s.items.filter((x) => x.ref !== it.ref && !x.includedIn);
                 const recurring = !it.includedIn && it.billing !== 'once';
                 return (
-                  <div key={it.ref} className="grid gap-2 border border-line p-2.5" data-testid={`review-item-${it.ref}`}>
+                  <div key={it.ref} className="grid gap-2 admin-box p-2.5" data-testid={`review-item-${it.ref}`}>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="w-6 text-[12px] font-bold text-yoca-green">{String(i + 1).padStart(2, '0')}</span>
                       <input aria-label={`${i + 1}. önerilen kalem başlığı`} className={`${field} min-w-0 flex-1`} value={it.title} onChange={(e) => setItem(i, { title: e.target.value })} />
@@ -217,14 +217,14 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
           )}
 
           {s.blocks.map((b) => sections.includes(`block:${b.key}`) && (
-            <div key={b.key} className="grid gap-2 border border-line p-3">
+            <div key={b.key} className="grid gap-2 admin-box p-3">
               {pick(`block:${b.key}`)}
               <textarea aria-label={`${blockLabel(b.key as BlockKey)} önerisi`} className={field} rows={Math.min(8, Math.max(2, b.body.split('\n').length + 1))} value={b.body} onChange={(e) => setBlock(b.key, e.target.value)} />
             </div>
           ))}
 
           {sections.includes('payment') && (
-            <div className="grid gap-2 border border-line p-3">
+            <div className="grid gap-2 admin-box p-3">
               {pick('payment')}
               <p className="text-[12px] text-subtle">Ödeme planı tek seferlik toplam üzerinden; aylık / yıllık ücretler bu plana girmez, kendi dönemlerinde faturalanır.</p>
               {s.payment.map((p, i) => (
@@ -237,17 +237,17 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
             </div>
           )}
           {sections.includes('deliveryTime') && (
-            <div className="grid gap-2 border border-line p-3">{pick('deliveryTime')}
+            <div className="grid gap-2 admin-box p-3">{pick('deliveryTime')}
               <textarea aria-label="Önerilen takvim" className={field} rows={2} value={s.deliveryTime} onChange={(e) => onChange({ ...s, deliveryTime: e.target.value })} />
             </div>
           )}
           {sections.includes('validity') && (
-            <div className="grid gap-2 border border-line p-3">{pick('validity')}
+            <div className="grid gap-2 admin-box p-3">{pick('validity')}
               <label className={label}>Geçerlilik (düzenleme tarihinden itibaren gün)<input className={field} inputMode="numeric" value={s.validityDays ?? ''} onChange={(e) => { const n = Number(e.target.value); onChange({ ...s, validityDays: Number.isInteger(n) && n >= 1 && n <= 365 ? n : null }); }} /></label>
             </div>
           )}
           {sections.includes('closing') && (
-            <div className="grid gap-2 border border-line p-3">{pick('closing')}
+            <div className="grid gap-2 admin-box p-3">{pick('closing')}
               <input aria-label="Önerilen kapanış cümlesi" className={field} value={s.closing} onChange={(e) => onChange({ ...s, closing: e.target.value })} />
             </div>
           )}
@@ -255,7 +255,7 @@ export function AiDraftReview({ suggestion: s, onChange, doc, defaultTaxRate, ha
         </div>
 
         <aside className="grid content-start gap-3 self-start text-[13px] xl:sticky xl:top-4" aria-label="Uygulanırsa hesaplanan özet">
-          <div className="grid gap-1.5 border border-line p-3" data-testid="review-totals">
+          <div className="grid gap-1.5 admin-box p-3" data-testid="review-totals">
             <p className="font-bold text-white">Uygulanırsa (uygulama hesaplar)</p>
             <p className="text-[12px] text-subtle">Toplamları yapay zekâ değil, belgenin hesaplama kuralları üretir. KDV: belge ayarlarındaki oran.</p>
             <div className="flex justify-between gap-6"><span className="text-muted">Tek seferlik ara toplam</span><span className="tabular-nums">{money(calc.totals.subtotal)}</span></div>

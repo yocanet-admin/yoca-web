@@ -95,16 +95,16 @@ export default function AdminSeo() {
         kicker="Genel"
         title="SEO"
         sub={`yoca.net — Search Console (${data?.site.property ?? 'https://yoca.net/'}), hedef kelimeler, teknik kontrol. Yalnızca yöneticiler görür.`}
-        actions={<>{data?.connection.fixture && <SampleBadge />}<button type="button" className="admin-btn !py-1.5 text-[12px]" onClick={() => load(true)}>↻ Yenile</button></>}
+        actions={<>{data?.connection.fixture && <SampleBadge />}<button type="button" className="admin-btn admin-btn-sm" onClick={() => load(true)}>↻ Yenile</button></>}
       />
       <Flash message={flash?.text ?? null} tone={flash?.tone} onClose={() => setFlash(null)} />
       {data && <ConnectionNotice mode={data.connection.mode} message={data.connection.message} step={data.connection.step} />}
       {data?.reportError && <Notice tone="warning">{data.reportError}</Notice>}
 
-      <nav className="flex flex-wrap gap-1 border-b border-line" aria-label="SEO bölümleri">
+      <nav className="admin-tabs" aria-label="SEO bölümleri">
         {TABS.map((t) => (
           <button key={t.id} type="button" onClick={() => pick(t.id)} aria-current={tab === t.id ? 'page' : undefined}
-            className={`-mb-px border-b-2 px-3 py-2 text-[13px] font-bold ${tab === t.id ? 'border-yoca-lime text-white' : 'border-transparent text-muted hover:text-white'}`}>
+            className="admin-tab">
             {t.label}{t.id === 'opportunities' && report ? ` (${report.opportunities.length})` : ''}
           </button>
         ))}

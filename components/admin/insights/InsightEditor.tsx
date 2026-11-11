@@ -417,36 +417,37 @@ export default function InsightEditor({ id, embedded = false, onState, reloadTok
   const imageUrls = Object.fromEntries(images.filter((i) => i.url).map((i) => [i.id, i.url as string]));
 
   const field = 'admin-input';
-  const label = 'grid gap-1.5 text-[13px] font-semibold text-muted';
+  const label = 'admin-label';
   const words = row.body_md.trim() ? row.body_md.trim().split(/\s+/).length : 0;
 
   return (
     <div className="grid gap-5">
       {/* Top bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-subtle">İçerik / Insights · {STATUS_LABELS[row.status]} · {row.locale.toUpperCase()}</p>
+      <div className={embedded ? 'flex flex-wrap items-center justify-between gap-3' : 'admin-head'}>
+        <div className={embedded ? 'min-w-0' : 'admin-head-text'}>
+          <p className={embedded ? 'text-[11px] font-bold uppercase tracking-[0.1em] text-subtle' : 'admin-kicker'}>İçerik / Insights · {STATUS_LABELS[row.status]} · {row.locale.toUpperCase()}</p>
+          {!embedded && <h1 className="admin-h1 !text-[28px]">{row.title.trim() || 'Yeni içerik'}</h1>}
           <p className="truncate text-[12px] text-muted">yoca.net/{row.locale}/insights/{slugify(row.slug || row.title) || '…'}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={embedded ? 'flex flex-wrap items-center gap-2' : 'admin-head-actions'}>
           {undoStack.length > 0 && <button type="button" onClick={undo} className="admin-btn" title={`Son uygulanan değişikliği geri al (${undoStack[undoStack.length - 1].label})`}>Geri al</button>}
           <button type="button" onClick={() => setPreviewOpen(true)} className="admin-btn">Önizle</button>
           <button type="button" onClick={() => setAiOpen((v) => !v)} className="admin-btn lg:hidden">{aiOpen ? 'Stüdyoyu gizle' : 'İçerik stüdyosu'}</button>
           <button type="button" onClick={() => save()} disabled={saving} className="admin-btn-primary">{saving ? 'Kaydediliyor…' : dirty ? 'Kaydet •' : 'Kaydet'}</button>
         </div>
       </div>
-      {message && <p role="status" className="rounded-sm border border-yoca-green/40 bg-yoca-green/10 px-4 py-2 text-[13px] text-yoca-green">{message}</p>}
+      {message && <p role="status" className="admin-notice admin-notice-good">{message}</p>}
       {restorable && (
-        <div className="flex flex-wrap items-center gap-2 rounded-sm border border-yellow-400/40 bg-yellow-400/10 px-4 py-2 text-[13px] text-yellow-200">
+        <div className="admin-notice admin-notice-warn flex flex-wrap items-center gap-2">
           Bu tarayıcıda kaydedilmemiş bir sürüm bulundu.
-          <button type="button" className="admin-btn !px-2 !py-0.5 !text-[12px]" onClick={() => { setRow(restorable); setDirty(true); setRestorable(null); }}>Geri getir</button>
-          <button type="button" className="admin-btn !px-2 !py-0.5 !text-[12px]" onClick={() => { try { window.localStorage.removeItem(localKey(row.id as string)); } catch { /* ignore */ } setRestorable(null); }}>Sil</button>
+          <button type="button" className="admin-btn admin-btn-sm" onClick={() => { setRow(restorable); setDirty(true); setRestorable(null); }}>Geri getir</button>
+          <button type="button" className="admin-btn admin-btn-sm" onClick={() => { try { window.localStorage.removeItem(localKey(row.id as string)); } catch { /* ignore */ } setRestorable(null); }}>Sil</button>
         </div>
       )}
       {row.source_insight_id && sourceState && row.source_hash && sourceState.fingerprint !== row.source_hash && (
-        <div className="flex flex-wrap items-center gap-2 rounded-sm border border-yellow-400/40 bg-yellow-400/10 px-4 py-2 text-[13px] text-yellow-200">
+        <div className="admin-notice admin-notice-warn flex flex-wrap items-center gap-2">
           Kaynak yazı ({sourceState.locale.toUpperCase()}) bu çeviri yapıldıktan sonra değişti; bu çeviri eski olabilir.
-          <a href={`/admin/insights/${sourceState.id}`} className="admin-btn !px-2 !py-0.5 !text-[12px]">Kaynağı aç → Diller ile yeniden oluştur</a>
+          <a href={`/admin/insights/${sourceState.id}`} className="admin-btn admin-btn-sm">Kaynağı aç → Diller ile yeniden oluştur</a>
         </div>
       )}
       {previewOpen && (
@@ -538,7 +539,7 @@ export default function InsightEditor({ id, embedded = false, onState, reloadTok
                   </div>
                 )}
                 {row.source_insight_id && (
-                  <div className="grid gap-1 border border-line p-3">
+                  <div className="grid gap-1 admin-box p-3">
                     <label className="flex items-center gap-2 text-[13px] font-semibold text-white"><input type="checkbox" checked={Boolean(row.language_reviewed)} onChange={(e) => setReviewed(e.target.checked)} /> Dil kontrolü yapıldı</label>
                     <p className="text-[12px] text-subtle">Bu yazı {sourceState ? `${sourceState.locale.toUpperCase()} kaynaktan` : 'kaynak yazıdan'} yapay zekâ ile çevrildi. {INSIGHT_LOCALES.find((l) => l.code === row.locale)?.label} bilen biri metni okuyup işaretlemeden (ve kaydetmeden) yayınlanamaz.{row.language_reviewed && row.language_reviewed_by ? ` İşaretleyen: ${row.language_reviewed_by}${row.language_reviewed_at ? ` · ${new Date(row.language_reviewed_at).toLocaleString('tr-TR')}` : ''}.` : ''}</p>
                   </div>
@@ -608,7 +609,7 @@ export default function InsightEditor({ id, embedded = false, onState, reloadTok
                     <li key={s.url + i} className="flex flex-wrap items-center gap-2 text-[13px]">
                       <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-yoca-lime hover:underline">{s.title || s.domain}</a>
                       <span className="text-subtle">— {s.domain}</span>
-                      <button type="button" onClick={() => update({ sources: row.sources.filter((_, j) => j !== i) })} className="admin-btn !px-2 !py-0.5 !text-[11px]">Kaldır</button>
+                      <button type="button" onClick={() => update({ sources: row.sources.filter((_, j) => j !== i) })} className="admin-btn admin-btn-sm">Kaldır</button>
                     </li>
                   ))}
                 </ul>
@@ -628,14 +629,14 @@ export default function InsightEditor({ id, embedded = false, onState, reloadTok
               <div className="admin-card grid gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-[13px] font-semibold text-muted">Sürüm geçmişi (son 30)</p>
-                  {row.id && <button type="button" className="admin-btn !px-2 !py-0.5 !text-[11px]" onClick={() => snapshot('Elle alınan sürüm')}>Şimdiki metni sürüm olarak sakla</button>}
+                  {row.id && <button type="button" className="admin-btn admin-btn-sm" onClick={() => snapshot('Elle alınan sürüm')}>Şimdiki metni sürüm olarak sakla</button>}
                 </div>
                 {revisions.length === 0 ? <p className="text-[12px] text-subtle">Henüz sürüm yok. AI önerileri, uygulama ve geri yükleme öncesinde otomatik alınır.</p> : (
                   <ul className="grid gap-1 text-[13px]">
                     {revisions.map((r) => (
                       <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-2">
                         <span><span className="text-white">{new Date(r.created_at).toLocaleString('tr-TR')}</span> <span className="text-subtle">· {REVISION_KIND[r.kind ?? 'snapshot'] ?? r.kind} · {r.reason ?? '—'} · {r.title}{r.created_by ? ` · ${r.created_by}` : ''}</span></span>
-                        <button type="button" onClick={() => restore(r)} className="admin-btn !px-2 !py-0.5 !text-[11px]">Geri yükle</button>
+                        <button type="button" onClick={() => restore(r)} className="admin-btn admin-btn-sm">Geri yükle</button>
                       </li>
                     ))}
                   </ul>
@@ -681,8 +682,8 @@ function SourceAdder({ onAdd }: { onAdd: (s: InsightSource) => void }) {
   const [title, setTitle] = useState('');
   return (
     <div className="flex flex-wrap items-end gap-2">
-      <label className="grid gap-1 text-[12px] font-semibold text-muted">Başlık<input value={title} onChange={(e) => setTitle(e.target.value)} className="admin-input !w-[220px]" /></label>
-      <label className="grid gap-1 text-[12px] font-semibold text-muted">URL<input value={url} onChange={(e) => setUrl(e.target.value)} className="admin-input !w-[280px]" placeholder="https://" /></label>
+      <label className="admin-label">Başlık<input value={title} onChange={(e) => setTitle(e.target.value)} className="admin-input !w-[220px]" /></label>
+      <label className="admin-label">URL<input value={url} onChange={(e) => setUrl(e.target.value)} className="admin-input !w-[280px]" placeholder="https://" /></label>
       <button
         type="button"
         onClick={() => {

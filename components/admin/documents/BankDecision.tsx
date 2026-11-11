@@ -15,8 +15,8 @@ export function BankDecision({ number, version, changes, busy, canRevise, onKeep
 }) {
   const removed = changes.some((c) => c.change === 'removed');
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="bank-decision-title" className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
-      <div className="admin-card grid max-h-[90vh] w-full max-w-xl gap-4 overflow-y-auto p-5">
+    <div role="dialog" aria-modal="true" aria-labelledby="bank-decision-title" className="admin-backdrop">
+      <div className="admin-dialog max-w-xl">
         <div>
           <h2 id="bank-decision-title" className="text-[17px] font-extrabold">Banka bilgisi değişmiş</h2>
           <p className="mt-1 text-[13px] text-muted">
@@ -25,7 +25,7 @@ export function BankDecision({ number, version, changes, busy, canRevise, onKeep
         </div>
         <ul className="grid gap-3 text-[13px]">
           {changes.map((c) => (
-            <li key={c.id} className="grid gap-1 border border-line p-3">
+            <li key={c.id} className="grid gap-1 admin-box p-3">
               <p className="font-bold">{c.old.bank || 'Banka hesabı'}{c.old.currency ? ` · ${c.old.currency}` : ''}</p>
               <p className="text-muted">Belgede: <span className="font-mono text-white">{formatIban(c.old.iban)}</span>{c.old.holder ? ` · ${c.old.holder}` : ''}</p>
               {c.change === 'removed'

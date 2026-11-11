@@ -38,7 +38,8 @@ export function MonthPicker({ value, onChange, thisMonth, label = 'Dönem' }: { 
     if (!open || !pop.current) { setShift(0); return; }
     const r = pop.current.getBoundingClientRect();
     const left = r.left - shift;
-    const max = window.innerWidth - 8;
+    // the visible width: a popover that sticks out widens a phone's layout viewport (innerWidth) itself
+    const max = Math.min(window.innerWidth, window.visualViewport?.width ?? window.innerWidth, document.documentElement.clientWidth) - 8;
     setShift(left + r.width > max ? Math.max(8 - left, max - (left + r.width)) : 0);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   // focus the active month whenever the popover opens or the focus moves
@@ -75,15 +76,15 @@ export function MonthPicker({ value, onChange, thisMonth, label = 'Dönem' }: { 
 
   const selY = Number(value.slice(0, 4)); const selI = Number(value.slice(5, 7)) - 1;
   const nowY = Number(thisMonth.slice(0, 4)); const nowI = Number(thisMonth.slice(5, 7)) - 1;
-  const nav = 'inline-flex h-9 w-9 items-center justify-center rounded-sm border border-line text-[15px] text-muted transition-colors hover:border-yoca-lime hover:text-yoca-lime focus-visible:outline focus-visible:outline-2 focus-visible:outline-yoca-lime';
+  const nav = 'inline-flex h-10 w-10 items-center justify-center rounded-[10px] border border-[var(--line-2,#343943)] bg-[var(--tile,#15171c)] text-[15px] text-muted transition-colors hover:border-yoca-lime hover:text-yoca-lime focus-visible:outline focus-visible:outline-2 focus-visible:outline-yoca-lime';
 
   return (
     <div className="flex flex-wrap items-center gap-2" role="group" aria-label={`${label} seçimi`}>
-      <span className="text-[12px] font-semibold text-muted">{label}</span>
+      <span className="text-[12px] font-bold text-[var(--ink-2,#c6c9cf)]">{label}</span>
       <button type="button" className={nav} onClick={() => onChange(shiftMonth(value, -1))} aria-label="Önceki ay">‹</button>
       <div ref={wrap} className="relative">
         <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? dialogId : undefined}
-          className="inline-flex h-9 min-w-[10.5rem] items-center justify-between gap-3 rounded-sm border border-line bg-surface-deep px-3 text-[14px] font-bold text-soft transition-colors hover:border-yoca-lime focus-visible:outline focus-visible:outline-2 focus-visible:outline-yoca-lime"
+          className="inline-flex h-10 min-w-[10.5rem] items-center justify-between gap-3 rounded-[10px] border border-[var(--line-2,#343943)] bg-[var(--inset,#0d0f12)] px-3 text-[14px] font-bold text-soft transition-colors hover:border-yoca-lime focus-visible:outline focus-visible:outline-2 focus-visible:outline-yoca-lime"
           onClick={() => (open ? close() : show())}
           onKeyDown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); show(); } }}>
           <span>{monthName(value)}</span>
@@ -91,7 +92,7 @@ export function MonthPicker({ value, onChange, thisMonth, label = 'Dönem' }: { 
         </button>
         {open && (
           <div ref={pop} id={dialogId} role="dialog" aria-label="Ay ve yıl seçin" aria-modal="false" style={shift ? { transform: `translateX(${shift}px)` } : undefined}
-            className="absolute left-0 top-full z-50 mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-sm border border-line bg-surface-elevated p-3 text-soft shadow-[0_12px_40px_rgba(0,0,0,0.55)]">
+            className="absolute left-0 top-full z-50 mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-[14px] border border-[var(--line-2,#343943)] bg-[var(--tile-2,#1c1f25)] p-3 text-soft shadow-[0_12px_40px_rgba(0,0,0,0.55)]">
             <div className="mb-2 flex items-center justify-between">
               <button type="button" className={nav} onClick={() => setYear(year - 1)} aria-label="Önceki yıl">‹</button>
               <span className="text-[14px] font-extrabold tabular-nums" aria-live="polite">{year}</span>
@@ -106,7 +107,7 @@ export function MonthPicker({ value, onChange, thisMonth, label = 'Dönem' }: { 
                     tabIndex={i === focusIdx ? 0 : -1} aria-selected={selected} aria-current={current ? 'date' : undefined}
                     aria-label={`${m} ${year}${current ? ' (bu ay)' : ''}`}
                     onClick={() => choose(year, i)} onFocus={() => setFocusIdx(i)}
-                    className={`h-10 rounded-sm text-[13px] font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-yoca-lime ${
+                    className={`h-10 rounded-[9px] text-[13px] font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-yoca-lime ${
                       selected ? 'bg-yoca-lime text-black' : `border ${current ? 'border-yoca-lime/60 text-yoca-lime' : 'border-line text-muted'} bg-surface-deep hover:border-yoca-lime hover:text-soft`}`}>
                     {m.slice(0, 3)}
                   </button>

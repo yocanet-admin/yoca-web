@@ -35,7 +35,7 @@ export default function AdminPrivacyNotice() {
     setShow(false);
   };
   return (
-    <section aria-label="Çerez ve tarayıcı depolama bilgisi" className="mt-10 grid gap-3 rounded-sm border border-line bg-surface-deep/60 p-4 text-[13px] leading-relaxed text-muted">
+    <section aria-label="Çerez ve tarayıcı depolama bilgisi" className="admin-card mt-10 grid gap-3 text-[13px] leading-relaxed text-muted">
       <p>
         <b className="text-soft">Çerezler:</b> Yönetim paneli yalnızca çalışması için gerekli tarayıcı depolamasını kullanır (oturum bilgisi ve kaydedilmemiş taslakların bu cihazdaki yedeği). Panelde analiz veya reklam çerezi çalışmaz.
         Aşağıdaki seçim yalnızca ziyaretçi sitesindeki isteğe bağlı analiz çerezleri içindir.
@@ -49,8 +49,8 @@ export default function AdminPrivacyNotice() {
         </ul>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="admin-btn !px-3 !py-1.5 !text-[12px]" onClick={() => decide(false)}>Yalnızca gerekli</button>
-        <button type="button" className="admin-btn !px-3 !py-1.5 !text-[12px]" onClick={() => decide(true)}>Sitede analiz çerezlerine izin ver</button>
+        <button type="button" className="admin-btn admin-btn-sm" onClick={() => decide(false)}>Yalnızca gerekli</button>
+        <button type="button" className="admin-btn admin-btn-sm" onClick={() => decide(true)}>Sitede analiz çerezlerine izin ver</button>
         <button type="button" className="text-[12px] text-subtle underline underline-offset-2 hover:text-white" aria-expanded={details} onClick={() => setDetails(!details)}>{details ? 'Ayrıntıları gizle' : 'Ayrıntılar'}</button>
       </div>
     </section>

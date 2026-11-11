@@ -84,12 +84,12 @@ export default function ReceivablePage() {
       )}
 
       {!cancelled && hasValid && (
-        <section className="grid gap-2 border border-line p-3 text-[13px]" aria-label="Beklenen tutarı düzelt">
+        <section className="grid gap-2 admin-box p-3 text-[13px]" aria-label="Beklenen tutarı düzelt">
           <h2 className="text-[14px] font-extrabold">Beklenen tutarı düzelt</h2>
           <p className="text-[12px] text-subtle">Alacak tutarı yanlış girildiyse burada gerekçeyle düzeltin. Tahsilatlar silinmez veya değişmez; eski → yeni tutar, kim ve ne zaman işlem geçmişinde kalır. Para birimi tahsilattan sonra değiştirilemez.</p>
           {fixing ? (
             <div className="flex flex-wrap items-end gap-2">
-              <label className="grid gap-1 text-[12px] font-semibold text-muted">Doğru tutar ({rec.currency})<input className={`${field} w-40`} inputMode="decimal" value={fixAmount} onChange={(e) => setFixAmount(e.target.value)} placeholder="0,00" /></label>
+              <label className="admin-label">Doğru tutar ({rec.currency})<input className={`${field} w-40`} inputMode="decimal" value={fixAmount} onChange={(e) => setFixAmount(e.target.value)} placeholder="0,00" /></label>
               <label className="grid flex-1 gap-1 text-[12px] font-semibold text-muted">Gerekçe (zorunlu)<input className={field} value={fixWhy} onChange={(e) => setFixWhy(e.target.value)} maxLength={500} placeholder="ör. sözleşmede 1.200 TL, 1.000 TL yazılmıştı" /></label>
               <button type="button" className="admin-btn" disabled={fixWhy.trim().length < 3 || !parseAmount(fixAmount) || (parseAmount(fixAmount) ?? BigInt(0)) <= BigInt(0)} onClick={async () => {
                 const m = parseAmount(fixAmount);

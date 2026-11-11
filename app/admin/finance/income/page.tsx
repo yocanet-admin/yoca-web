@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Badge, Empty, Flash, PageHead, field, fmtDate, small } from '@/components/admin/ops/ui';
+import { AdminTable, Badge, Empty, Flash, PageHead, field, fmtDate, small } from '@/components/admin/ops/ui';
 import { MonthPicker, monthName } from '@/components/admin/fin/MonthPicker';
 import { FinanceNav } from '@/components/admin/fin/FinanceNav';
 import { SourceBadge, TotalsCard, money } from '@/components/admin/fin/parts';
@@ -106,23 +106,23 @@ function IncomePage() {
       </section>
       <p className="-mt-3 text-[12px] text-subtle">Dönem takibi: kartlar yalnızca {mName} dönemine ait gelirleri sayar (Operasyon: müşteri tahsilat vadesinin ayı). Gerçek tahsilat tarihine göre giren para Finans › Genel bakış’taki nakit hareketindedir. Para birimleri ayrı toplanır; kur dönüşümü yapılmaz. Tutarı bilinmeyen kayıtlar toplamlara 0 olarak eklenmez.{noMonth ? ` Vadesi girilmemiş ${noMonth} Operasyon kaydı aylara dahil değil (Tüm aylar’da görünür).` : ''}</p>
 
-      <section aria-label="Filtreler" className="grid grid-cols-2 gap-3 border border-line p-3 lg:grid-cols-4">
-        <label className="grid gap-1 text-[12px] font-semibold text-muted">Kategori
+      <section aria-label="Filtreler" className="grid grid-cols-2 gap-3 admin-box p-3 lg:grid-cols-4">
+        <label className="admin-label">Kategori
           <select className={field} value={f.category} onChange={(e) => setParam({ cat: e.target.value })}>
             <option value="">Tümü</option>{INCOME_CATEGORIES.map((c) => <option key={c} value={c}>{INCOME_CATEGORY_LABEL[c]}</option>)}<option value="ops">{INCOME_CATEGORY_LABEL.ops}</option>
           </select>
         </label>
-        <label className="grid gap-1 text-[12px] font-semibold text-muted">Durum
+        <label className="admin-label">Durum
           <select className={field} value={f.state} onChange={(e) => setParam({ state: e.target.value })}>
             {STATE_OPTIONS.map(([v, t]) => <option key={v || 'all'} value={v}>{t}</option>)}
           </select>
         </label>
-        <label className="grid gap-1 text-[12px] font-semibold text-muted">Kaynak
+        <label className="admin-label">Kaynak
           <select className={field} value={f.source} onChange={(e) => setParam({ src: e.target.value })}>
             <option value="">Tümü</option><option value="fin">Gelirler</option><option value="ops">Operasyon</option>
           </select>
         </label>
-        <label className="grid gap-1 text-[12px] font-semibold text-muted">Ara<input className={field} value={f.q} onChange={(e) => setParam({ q: e.target.value })} placeholder="açıklama, müşteri…" /></label>
+        <label className="admin-label">Ara<input className={field} value={f.q} onChange={(e) => setParam({ q: e.target.value })} placeholder="açıklama, müşteri…" /></label>
       </section>
 
       <div className="flex flex-wrap gap-3 text-[13px]">
@@ -141,14 +141,9 @@ function IncomePage() {
       </div>
 
       {shown.length === 0 ? <Empty text={items.length ? 'Bu filtrelere uyan kayıt yok.' : 'Henüz gelir yok. “Yeni gelir” ile ilk alacağı ekleyin; Operasyon’daki müşteri tahsilatları burada kendiliğinden görünür.'} /> : (
-        <div className="overflow-x-auto border border-line">
-          <table className="w-full min-w-[980px] text-left text-[13px]">
-            <thead className="bg-surface text-[11px] uppercase tracking-[0.06em] text-subtle">
-              <tr>{['Dönem / vade', 'Gelir / hizmet', 'Kategori', 'Müşteri / ödeyen', 'Beklenen', 'Tahsil edilen', 'Kalan', 'Durum', ''].map((h) => <th key={h} className="px-3 py-2">{h}</th>)}</tr>
-            </thead>
-            <tbody>{shown.map((it) => <Row key={it.key} it={it} today={today} />)}</tbody>
-          </table>
-        </div>
+        <AdminTable head={['Dönem / vade', 'Gelir / hizmet', 'Kategori', 'Müşteri / ödeyen', 'Beklenen', 'Tahsil edilen', 'Kalan', 'Durum', '']} min={980} label="Gelirler">
+          {shown.map((it) => <Row key={it.key} it={it} today={today} />)}
+        </AdminTable>
       )}
     </div>
   );
@@ -157,19 +152,19 @@ function IncomePage() {
 const href = (it: IncomeItem) => (it.source === 'ops' ? `${BASE}/ops/${it.id}` : `${BASE}/${it.id}`);
 
 function Row({ it, today }: { it: IncomeItem; today: string }) {
-  const td = 'px-3 py-2.5 align-top';
+  const td = 'align-top';
   const s = it.summary;
   return (
-    <tr className="border-t border-line">
+    <tr>
       <td className={td}>{it.month ? monthName(it.month) : <span className="text-subtle">Ay yok</span>}<span className="block text-[11px] text-subtle">{it.dueOn ? `${fmtDate(it.dueOn)} · ${dueText(it.dueOn, today)}` : 'vade yok'}</span></td>
-      <td className={td}><Link href={href(it)} className="font-bold hover:text-yoca-lime">{it.title}</Link><span className="mt-1 flex flex-wrap items-center gap-1"><SourceBadge source={it.source} income />{it.periodText && it.source === 'ops' && <span className="text-[11px] text-subtle">{it.periodText}</span>}</span></td>
+      <td className={td} data-primary><Link href={href(it)} className="admin-link">{it.title}</Link><span className="mt-1 flex flex-wrap items-center gap-1"><SourceBadge source={it.source} income />{it.periodText && it.source === 'ops' && <span className="text-[11px] text-subtle">{it.periodText}</span>}</span></td>
       <td className={td}>{it.categoryText}</td>
       <td className={td}>{it.party ?? <span className="text-subtle">—</span>}</td>
       <td className={`${td} tabular-nums`}>{it.amount ? formatAmount(it.amount, it.currency) : <span className="text-subtle">Tutar bekleniyor</span>}</td>
       <td className={`${td} tabular-nums`}>{money(s.paid, it.currency)}</td>
       <td className={`${td} tabular-nums`}>{s.remaining === null ? '—' : money(s.remaining, it.currency)}</td>
       <td className={td}><Badge tone={FIN_STATE_TONE[s.state]}>{incomeStateText(s)}</Badge></td>
-      <td className={td}><Link href={href(it)} className={small}>{s.state === 'cancelled' ? 'Aç' : 'Tahsilat kaydet'}</Link></td>
+      <td className={td} data-actions><Link href={href(it)} className={small}>{s.state === 'cancelled' ? 'Aç' : 'Tahsilat kaydet'}</Link></td>
     </tr>
   );
 }

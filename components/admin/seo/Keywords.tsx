@@ -31,8 +31,8 @@ function KeywordForm({ draft, onCancel, onSave, busy }: { draft: Draft; onCancel
         <label className={`${lab} sm:col-span-2 lg:col-span-4`}>Not<input className={field} value={d.note} onChange={(e) => setD({ ...d, note: e.target.value })} maxLength={1000} /></label>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button type="submit" className="admin-btn admin-btn-primary !py-1.5 text-[12px]" disabled={busy}>Kaydet</button>
-        <button type="button" className="admin-btn !py-1.5 text-[12px]" onClick={onCancel}>Vazgeç</button>
+        <button type="submit" className="admin-btn admin-btn-primary admin-btn-sm" disabled={busy}>Kaydet</button>
+        <button type="button" className="admin-btn admin-btn-sm" onClick={onCancel}>Vazgeç</button>
       </div>
     </form>
   );
@@ -64,7 +64,7 @@ function KeywordCard({ k, busy, onEdit, onToggle, onDelete }: { k: SeoKeyword; b
     <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-[0.06em] text-subtle">{label}</p><p className="text-[15px] font-extrabold tabular-nums text-white">{value}</p></div>
   );
   return (
-    <li className="grid gap-2 rounded-sm border border-line bg-surface-deep/60 p-3" data-testid="seo-keyword-card">
+    <li className="grid gap-2 admin-box p-3" data-testid="seo-keyword-card">
       <div className="flex items-start justify-between gap-2">
         <p className="min-w-0 break-words font-semibold text-white">{k.keyword}</p>
         <Badge tone={k.status === 'active' ? 'ok' : 'muted'}>{STATUS_LABEL[k.status]}</Badge>

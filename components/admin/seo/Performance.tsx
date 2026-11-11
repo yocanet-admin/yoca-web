@@ -23,7 +23,7 @@ export function Filters({ query, onChange, today }: { query: Query; onChange: (q
   const f = query.filters;
   const set = (patch: Partial<SeoFilters>) => onChange({ ...query, filters: { ...f, ...patch } });
   return (
-    <div className="grid gap-3 rounded-md border border-line bg-surface-deep/60 p-4" data-testid="seo-filters">
+    <div className="grid gap-3 admin-box p-4" data-testid="seo-filters">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[12px] font-bold text-muted">Dönem</span>
         {PRESETS.map((p) => (
@@ -75,7 +75,7 @@ export function DataLag({ report }: { report: Report }) {
   const f = report.freshness;
   const list = (days: string[]) => (days.length ? days.map(fmtDay).join(', ') : 'yok');
   return (
-    <div className="grid gap-1.5 rounded-md border border-line bg-surface p-4 text-[13px] leading-relaxed text-soft" data-testid="seo-lag">
+    <div className="grid gap-1.5 admin-box p-4 text-[13px] leading-relaxed text-soft" data-testid="seo-lag">
       {f.known && f.finalThrough && f.firstIncompleteDate ? (
         <p>
           <strong className="text-white">Son kesin veri günü:</strong> {dayYear(f.finalThrough)} <span className="text-subtle">(ilk kesinleşmemiş gün {dayYear(f.firstIncompleteDate)}; Search Console yanıtından doğrulandı)</span>. {DATA_LAG_NOTE}
@@ -122,7 +122,7 @@ export function Totals({ report }: { report: Report }) {
       <StatTile label="Tıklama" value={fmtNumber(t.clicks)} deltaPct={d.clicksPct} deltaLabel={label} hint={d.clicksPct === null ? `önceki: ${fmtNumber(p.clicks)}` : undefined} />
       <StatTile label="Gösterim" value={fmtNumber(t.impressions)} deltaPct={d.impressionsPct} deltaLabel={label} hint={d.impressionsPct === null ? `önceki: ${fmtNumber(p.impressions)}` : undefined} />
       <StatTile label="Tıklama oranı (TO)" value={t.impressions ? ctrText(t.ctr, t.impressions) : '–'} hint={d.ctrPoints === null ? (t.impressions ? '' : NO_DATA) : `${sign(d.ctrPoints)} puan ${label} (önceki ${ctrText(p.ctr, p.impressions)})`} />
-      <div className="rounded-md border border-line bg-surface-deep/80 p-5" data-testid="seo-position">
+      <div className="admin-box p-5" data-testid="seo-position">
         <p className="text-[12px] font-semibold text-muted">{POSITION_LABEL}</p>
         <p className="mt-2 text-[30px] font-extrabold leading-none tabular-nums tracking-[-0.02em] text-white">{t.position === null ? '–' : positionText(t.position)}</p>
         <p className="mt-2 text-[12px] text-subtle">
@@ -175,7 +175,7 @@ export function Daily({ report }: { report: Report }) {
 
 export function Weekly({ weekly, onSave, busy, canSave }: { weekly: WeeklyTotal[]; onSave: () => void; busy: boolean; canSave: boolean }) {
   return (
-    <Card title="Haftalık kayıt" action={<button type="button" className="admin-btn !py-1.5 text-[12px]" disabled={busy || !canSave} onClick={onSave}>{busy ? 'Kaydediliyor…' : 'Şimdi kaydet'}</button>}>
+    <Card title="Haftalık kayıt" action={<button type="button" className="admin-btn admin-btn-sm" disabled={busy || !canSave} onClick={onSave}>{busy ? 'Kaydediliyor…' : 'Şimdi kaydet'}</button>}>
       <p className="mb-3 max-w-[90ch] text-[12px] leading-relaxed text-subtle" data-testid="seo-history-scope">{HISTORY_SCOPE} Haftalar pazartesi başlar; yalnızca tamamlanmış ve Search Console’un kesinleştiğini bildirdiği haftalar kaydedilir; kesinleşme belirlenemezse hafta atlanır. Aynı hafta tekrar kaydedilirse haftanın tüm kaydı tek işlemde yenilenir (çift veya artık satır kalmaz; yazma başarısız olursa önceki kayıt korunur). Haftalık otomatik kayıt: perşembe 04:10 UTC.</p>
       {weekly.length === 0 ? <p className="text-[13px] text-subtle">Henüz haftalık kayıt yok.</p> : (
         <div className="-mx-1 overflow-x-auto">

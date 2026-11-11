@@ -32,7 +32,7 @@ const STATE: Record<Row['state'], [string, 'ok' | 'muted' | 'warn']> = { new: ['
 
 function Group({ title, note, rows, render }: { title: string; note?: string; rows: Row[]; render: (r: Row) => ReactNode }) {
   return (
-    <section className="grid gap-2 border border-line p-3">
+    <section className="grid gap-2 admin-box p-3">
       <h3 className="text-[14px] font-extrabold">{title} <span className="text-subtle">({rows.length})</span></h3>
       {note && <p className="text-[12px] text-subtle">{note}</p>}
       {rows.length === 0 ? <p className="text-[12px] text-subtle">Yok.</p> : <ul className="grid gap-1 text-[13px]">{rows.map((r) => <li key={r.key} className="flex flex-wrap items-baseline gap-2 border-t border-line py-1.5"><span className="w-14 text-[11px] text-subtle">satır {r.row}</span>{render(r)}<Badge tone={STATE[r.state][1]}>{STATE[r.state][0]}</Badge></li>)}</ul>}

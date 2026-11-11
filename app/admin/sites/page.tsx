@@ -1,5 +1,6 @@
 'use client';
 
+import { DateField } from '@/components/admin/DateField';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Card, Notice, StatusBadge } from '@/components/admin/cockpit/Widgets';
@@ -146,10 +147,11 @@ export default function AdminSites() {
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Müşteri siteleri</h1>
-          <p className="mt-1.5 text-[14px] text-muted">Açık mı, askıda mı, imza var mı, SSL ve alan adı ne zaman bitiyor. Her site kendi sıklığıyla kontrol edilir.</p>
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Genel</p>
+          <h1 className="admin-h1">Müşteri siteleri</h1>
+          <p className="admin-lede">Açık mı, askıda mı, imza var mı, SSL ve alan adı ne zaman bitiyor. Her site kendi sıklığıyla kontrol edilir.</p>
         </div>
         <div className="flex items-center gap-3">
           {flash && <span role="status" className="text-[13px] font-bold text-amber-300">{flash}</span>}
@@ -184,7 +186,7 @@ export default function AdminSites() {
           const inFlight = checking[site.id] || site.checking;
           const answered = c && (c.state === 'up' || c.state === 'slow');
           return (
-            <article key={site.id} className="rounded-md border border-line bg-surface-deep/80 p-4">
+            <article key={site.id} className="admin-box p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-2.5 text-[15px] font-extrabold">
@@ -275,11 +277,11 @@ export default function AdminSites() {
                 )}
               </dl>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => checkNow(site)} disabled={Boolean(inFlight) || cooldown > 0} className="admin-btn !py-1.5 text-[12px]">
+                <button type="button" onClick={() => checkNow(site)} disabled={Boolean(inFlight) || cooldown > 0} className="admin-btn admin-btn-sm">
                   {inFlight ? 'Kontrol ediliyor…' : cooldown > 0 ? `Şimdi kontrol et (${cooldown} sn)` : 'Şimdi kontrol et'}
                 </button>
                 {c && !answered && (
-                  <button type="button" onClick={() => probe(site)} disabled={probes[site.id]?.state === 'checking'} className="admin-btn !py-1.5 text-[12px]">
+                  <button type="button" onClick={() => probe(site)} disabled={probes[site.id]?.state === 'checking'} className="admin-btn admin-btn-sm">
                     Bu tarayıcıdan dene
                   </button>
                 )}
@@ -340,7 +342,7 @@ export default function AdminSites() {
         <Card title="İzlenen siteler">
           <ul className="grid gap-2">
             {(ready ? rows : []).map((row) => (
-              <li key={row.id} className="grid gap-2 rounded-sm border border-line p-3 text-[13px]">
+              <li key={row.id} className="grid gap-2 admin-box p-3 text-[13px]">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-bold">{row.name}</span>
                   <span className="flex items-center gap-3">
@@ -369,15 +371,10 @@ export default function AdminSites() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-[12px] text-subtle">
                   {row.url}
-                  <label className="ml-auto flex items-center gap-1.5">
-                    Hosting yenileme
-                    <input
-                      type="date"
-                      value={row.hosting_renews_on ?? ''}
-                      onChange={(e) => edit(row, { hosting_renews_on: e.target.value || null })}
-                      className="admin-input !w-auto !py-1 text-[12px]"
-                    />
-                  </label>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <span aria-hidden="true">Hosting yenileme</span>
+                    <DateField label="Hosting yenileme" today="" value={row.hosting_renews_on ?? ''} onChange={(v) => edit(row, { hosting_renews_on: v || null })} />
+                  </div>
                 </div>
               </li>
             ))}

@@ -56,7 +56,7 @@ async function login(ctx, start) {
   const bg = await dialog.evaluate((el) => getComputedStyle(el).backgroundColor);
   const sel = page.getByRole('gridcell', { selected: true });
   const selBg = await sel.evaluate((el) => getComputedStyle(el).backgroundColor);
-  check('picker: dark popover (not the white native calendar), selected month in lime', bg === 'rgb(30, 34, 42)' && selBg === 'rgb(162, 255, 0)', `${bg} / ${selBg}`);
+  check('picker: dark popover (not the white native calendar), selected month in lime', bg === 'rgb(28, 31, 37)' /* panel token --tile-2 (shared Yoca panel design) */ && selBg === 'rgb(162, 255, 0)', `${bg} / ${selBg}`);
   await page.screenshot({ path: `${OUT}/ay-secici-acik.png`, clip: { x: 260, y: 120, width: 700, height: 470 } });
   const focused0 = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
   await page.keyboard.press('ArrowLeft');

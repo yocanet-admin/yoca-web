@@ -217,7 +217,7 @@ export default function OpsOverview() {
 
 function Tile({ href, label, value, hint, alert }: { href: string; label: string; value: number; hint?: string; alert?: boolean }) {
   return (
-    <Link href={href} className="block rounded-md border border-line bg-surface-deep/80 p-4 transition-colors hover:border-yoca-lime/50">
+    <Link href={href} className="block admin-box p-4 transition-colors hover:border-yoca-lime/50">
       <p className="text-[12px] font-semibold text-muted">{label}</p>
       <p className={`mt-1.5 text-[28px] font-extrabold leading-none tabular-nums ${alert ? 'text-amber-300' : 'text-white'}`}>{value}</p>
       <p className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] text-subtle">{alert && <Badge tone="warn">Dikkat</Badge>}{hint}</p>

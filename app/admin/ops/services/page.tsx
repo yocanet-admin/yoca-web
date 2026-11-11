@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { StatusBadges } from '@/components/admin/ops/ServiceForm';
+import { LabeledDate } from '@/components/admin/DateField';
 import { Badge, Details, Empty, EntityLink, Flash, PageHead, Unknown, field, fmtDate, label as labelCls, small } from '@/components/admin/ops/ui';
 import { IMPORT_FIELDS, guessMapping, parseCsv, toCsv, validateImport, type ImportField, type ImportRow } from '@/lib/ops/csv';
 import { createService, loadOps, type OpsData, type Party, type Project } from '@/lib/ops/data';
@@ -181,8 +182,8 @@ function ServicesInner() {
   };
 
   const sel = (k: string, title: string, options: Array<[string, string]>) => (
-    <label className="grid gap-1 text-[12px] font-semibold text-muted">{title}
-      <select className={`${field} !py-1.5 text-[13px]`} value={get(k)} onChange={(e) => setParams({ [k]: e.target.value || null })}>
+    <label className="admin-label">{title}
+      <select className={field} value={get(k)} onChange={(e) => setParams({ [k]: e.target.value || null })}>
         <option value="">Tümü</option>
         {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
@@ -204,13 +205,13 @@ function ServicesInner() {
       {data && !data.ready && <Flash tone="bad" message={data.error ?? 'Veriler yüklenemedi.'} />}
       {showImport && data?.ready && <ImportPanel data={data} onImported={reload} onClose={() => setShowImport(false)} />}
 
-      <section className="admin-card grid gap-3 !p-4">
+      <section className="admin-card grid gap-3" aria-label="Filtreler">
         <div className="flex flex-wrap items-end gap-2">
-          <label className="grid min-w-[220px] flex-1 gap-1 text-[12px] font-semibold text-muted">Ara
-            <input className={`${field} !py-1.5 text-[13px]`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ad, alan adı, müşteri veya sağlayıcı" aria-label="Hizmet ara" />
+          <label className="admin-label min-w-[220px] flex-1">Ara
+            <input className={field} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ad, alan adı, müşteri veya sağlayıcı" aria-label="Hizmet ara" />
           </label>
-          <label className="grid gap-1 text-[12px] font-semibold text-muted">Sırala
-            <select className={`${field} !py-1.5 text-[13px]`} value={f.sort} onChange={(e) => setParams({ sort: e.target.value === 'end' ? null : e.target.value })}>
+          <label className="admin-label">Sırala
+            <select className={field} value={f.sort} onChange={(e) => setParams({ sort: e.target.value === 'end' ? null : e.target.value })}>
               <option value="end">Bitiş tarihi</option><option value="name">Ad</option>
             </select>
           </label>
@@ -223,17 +224,13 @@ function ServicesInner() {
           {sel('owner', 'Ekip sorumlusu', owners.map((o) => [o, o]))}
           {sel('client', 'Müşteri', customers.map((p) => [p.id, p.name]))}
           {sel('provider', 'Sağlayıcı', providers.map((p) => [p.id, p.name]))}
-          <label className="grid gap-1 text-[12px] font-semibold text-muted">Bitiş (başlangıç)
-            <input type="date" className={`${field} !py-1.5 text-[13px]`} value={f.from} onChange={(e) => setParams({ from: e.target.value || null })} />
-          </label>
-          <label className="grid gap-1 text-[12px] font-semibold text-muted">Bitiş (son)
-            <input type="date" className={`${field} !py-1.5 text-[13px]`} value={f.to} onChange={(e) => setParams({ to: e.target.value || null })} />
-          </label>
+          <LabeledDate className="lg:col-span-2" label="Bitiş (başlangıç)" value={f.from} max={f.to || null} today={today} onChange={(v) => setParams({ from: v || null })} />
+          <LabeledDate className="lg:col-span-2" label="Bitiş (son)" value={f.to} min={f.from || null} today={today} onChange={(v) => setParams({ to: v || null })} />
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-soft">
-          <label className="flex items-center gap-2"><input type="checkbox" className="accent-yoca-lime" checked={f.missing} onChange={(e) => setParams({ missing: e.target.checked ? '1' : null })} />Eksik bilgisi olanlar</label>
-          <label className="flex items-center gap-2"><input type="checkbox" className="accent-yoca-lime" checked={f.autorenew === 'unverified'} onChange={(e) => setParams({ autorenew: e.target.checked ? 'unverified' : null })} />Otomatik yenileme doğrulanmamış</label>
-          <label className="flex items-center gap-2"><input type="checkbox" className="accent-yoca-lime" checked={f.archived} onChange={(e) => setParams({ archived: e.target.checked ? '1' : null })} />Yalnızca arşivdekiler</label>
+          <label className="flex items-center gap-2"><input type="checkbox" className="admin-check" checked={f.missing} onChange={(e) => setParams({ missing: e.target.checked ? '1' : null })} />Eksik bilgisi olanlar</label>
+          <label className="flex items-center gap-2"><input type="checkbox" className="admin-check" checked={f.autorenew === 'unverified'} onChange={(e) => setParams({ autorenew: e.target.checked ? 'unverified' : null })} />Otomatik yenileme doğrulanmamış</label>
+          <label className="flex items-center gap-2"><input type="checkbox" className="admin-check" checked={f.archived} onChange={(e) => setParams({ archived: e.target.checked ? '1' : null })} />Yalnızca arşivdekiler</label>
           {active.length > 0 && <button type="button" className={small} onClick={() => { setQ(''); router.replace(BASE, { scroll: false }); }}>Filtreleri temizle</button>}
         </div>
       </section>
@@ -247,22 +244,22 @@ function ServicesInner() {
         ) : (
           <div className="grid gap-2">
             <p className="text-[12px] text-subtle">{visible.length} kayıt{active.length ? ' (filtreli)' : ''}</p>
-            <div className="overflow-x-auto border border-line">
-              <table className="w-full min-w-[960px] text-left text-[13px]">
-                <thead className="bg-surface text-[11px] uppercase tracking-[0.06em] text-subtle">
+            <div className="admin-table-wrap admin-table-cards-lg">
+              <table className="admin-table min-w-[960px]">
+                <thead>
                   <tr>
-                    <th className="px-3 py-2">Hizmet</th>
-                    <th className="px-3 py-2">Müşteri / proje</th>
-                    <th className="px-3 py-2">Sağlayıcı</th>
-                    <th className="px-3 py-2">Bitiş</th>
-                    <th className="px-3 py-2">Durumlar</th>
-                    <th className="px-3 py-2">Sorumlu</th>
+                    <th>Hizmet</th>
+                    <th>Müşteri / proje</th>
+                    <th>Sağlayıcı</th>
+                    <th>Bitiş</th>
+                    <th>Durumlar</th>
+                    <th>Sorumlu</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visible.map((r) => (
-                    <tr key={r.s.id} className="border-t border-line align-top">
-                      <td className="px-3 py-2.5">
+                    <tr key={r.s.id}>
+                      <td data-primary>
                         <EntityLink href={`${BASE}/${r.s.id}`}>{r.s.name}</EntityLink>
                         <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[12px] text-subtle">
                           {KIND_LABEL[r.s.kind]}{r.domain && r.domain !== r.s.name ? ` · ${r.domain}` : ''}
@@ -270,7 +267,7 @@ function ServicesInner() {
                           {r.missing.length > 0 && <Badge tone="warn" title="Eksik bilgi">Eksik: {r.missing.join(', ')}</Badge>}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5">
+                      <td data-label="Müşteri / proje">
                         {r.clients.length || r.projects.length ? (
                           <span className="grid gap-0.5">
                             {r.clients.map((c) => <span key={c.id}>{c.name}</span>)}
@@ -278,10 +275,10 @@ function ServicesInner() {
                           </span>
                         ) : <Unknown>Bağlı değil</Unknown>}
                       </td>
-                      <td className="px-3 py-2.5">{r.provider ? r.provider.name : <Unknown />}</td>
-                      <td className="px-3 py-2.5"><EndCell r={r} today={today} /></td>
-                      <td className="px-3 py-2.5"><StatusBadges compact status={r.s.status} collection={r.pin?.state ?? null} provider={r.pout?.state ?? null} renew={r.renew} /></td>
-                      <td className="px-3 py-2.5">{r.s.team_owner || <Unknown>Atanmadı</Unknown>}</td>
+                      <td data-label="Sağlayıcı">{r.provider ? r.provider.name : <Unknown />}</td>
+                      <td data-label="Bitiş"><EndCell r={r} today={today} /></td>
+                      <td data-label="Durumlar"><StatusBadges compact status={r.s.status} collection={r.pin?.state ?? null} provider={r.pout?.state ?? null} renew={r.renew} /></td>
+                      <td data-label="Sorumlu">{r.s.team_owner || <Unknown>Atanmadı</Unknown>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -454,7 +451,7 @@ function ImportPanel({ data, onImported, onClose }: { data: OpsData; onImported:
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {IMPORT_FIELDS.map((fd) => (
                 <label key={fd.key} className={labelCls}>{fd.label}{'required' in fd && fd.required ? ' *' : ''}
-                  <select className={`${field} !py-1.5 text-[13px]`} value={mapping[fd.key] ?? ''} onChange={(e) => setMapping((m) => ({ ...m, [fd.key]: e.target.value === '' ? undefined : Number(e.target.value) }))}>
+                  <select className={field} value={mapping[fd.key] ?? ''} onChange={(e) => setMapping((m) => ({ ...m, [fd.key]: e.target.value === '' ? undefined : Number(e.target.value) }))}>
                     <option value="">— yok —</option>
                     {header.map((h, idx) => <option key={idx} value={idx}>{idx + 1}. {h || '(başlıksız)'}</option>)}
                   </select>
@@ -482,7 +479,7 @@ function ImportPanel({ data, onImported, onClose }: { data: OpsData; onImported:
                 {preview.map((r) => (
                   <tr key={r.line} className={`border-t border-line align-top ${r.errors.length ? 'bg-red-500/5' : r.duplicateOf ? 'bg-yellow-400/5' : ''}`}>
                     <td className="px-2 py-1.5">
-                      <input type="checkbox" className="accent-yoca-lime" aria-label={`Satır ${r.line} içe aktar`} disabled={!tickable(r) || busy} checked={Boolean(picked[r.line]) && tickable(r)} onChange={(e) => setPicked((p) => ({ ...p, [r.line]: e.target.checked }))} />
+                      <input type="checkbox" className="admin-check" aria-label={`Satır ${r.line} içe aktar`} disabled={!tickable(r) || busy} checked={Boolean(picked[r.line]) && tickable(r)} onChange={(e) => setPicked((p) => ({ ...p, [r.line]: e.target.checked }))} />
                     </td>
                     <td className="px-2 py-1.5 tabular-nums">{r.line}</td>
                     <td className="px-2 py-1.5">{r.values.name ?? <Unknown>—</Unknown>}{r.values.domain && <span className="block text-subtle">{r.values.domain}</span>}</td>
@@ -514,7 +511,7 @@ function ImportPanel({ data, onImported, onClose }: { data: OpsData; onImported:
       )}
 
       {result && (
-        <div className="grid gap-2 border border-line p-3 text-[13px]" role="status">
+        <div className="grid gap-2 admin-box p-3 text-[13px]" role="status">
           <p className="font-bold">Sonuç: {result.created.length} oluşturuldu · {result.skipped.length} atlandı · {result.failed.length} başarısız</p>
           {result.created.length > 0 && (
             <Details title={`Oluşturulanlar (${result.created.length})`} open={result.created.some((c) => c.notes.length > 0)}>

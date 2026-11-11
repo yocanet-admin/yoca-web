@@ -45,7 +45,10 @@ async function login(ctx, email, pw, start = '/admin/ops') {
   await page.getByLabel('Açıklama').waitFor();
   await page.getByLabel('Açıklama').fill('TEST İnternet (fiber)');
   await page.getByLabel('Kategori').selectOption('internet');
-  await page.locator('label:has-text("İlk vade") input').fill('2026-11-10');
+  // the Turkish dark date field (gg.aa.yyyy) replaced the native date input; the value is committed on blur
+  const firstDue = page.getByRole('textbox', { name: /^İlk vade .*\(gg\.aa\.yyyy\)$/ });
+  await firstDue.fill('10.11.2026');
+  await firstDue.press('Tab');
   await page.locator('label:has-text("Tutar") input').first().fill('1.250,00');
   await page.getByLabel('Firma / kişi adı').fill('TEST Telekom');
   await page.getByLabel('Ödeme hesabı').fill('Şirket kartı');

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { LabeledDate } from '@/components/admin/DateField';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Details, Flash, field, label, small, fmtDate, fmtDateTime } from '@/components/admin/ops/ui';
@@ -380,10 +381,10 @@ function EditorInner() {
   return (
     <div className="grid gap-5">
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-subtle"><Link href="/admin/documents" className="hover:text-white">Teklifler ve Belgeler</Link> · {KIND_LABEL[kind].tr}</p>
-          <h1 className="text-2xl font-extrabold tracking-tight"><span className="font-mono text-[18px] text-muted">{doc.number}</span> {draft.title || <span className="italic text-subtle">Başlıksız</span>}</h1>
+      <div className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker"><Link href="/admin/documents" className="hover:text-white">Teklifler ve Belgeler</Link> · {KIND_LABEL[kind].tr}</p>
+          <h1 className="admin-h1 !text-[28px]"><span className="font-mono text-[18px] text-muted">{doc.number}</span> {draft.title || <span className="italic text-subtle">Başlıksız</span>}</h1>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Badge tone={doc.status === 'draft' ? 'warn' : doc.status === 'final' ? 'ok' : 'muted'}>{STATUS_LABEL[doc.status]}</Badge>
             {doc.final_version ? <Badge tone="info">Son sürüm v{doc.final_version}{doc.status === 'draft' ? ' · revizyon açık' : ''}</Badge> : null}
@@ -481,8 +482,8 @@ function EditorInner() {
               <label className={label}>Başlık (PDF’te ana başlık)<input className={field} value={draft.title} onChange={(e) => setTop({ title: e.target.value })} placeholder={kind === 'quote' ? 'Ör. Marka kimliği ve iki dilli web sitesi teklifi' : 'Belge başlığı'} /></label>
               <div className="grid gap-3 sm:grid-cols-3">
                 <label className={label}>Dil<select className={field} value={c.locale} onChange={(e) => set({ locale: e.target.value === 'en' ? 'en' : 'tr' })}><option value="tr">Türkçe</option><option value="en">English</option></select></label>
-                <label className={label}>Düzenleme tarihi<input type="date" className={field} value={c.issueDate} onChange={(e) => set({ issueDate: e.target.value })} /></label>
-                {def.validity && <label className={label}>Geçerlilik tarihi<input type="date" className={field} value={c.validUntil} onChange={(e) => set({ validUntil: e.target.value })} /></label>}
+                <LabeledDate label="Düzenleme tarihi" value={c.issueDate} onChange={(v) => set({ issueDate: v })} />
+                {def.validity && <LabeledDate label="Geçerlilik tarihi" value={c.validUntil} onChange={(v) => set({ validUntil: v })} />}
                 {def.items && <label className={label}>Para birimi<select className={field} value={c.currency} onChange={(e) => pickCurrency(e.target.value as DocCurrency)}><CurrencyOptions /></select></label>}
                 {def.period && <label className={label}>Rapor dönemi<input className={field} value={c.period} onChange={(e) => set({ period: e.target.value })} placeholder="Ör. 20 Ekim – 3 Kasım 2026" /></label>}
               </div>
@@ -548,7 +549,7 @@ function EditorInner() {
                 {c.items.map((it, i) => {
                   const line = [...calc.totals.lines, ...calc.recurring.flatMap((g) => g.totals.lines)].find((l) => l.id === it.id);
                   return (
-                    <div key={it.id} className="grid gap-2 border border-line p-3" data-testid={`item-${i}`}>
+                    <div key={it.id} className="grid gap-2 admin-box p-3" data-testid={`item-${i}`}>
                       <div className="flex items-start gap-2">
                         <span className="mt-2 w-6 text-[12px] font-bold text-yoca-green">{String(i + 1).padStart(2, '0')}</span>
                         <div className="grid min-w-0 flex-1 gap-2">
@@ -643,7 +644,7 @@ function EditorInner() {
                 {c.payment.map((p, i) => {
                   const row = calc.payment.rows.find((r) => r.id === p.id);
                   return (
-                    <div key={p.id} className="grid gap-2 border border-line p-3 sm:grid-cols-[1.4fr_auto_0.7fr_1.2fr_auto] sm:items-end">
+                    <div key={p.id} className="grid gap-2 admin-box p-3 sm:grid-cols-[1.4fr_auto_0.7fr_1.2fr_auto] sm:items-end">
                       <label className={label}>Adım<input className={field} value={p.label} onChange={(e) => setStep(i, { label: e.target.value })} placeholder="Başlangıç ödemesi" /></label>
                       <label className={label}>Tür<select className={field} value={p.mode} onChange={(e) => setStep(i, { mode: e.target.value === 'amount' ? 'amount' : 'percent' })}><option value="percent">Yüzde</option><option value="amount">Tutar</option></select></label>
                       <label className={label}>{p.mode === 'percent' ? '%' : c.currency}<input className={field} inputMode="decimal" value={p.value} onChange={(e) => setStep(i, { value: e.target.value })} /></label>
@@ -689,7 +690,7 @@ function EditorInner() {
               {c.blocks.map((b, i) => {
                 const bo = blockOpen(b);
                 return (
-                  <div key={b.id} className="grid gap-2 border border-line p-3">
+                  <div key={b.id} className="grid gap-2 admin-box p-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <button type="button" className="w-4 text-subtle" aria-expanded={bo} aria-label={bo ? `${b.heading || 'Bölüm'} kapat` : `${b.heading || 'Bölüm'} aç`} onClick={() => setOpenBlocks((o) => ({ ...o, [b.id]: !bo }))}><span aria-hidden className={`inline-block transition-transform ${bo ? 'rotate-90' : ''}`}>›</span></button>
                       <input aria-label="Bölüm başlığı" className={`${field} flex-1`} value={b.heading} onChange={(e) => setBlock(b.id, { heading: e.target.value })} />
@@ -906,8 +907,8 @@ function EditorInner() {
         );
       })()}
       {curAsk && (
-        <div role="dialog" aria-modal="true" aria-labelledby="cur-h" className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4" onKeyDown={(e) => { if (e.key === 'Escape') setCurAsk(null); }}>
-          <div className="admin-card grid w-full max-w-lg gap-3 p-5 text-[13px]">
+        <div role="dialog" aria-modal="true" aria-labelledby="cur-h" className="admin-backdrop" onKeyDown={(e) => { if (e.key === 'Escape') setCurAsk(null); }}>
+          <div className="admin-dialog max-w-lg text-[13px]">
             <h2 id="cur-h" className="text-lg font-extrabold">Para birimi: {CURRENCY_LABEL[c.currency]} → {CURRENCY_LABEL[curAsk]}</h2>
             <p className="text-muted">Bu belgede tutar girilmiş ({c.items.filter((x) => x.unitPrice.trim()).length} kalemde fiyat). Panelde döviz kuru altyapısı yok: tutarlar <b className="text-white">çevrilemez</b>. Ne yapılacağını siz seçin.</p>
             <button type="button" className="admin-btn justify-self-start" disabled title="Kur çevrimi bu panelde yok">Kurla çevir (kullanılamıyor — kur altyapısı yok)</button>

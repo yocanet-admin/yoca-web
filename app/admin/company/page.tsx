@@ -116,10 +116,11 @@ export default function AdminCompany() {
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Şirket bilgileri</h1>
-          <p className="mt-1.5 text-[14px] text-muted">Aydınlatma Metni bu bilgilerden oluşur. Bilinmeyen resmî alanları boş bırakın; sitede “tamamlanacak” görünür.</p>
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Sistem</p>
+          <h1 className="admin-h1">Şirket bilgileri</h1>
+          <p className="admin-lede">Aydınlatma Metni bu bilgilerden oluşur. Bilinmeyen resmî alanları boş bırakın; sitede “tamamlanacak” görünür.</p>
         </div>
         <div className="flex items-center gap-3">
           {msg && <span className="text-[13px] font-bold text-yoca-lime">{msg}</span>}
@@ -162,7 +163,7 @@ export default function AdminCompany() {
               <Card key={g.title} title={g.title}>
                 <div className="grid gap-3">
                   {g.title === 'Veri sorumlusu' && (
-                    <label className="grid gap-1 text-[12px] font-bold text-subtle">Veri sorumlusu türü
+                    <label className="admin-label">Veri sorumlusu türü
                       <select value={draft.controllerType} onChange={(e) => setDraft({ ...draft, controllerType: e.target.value as CompanyInfo['controllerType'] })} className="admin-input text-[13px]">
                         <option value="">— tamamlanacak</option>
                         <option value="person">Gerçek kişi</option>

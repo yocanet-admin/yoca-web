@@ -119,10 +119,11 @@ export default function AdminSettings() {
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Ayarlar</h1>
-          <p className="mt-1.5 text-[14px] text-muted">Bildirimler, sabah özeti, yanıt süreleri ve yapay zekâ.</p>
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Sistem</p>
+          <h1 className="admin-h1">Ayarlar</h1>
+          <p className="admin-lede">Bildirimler, sabah özeti, yanıt süreleri ve yapay zekâ.</p>
         </div>
         {flash && (
           <span role="status" className={`text-[13px] font-bold ${flash.tone === 'ok' ? 'text-yoca-lime' : 'text-amber-300'}`}>
@@ -199,7 +200,7 @@ export default function AdminSettings() {
                   ['morning_summary', 'Sabah özeti', 'Her gün 08:30: yeni leadler, takipler, görevler, site uyarıları, dünkü trafik.'],
                 ] as const
               ).map(([key, label, hint]) => (
-                <label key={key} className="flex cursor-pointer items-start gap-3 rounded-sm border border-line p-3">
+                <label key={key} className="flex cursor-pointer items-start gap-3 admin-box p-3">
                   <input type="checkbox" checked={draft[key]} disabled={!draft.ready || busy !== null} onChange={(e) => save({ [key]: e.target.checked })} className="mt-0.5 h-4 w-4 accent-yoca-lime" />
                   <span>
                     <span className="block text-[13px] font-bold text-white">{label}</span>

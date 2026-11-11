@@ -1,5 +1,6 @@
 'use client';
 
+import { DateField } from '@/components/admin/DateField';
 import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -147,10 +148,11 @@ function ClientsInner() {
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Müşteriler</h1>
-          <p className="mt-1.5 text-[14px] text-muted">Adaylar, aktif müşteriler, fırsatlar ve yapılacaklar. Kayıtlar Operasyon → <Link href="/admin/ops/clients" className="underline">Müşteriler ve firmalar</Link> ile aynı kayıtlardır; bir müşteriyi iki ekrana ayrı ayrı girmeniz gerekmez.</p>
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Genel</p>
+          <h1 className="admin-h1">Müşteriler</h1>
+          <p className="admin-lede">Adaylar, aktif müşteriler, fırsatlar ve yapılacaklar. Kayıtlar Operasyon → <Link href="/admin/ops/clients" className="underline">Müşteriler ve firmalar</Link> ile aynı kayıtlardır; bir müşteriyi iki ekrana ayrı ayrı girmeniz gerekmez.</p>
         </div>
         <div className="flex items-center gap-3">
           {flash && <span role="status" className="text-[13px] font-bold text-yoca-lime">{flash}</span>}
@@ -162,7 +164,7 @@ function ClientsInner() {
 
       {creating && (
         <form onSubmit={createClient} className="admin-card grid gap-3 !p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end" aria-label="Yeni müşteri">
-          <label className="grid gap-1 text-[12px] font-semibold text-muted">
+          <label className="admin-label">
             Firma / marka adı
             <input
               autoFocus
@@ -348,7 +350,7 @@ function ClientDetail({
   const dirty = editable(form) !== editable(client);
 
   const field = (key: keyof Client, label: string, type = 'text') => (
-    <label className="grid gap-1 text-[12px] font-bold text-subtle">
+    <label className="admin-label">
       {label}
       <input type={type} value={(form[key] as string) ?? ''} onChange={(e) => setForm({ ...form, [key]: e.target.value })} className="admin-input text-[13px]" />
     </label>
@@ -379,7 +381,7 @@ function ClientDetail({
           {field('email', 'E-posta', 'email')}
           {field('phone', 'Telefon', 'tel')}
           {field('website', 'Web sitesi', 'url')}
-          <label className="grid gap-1 text-[12px] font-bold text-subtle">
+          <label className="admin-label">
             Durum
             <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ClientStatus })} className="admin-input text-[13px]">
               {CLIENT_STATUSES.map((s) => (
@@ -389,7 +391,7 @@ function ClientDetail({
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-[12px] font-bold text-subtle sm:col-span-2">
+          <label className="admin-label sm:col-span-2">
             Not
             <textarea rows={2} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className="admin-input text-[13px]" />
           </label>
@@ -427,7 +429,7 @@ function ClientDetail({
         {deals.length > 0 && (
           <ul className="mb-4 grid gap-2">
             {deals.map((deal) => (
-              <li key={deal.id} className="grid gap-2 rounded-sm border border-line p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-center">
+              <li key={deal.id} className="grid gap-2 admin-box p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-center">
                 <span className="min-w-0 truncate text-[14px] font-bold">{deal.title}</span>
                 <span className="text-[14px] font-extrabold tabular-nums">{money(deal.value, deal.currency)}</span>
                 <select
@@ -515,7 +517,7 @@ function ClientDetail({
           </div>
           <textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} placeholder={kind === 'task' ? 'Ne yapılacak?' : 'Ne konuşuldu / ne oldu?'} aria-label="Aktivite metni" className="admin-input text-[13px]" />
           <div className="flex flex-wrap items-center gap-2">
-            {kind === 'task' && <input type="date" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Son tarih" className="admin-input !w-auto !py-1.5 text-[13px]" />}
+            {kind === 'task' && <div className="w-[13rem]"><DateField label="Son tarih" today="" value={due} onChange={(v) => setDue(v)} /></div>}
             <button type="submit" className="admin-btn-primary">
               Ekle
             </button>

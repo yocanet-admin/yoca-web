@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { LabeledDate } from '@/components/admin/DateField';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, DateOr, Details, Documents, Empty, EntityLink, Flash, PageHead, field, fmtDate, fmtDateTime, label, small } from '@/components/admin/ops/ui';
@@ -171,8 +172,8 @@ function ProjectForm({ project, data, slugs, onSaved, onError, onArchive }: { pr
           </select>
         </label>
         <div className="grid grid-cols-2 gap-3">
-          <label className={label}>Başlangıç<input type="date" className={field} value={d.start_on} onChange={(e) => setD({ ...d, start_on: e.target.value })} /></label>
-          <label className={label}>Teslim<input type="date" className={field} value={d.delivered_on} onChange={(e) => setD({ ...d, delivered_on: e.target.value })} /></label>
+          <LabeledDate label="Başlangıç" value={d.start_on} onChange={(v) => setD({ ...d, start_on: v })} />
+          <LabeledDate label="Teslim" value={d.delivered_on} onChange={(v) => setD({ ...d, delivered_on: v })} />
         </div>
       </div>
 
@@ -372,7 +373,7 @@ function Checklist({ projectId, tasks, error, today, onChange, onError }: { proj
           </select>
         </label>
         <label className={label}>Sorumlu (e-posta)<input type="email" className={field} value={owner} onChange={(e) => setOwner(e.target.value)} /></label>
-        <label className={label}>Tarih<input type="date" className={field} value={due} onChange={(e) => setDue(e.target.value)} /></label>
+        <LabeledDate label="Tarih" value={due} onChange={(v) => setDue(v)} />
         <button type="submit" disabled={busy === 'new'} className="admin-btn">{busy === 'new' ? 'Ekleniyor…' : '+ Ekle'}</button>
       </form>
     </section>

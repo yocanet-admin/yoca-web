@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { LabeledDate } from '@/components/admin/DateField';
 import { CURRENCIES, minorToDb, parseAmount } from '@/lib/ops/money';
 import {
   AUTO_RENEW_LABEL,
@@ -438,10 +439,12 @@ export default function ServiceForm({ data, initial, initialLinks, mode, onSubmi
 
       <Details title="Tarihler" open={has('start_on', 'end_on', 'is_perpetual', 'due_on', 'cancel_by')}>
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className={labelCls}>Başlangıç<input className={field} type="date" value={f.start_on} onChange={(e) => set('start_on', e.target.value)} /></label>
-          <label className={labelCls}>Bitiş (dönem sonu)
-            <input className={field} type="date" value={f.is_perpetual ? '' : f.end_on} disabled={f.is_perpetual} onChange={(e) => set('end_on', e.target.value)} />
-          </label>
+          <LabeledDate label="Başlangıç" value={f.start_on} onChange={(v) => set('start_on', v)} />
+          {f.is_perpetual ? (
+            <div className={labelCls}>Bitiş (dönem sonu)
+              <input className={field} value="Süresiz" disabled aria-label="Bitiş (dönem sonu): süresiz" readOnly />
+            </div>
+          ) : <LabeledDate label="Bitiş (dönem sonu)" value={f.end_on} onChange={(v) => set('end_on', v)} />}
         </div>
         <label className="flex items-center gap-2 text-[13px] text-soft">
           <input type="checkbox" className="accent-yoca-lime" checked={f.is_perpetual} onChange={(e) => set('is_perpetual', e.target.checked)} />
@@ -449,8 +452,8 @@ export default function ServiceForm({ data, initial, initialLinks, mode, onSubmi
         </label>
         <p className="text-[12px] text-subtle">Bitiş boş ve “Süresiz” işaretli değilse “Bitiş tarihi bilinmiyor” görünür.</p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className={labelCls}>Sağlayıcıya ödeme vadesi<input className={field} type="date" value={f.due_on} onChange={(e) => set('due_on', e.target.value)} /></label>
-          <label className={labelCls}>İptal / bildirim son günü<input className={field} type="date" value={f.cancel_by} onChange={(e) => set('cancel_by', e.target.value)} /></label>
+          <LabeledDate label="Sağlayıcıya ödeme vadesi" value={f.due_on} onChange={(v) => set('due_on', v)} />
+          <LabeledDate label="İptal / bildirim son günü" value={f.cancel_by} onChange={(v) => set('cancel_by', v)} />
         </div>
       </Details>
 

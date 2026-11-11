@@ -117,12 +117,12 @@ function ClientDetail() {
       {party.archived_at && <Flash tone="warn" message={`Bu kayıt arşivde (${fmtDateTime(party.archived_at)}).`} />}
       {flash && <Flash tone={flash.tone} message={flash.text} onClose={() => setFlash(null)} />}
 
-      <nav aria-label="Bölümler" className="-mx-1 flex gap-1 overflow-x-auto border-b border-line px-1 pb-px">
+      <nav aria-label="Bölümler" className="admin-tabs">
         {TABS.map(([k, t]) => {
           const count = k === 'kisiler' ? rel.contacts.length : k === 'projeler' ? rel.projects.filter((p) => !p.archived_at).length : k === 'hizmetler' ? rel.services.filter((s) => !s.archived_at).length : k === 'lisanslar' ? rel.licenses.length : null;
           return (
             <button key={k} type="button" onClick={() => setTab(k)} aria-current={tab === k ? 'page' : undefined}
-              className={`whitespace-nowrap border-b-2 px-3 py-2 text-[13px] font-bold ${tab === k ? 'border-yoca-lime text-white' : 'border-transparent text-muted hover:text-white'}`}>
+              className="admin-tab">
               {t}{count ? <span className="ms-1 text-subtle">{count}</span> : null}
             </button>
           );
@@ -423,7 +423,7 @@ function Contacts({ clientId, contacts, onChange, onError }: { clientId: string;
   };
 
   const form = (
-    <form onSubmit={save} className="grid gap-3 border border-line p-3">
+    <form onSubmit={save} className="grid gap-3 admin-box p-3">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className={label}>Ad *<input className={field} value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} autoFocus /></label>
         <label className={label}>Görevi / rolü<input className={field} value={d.role} onChange={(e) => setD({ ...d, role: e.target.value })} placeholder="ör. muhasebe, teknik, karar verici" /></label>

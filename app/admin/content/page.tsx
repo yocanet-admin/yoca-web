@@ -158,10 +158,11 @@ export default function AdminContent() {
 
   return (
     <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">Metinler</h1>
-          <p className="mt-1.5 text-[14px] text-muted">
+      <header className="admin-head">
+        <div className="admin-head-text">
+          <p className="admin-kicker">Site içeriği</p>
+          <h1 className="admin-h1">Metinler</h1>
+          <p className="admin-lede">
             Her alanda sitede hangi metnin kullanıldığı yazar: “Özel metin” (buradan girilen) veya
             “Varsayılan” (koddaki metin). Varsayılan metin her alanın altında görünür; “Varsayılana dön”
             özel metni siler.
@@ -187,7 +188,7 @@ export default function AdminContent() {
       <AboutDraftCard />
       <p className="text-[12px] text-subtle">İletişim ve Check-Up açıklama/onay metinleri artık Ayarlar → Yanıt süreleri’nden yönetiliyor (süre taahhüdü onaylanana kadar süresiz metin).</p>
 
-      <div className="flex gap-1 rounded-sm border border-line p-1 sm:w-fit">
+      <div className="flex gap-1 admin-box p-1 sm:w-fit">
         {LOCALES.map((locale) => (
           <button
             key={locale.code}

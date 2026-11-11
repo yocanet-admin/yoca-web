@@ -30,7 +30,7 @@ export default function DiffView({ before, after, changes, onApply, onCancel }: 
 
   if (hunks.length === 0) {
     return (
-      <div className="grid gap-2 border border-line p-3 text-[13px]">
+      <div className="grid gap-2 admin-box p-3 text-[13px]">
         <p className="text-muted">Önerilen metin mevcut metinle aynı; uygulanacak değişiklik yok.</p>
         <button type="button" className="admin-btn w-fit" onClick={onCancel}>Kapat</button>
       </div>
@@ -38,12 +38,12 @@ export default function DiffView({ before, after, changes, onApply, onCancel }: 
   }
 
   return (
-    <div className="grid gap-3 border border-line p-3 text-[13px]">
+    <div className="grid gap-3 admin-box p-3 text-[13px]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-bold text-white">{hunks.length} değişiklik · {accepted.size} seçili</p>
         <div className="flex flex-wrap gap-1.5">
-          <button type="button" className="admin-btn !px-2 !py-1 !text-[12px]" onClick={() => setAccepted(new Set(hunks.map((h) => h.id)))}>Tümünü seç</button>
-          <button type="button" className="admin-btn !px-2 !py-1 !text-[12px]" onClick={() => setAccepted(new Set())}>Hiçbiri</button>
+          <button type="button" className="admin-btn admin-btn-sm" onClick={() => setAccepted(new Set(hunks.map((h) => h.id)))}>Tümünü seç</button>
+          <button type="button" className="admin-btn admin-btn-sm" onClick={() => setAccepted(new Set())}>Hiçbiri</button>
         </div>
       </div>
       {changes && changes.length > 0 && (
