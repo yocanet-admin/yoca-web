@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import { DUR, EASE_YOCA } from '@/lib/motion';
 import SplitWords from '@/components/ui/SplitWords';
 import { brandText } from '@/components/ui/BrandText';
@@ -47,8 +48,9 @@ export default function PageIntro({
   compact = false,
   titleMax = 'max-w-[18ch]',
 }: PageIntroProps) {
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = usePrefersReducedMotion();
   const item = (delay: number) => ({
+    'data-reveal': true,
     initial: { opacity: prefersReducedMotion ? 1 : 0, y: prefersReducedMotion ? 0 : 20 },
     animate: { opacity: 1, y: 0 },
     transition: { duration: DUR.slow, delay, ease: EASE_YOCA },

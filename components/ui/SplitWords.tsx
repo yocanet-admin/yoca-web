@@ -1,6 +1,7 @@
 'use client';
 
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import { EASE_YOCA, VIEWPORT_ONCE } from '@/lib/motion';
 
 /**
@@ -50,7 +51,7 @@ export default function SplitWords({
   className,
   breakSentences = true,
 }: SplitWordsProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const sentences = breakSentences ? toSentences(text) : [text];
   // Words carry their sentence index so line breaks land between sentences.
   const words: Array<{ word: string; sentence: number }> = [];
@@ -96,7 +97,7 @@ export default function SplitWords({
       {words.map(({ word, sentence }, index) => (
         <span key={index}>
           <span className="inline-block overflow-hidden align-bottom pb-[0.3em] -mb-[0.3em] pt-[0.12em] -mt-[0.12em] pe-[0.08em] -me-[0.08em]">
-            <motion.span variants={wordVariants} custom={index} className="inline-block">
+            <motion.span variants={wordVariants} custom={index} className="inline-block" data-reveal>
               {isEmphasis(word) ? (
                 <span className="underline decoration-yoca-lime decoration-[0.045em] underline-offset-[0.06em]">{word}</span>
               ) : (

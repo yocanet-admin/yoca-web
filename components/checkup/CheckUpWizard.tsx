@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import type { CheckupPayload, Locale } from '@/types';
 import type { Dict } from '@/lib/i18n';
 import { DUR, EASE_YOCA } from '@/lib/motion';
@@ -43,7 +44,7 @@ const SECTION_KEYS: string[][] = [
 const SECTION_NAMES = ['business', 'brand', 'website', 'marketing', 'measurement', 'goals'];
 
 export default function CheckUpWizard({ locale, t, legal, privacyHref, receiptNote }: CheckUpWizardProps) {
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = usePrefersReducedMotion();
   // Re-order questions to follow the six sections; unknown keys keep dict order.
   const questions = useMemo(() => {
     const byKey = new Map(t.questions.map((question) => [question.key, question]));
@@ -191,6 +192,7 @@ export default function CheckUpWizard({ locale, t, legal, privacyHref, receiptNo
     return (
       <div ref={topRef} className="scroll-mt-32">
         <motion.div
+          data-reveal
           initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: DUR.reveal, ease: EASE_YOCA }}

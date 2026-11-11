@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { insightSlugFromPath } from '@/lib/insightAlternates';
+import { serviceExists, serviceSlugFromPath, workSlugFromPath, workVerdictFromApi } from '@/lib/detailRoutes';
 import { isAppLocale, LOCALE_COOKIE, pickLocale, type AppLocale } from '@/lib/localeDetect';
 
 /**
@@ -22,6 +23,12 @@ import { isAppLocale, LOCALE_COOKIE, pickLocale, type AppLocale } from '@/lib/lo
  *   page WITH a real 404 status (notFound() inside the streamed page would
  *   answer 200 + noindex). Draft previews (?preview=) skip the check; any
  *   lookup error fails open (the page itself still shows not-found).
+ * - /{locale}/services/{slug} and /{locale}/work/{slug} get the same real 404
+ *   for a slug that certainly has no page (lib/detailRoutes.ts): services
+ *   from the fixed list; work from app/api/work-visibility, which applies the
+ *   page's own visibility rule on the server (hidden and unknown projects are
+ *   both "missing"; the service role never reaches the edge). A data-source
+ *   error, timeout or any other doubt fails open to the page.
  */
 
 
@@ -34,23 +41,16 @@ const isLocale = (value: string | undefined): value is AppLocale => isAppLocale(
 
 const NOT_FOUND_PATH = '/__yoca-not-found';
 
-/** true = published row exists, false = definitely missing, null = unknown (fail open). */
-async function insightExists(locale: AppLocale, slug: string): Promise<boolean | null> {
+/** Anon REST lookup: true = a matching row exists, false = none, null = unknown (fail open). */
+async function anyRow(table: string, filters: Record<string, string>): Promise<boolean | null> {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!base || !key) return null;
-  const params = new URLSearchParams({
-    select: 'id',
-    locale: `eq.${locale}`,
-    slug: `eq.${slug}`,
-    status: 'eq.PUBLISHED',
-    publish_at: `lte.${new Date().toISOString()}`,
-    limit: '1',
-  });
+  const params = new URLSearchParams({ ...filters, limit: '1' });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 1500);
   try {
-    const res = await fetch(`${base.replace(/\/$/, '')}/rest/v1/insights?${params.toString()}`, {
+    const res = await fetch(`${base.replace(/\/$/, '')}/rest/v1/${table}?${params.toString()}`, {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
       signal: controller.signal,
       cache: 'no-store',
@@ -58,6 +58,49 @@ async function insightExists(locale: AppLocale, slug: string): Promise<boolean |
     if (!res.ok) return null;
     const rows = (await res.json()) as unknown[];
     return Array.isArray(rows) ? rows.length > 0 : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** true = published row exists, false = definitely missing, null = unknown (fail open). */
+function insightExists(locale: AppLocale, slug: string): Promise<boolean | null> {
+  return anyRow('insights', {
+    select: 'id',
+    locale: `eq.${locale}`,
+    slug: `eq.${slug}`,
+    status: 'eq.PUBLISHED',
+    publish_at: `lte.${new Date().toISOString()}`,
+  });
+}
+
+/**
+ * Vercel Deployment Protection (previews and *.vercel.app) also guards this
+ * internal call: without the visitor's own access it answers with a login
+ * redirect (or 401) and every check would fall open. Only the protection credentials the visitor already
+ * sent to this same deployment are passed on (no other cookie, nothing new).
+ */
+function protectionHeaders(request: NextRequest): HeadersInit {
+  const headers: Record<string, string> = {};
+  const jwt = request.cookies.get('_vercel_jwt')?.value;
+  if (jwt) headers.cookie = `_vercel_jwt=${jwt}`;
+  const bypass = request.headers.get('x-vercel-protection-bypass');
+  if (bypass) headers['x-vercel-protection-bypass'] = bypass;
+  return headers;
+}
+
+/** Work detail: asks the server route (lib/detailRoutes.ts → workVerdictFromApi). */
+async function workExists(request: NextRequest, locale: AppLocale, slug: string): Promise<boolean | null> {
+  const url = new URL('/api/work-visibility', request.url);
+  url.search = new URLSearchParams({ locale, slug }).toString();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const res = await fetch(url, { headers: protectionHeaders(request), redirect: 'manual', signal: controller.signal, cache: 'no-store' });
+    if (!res.ok) return null;
+    return workVerdictFromApi(((await res.json()) as { state?: unknown }).state);
   } catch {
     return null;
   } finally {
@@ -92,6 +135,10 @@ export async function middleware(request: NextRequest) {
       const exists = await insightExists(segment, slug);
       if (exists === false) url.pathname = NOT_FOUND_PATH;
     }
+    const serviceSlug = serviceSlugFromPath(rest);
+    if (serviceSlug !== null && !serviceExists(serviceSlug)) url.pathname = NOT_FOUND_PATH;
+    const workSlug = workSlugFromPath(rest);
+    if (workSlug !== null && (await workExists(request, segment, workSlug)) === false) url.pathname = NOT_FOUND_PATH;
 
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('x-yoca-locale', segment);

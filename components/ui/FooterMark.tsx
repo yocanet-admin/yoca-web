@@ -1,6 +1,7 @@
 'use client';
 
-import { motion, useMotionValue, useReducedMotion, useSpring } from 'framer-motion';
+import { motion, useMotionValue, useSpring } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import SplitWords from '@/components/ui/SplitWords';
 import { MOTION } from '@/lib/motion';
 
@@ -10,7 +11,7 @@ import { MOTION } from '@/lib/motion';
  * oversized outlined YOCA, which leans a few pixels with the pointer.
  */
 export default function FooterMark() {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const mx = useMotionValue(0);
   const my = useMotionValue(0);
   const x = useSpring(mx, { stiffness: 50, damping: 18 });

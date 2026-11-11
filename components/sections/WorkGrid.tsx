@@ -147,6 +147,7 @@ export default function WorkGrid({ studies, base, labels }: WorkGridProps) {
                 <motion.div
                   key={study.slug}
                   layout
+                  data-reveal
                   initial={{ opacity: 0, y: 18 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.97 }}

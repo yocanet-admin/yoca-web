@@ -1,7 +1,8 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { motion, useMotionValueEvent, useReducedMotion, useScroll, useTransform } from 'framer-motion';
+import { motion, useMotionValueEvent, useScroll, useTransform } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 import { EASE_YOCA } from '@/lib/motion';
 
 /**
@@ -15,7 +16,7 @@ interface ProcessTimelineProps {
 }
 
 export default function ProcessTimeline({ steps }: ProcessTimelineProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const ref = useRef<HTMLOListElement>(null);
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start 80%', 'end 45%'] });
   const fill = useTransform(scrollYProgress, [0, 1], [0, 1]);

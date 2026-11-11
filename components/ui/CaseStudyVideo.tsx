@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useReducedMotion } from 'framer-motion';
+import { usePrefersReducedMotion } from '@/lib/reducedMotion';
 
 /**
  * Yoca — case-study video ("system in motion").
@@ -20,7 +20,7 @@ interface CaseStudyVideoProps {
 }
 
 export default function CaseStudyVideo({ src, mp4Src, poster, alt, className }: CaseStudyVideoProps) {
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   const ref = useRef<HTMLVideoElement>(null);
   const [near, setNear] = useState(false);
   const [failed, setFailed] = useState(false);
