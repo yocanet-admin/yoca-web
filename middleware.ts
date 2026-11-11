@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { insightSlugFromPath } from '@/lib/insightAlternates';
-import { serviceExists, serviceSlugFromPath, workSlugFromPath, workVerdict } from '@/lib/detailRoutes';
+import { serviceExists, serviceSlugFromPath, workSlugFromPath, workVerdictFromApi } from '@/lib/detailRoutes';
 import { isAppLocale, LOCALE_COOKIE, pickLocale, type AppLocale } from '@/lib/localeDetect';
 
 /**
@@ -25,8 +25,10 @@ import { isAppLocale, LOCALE_COOKIE, pickLocale, type AppLocale } from '@/lib/lo
  *   lookup error fails open (the page itself still shows not-found).
  * - /{locale}/services/{slug} and /{locale}/work/{slug} get the same real 404
  *   for a slug that certainly has no page (lib/detailRoutes.ts): services
- *   from the fixed list, work from an anon lookup of an active row plus the
- *   code project slugs. Anything uncertain fails open to the page.
+ *   from the fixed list; work from app/api/work-visibility, which applies the
+ *   page's own visibility rule on the server (hidden and unknown projects are
+ *   both "missing"; the service role never reaches the edge). A data-source
+ *   error, timeout or any other doubt fails open to the page.
  */
 
 
@@ -74,10 +76,21 @@ function insightExists(locale: AppLocale, slug: string): Promise<boolean | null>
   });
 }
 
-/** Work detail: see workVerdict (lib/detailRoutes.ts). */
-async function workExists(slug: string): Promise<boolean | null> {
-  if (workVerdict(slug, false) !== false) return null; // a code project: only the page can decide, skip the lookup
-  return workVerdict(slug, await anyRow('case_studies', { select: 'id', slug: `eq.${slug}`, is_active: 'eq.true' }));
+/** Work detail: asks the server route (lib/detailRoutes.ts → workVerdictFromApi). */
+async function workExists(request: NextRequest, locale: AppLocale, slug: string): Promise<boolean | null> {
+  const url = new URL('/api/work-visibility', request.url);
+  url.search = new URLSearchParams({ locale, slug }).toString();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+    if (!res.ok) return null;
+    return workVerdictFromApi(((await res.json()) as { state?: unknown }).state);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function middleware(request: NextRequest) {
@@ -110,7 +123,7 @@ export async function middleware(request: NextRequest) {
     const serviceSlug = serviceSlugFromPath(rest);
     if (serviceSlug !== null && !serviceExists(serviceSlug)) url.pathname = NOT_FOUND_PATH;
     const workSlug = workSlugFromPath(rest);
-    if (workSlug !== null && (await workExists(workSlug)) === false) url.pathname = NOT_FOUND_PATH;
+    if (workSlug !== null && (await workExists(request, segment, workSlug)) === false) url.pathname = NOT_FOUND_PATH;
 
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('x-yoca-locale', segment);

@@ -2,6 +2,7 @@ import { cache } from 'react';
 import { getSupabase, getSupabaseServiceRole } from '@/lib/supabase';
 import type { CaseStudyRow, Locale } from '@/types';
 import { mergeWorkSources, rowToCaseStudy, staticCaseStudies, type CaseStudy } from '@/lib/workData';
+import { workLookupState, type WorkLookupState, type WorkSourceStatus } from '@/lib/detailRoutes';
 
 /**
  * Yoca — selected work / case studies (server data layer).
@@ -27,7 +28,7 @@ export type { CaseStudy } from '@/lib/workData';
  *   1. active rows (anon key; with v11 visitors only see active rows), and
  *   2. the slugs of hidden rows, read with the service role (slug + flag only).
  */
-export type WorkSourceStatus = 'ok' | 'not_configured' | 'missing_service_role' | 'read_failed';
+export type { WorkSourceStatus } from '@/lib/detailRoutes';
 
 const fetchCaseStudyRows = cache(async (): Promise<{ rows: CaseStudyRow[] | null; status: WorkSourceStatus }> => {
   const supabase = getSupabase();
@@ -101,6 +102,13 @@ export async function getCaseStudies(locale: Locale): Promise<CaseStudy[]> {
 export async function getCaseStudy(locale: Locale, slug: string): Promise<CaseStudy | null> {
   const all = await getCaseStudies(locale);
   return all.find((cs) => cs.slug === slug) ?? null;
+}
+
+/** Detail visibility for the middleware's 404 check (app/api/work-visibility). */
+export async function lookupCaseStudy(locale: Locale, slug: string): Promise<WorkLookupState> {
+  const study = await getCaseStudy(locale, slug);
+  const { status } = await fetchCaseStudyRows();
+  return workLookupState(study !== null, status, slug);
 }
 
 /** Every publicly visible slug (same merge rule as getCaseStudies). */

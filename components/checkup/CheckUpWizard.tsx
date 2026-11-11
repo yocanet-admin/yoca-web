@@ -192,6 +192,7 @@ export default function CheckUpWizard({ locale, t, legal, privacyHref, receiptNo
     return (
       <div ref={topRef} className="scroll-mt-32">
         <motion.div
+          data-reveal
           initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: DUR.reveal, ease: EASE_YOCA }}

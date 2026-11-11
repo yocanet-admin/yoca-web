@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { serviceExists, serviceSlugFromPath, workSlugFromPath, workVerdict } from '../lib/detailRoutes';
+import { serviceExists, serviceSlugFromPath, workLookupState, workSlugFromPath, workVerdictFromApi } from '../lib/detailRoutes';
 import { SERVICE_PAGES } from '../lib/servicePages';
 import { DEFAULT_CASE_STUDY_SLUGS } from '../lib/workData';
 
@@ -23,15 +23,26 @@ test('every service page exists; anything else is missing', () => {
   assert.equal(serviceExists('AI-Automation'), false, 'slugs are case-sensitive, like the page');
 });
 
-test('work: 404 only when there is certainly no public project', () => {
-  assert.ok(DEFAULT_CASE_STUDY_SLUGS.length > 0);
-  for (const slug of DEFAULT_CASE_STUDY_SLUGS) {
-    // a hidden row (invisible to the anon key) may hide a code project → the page decides
-    assert.equal(workVerdict(slug, false), null, slug);
-    assert.equal(workVerdict(slug, null), null, slug);
-    assert.equal(workVerdict(slug, true), true, slug);
-  }
-  assert.equal(workVerdict('db-only-project', true), true, 'active DB row → exists');
-  assert.equal(workVerdict('unknown-x', false), false, 'no active row, not a code project → 404');
-  assert.equal(workVerdict('unknown-x', null), null, 'lookup failed → fail open');
+test('work: hidden and unknown are both "missing"; a data-source error is never "missing"', () => {
+  const code = DEFAULT_CASE_STUDY_SLUGS[0];
+  assert.ok(code);
+  // found (active row, or a code project with no row) → found, whatever the source status
+  assert.equal(workLookupState(true, 'ok', code), 'found');
+  assert.equal(workLookupState(true, 'missing_service_role', 'db-only'), 'found');
+  // hidden rows were checked (ok) or there is no Supabase: not public → missing (hidden code project included)
+  assert.equal(workLookupState(false, 'ok', code), 'missing', 'a hidden code project');
+  assert.equal(workLookupState(false, 'ok', 'unknown-x'), 'missing');
+  assert.equal(workLookupState(false, 'not_configured', 'unknown-x'), 'missing');
+  // no service role: active rows were read, so a non-code slug is certain; a code slug may be hidden or not
+  assert.equal(workLookupState(false, 'missing_service_role', 'unknown-x'), 'missing');
+  assert.equal(workLookupState(false, 'missing_service_role', code), 'uncertain');
+  // read error: nothing is certain
+  assert.equal(workLookupState(false, 'read_failed', 'unknown-x'), 'uncertain');
+  assert.equal(workLookupState(false, 'read_failed', code), 'uncertain');
+});
+
+test('work: the middleware 404s only on an explicit "missing" answer', () => {
+  assert.equal(workVerdictFromApi('found'), true);
+  assert.equal(workVerdictFromApi('missing'), false);
+  for (const other of ['uncertain', undefined, null, '', 'MISSING', 404]) assert.equal(workVerdictFromApi(other), null, String(other));
 });

@@ -36,18 +36,30 @@ export function serviceExists(slug: string): boolean {
 }
 
 /**
- * Work slugs (same merge rule as lib/work.ts): a project is public when it has
- * an active case_studies row, or when it is a code project without a row.
- *  - activeRow: result of the anon lookup for an ACTIVE row with this slug
- *    (true / false), or null when the lookup failed or Supabase is not set.
- *  - An active row → exists.
- *  - A code project slug → unknown: a hidden row (invisible to the anon key)
- *    may hide it, and code projects may be withheld (fail closed in
- *    lib/work.ts), so only the page can decide.
- *  - Otherwise no active row and not a code project → definitely missing.
+ * Work slugs are decided on the SERVER (app/api/work-visibility → lib/work.ts),
+ * because only the service role can see hidden rows. The answer carries the
+ * outcome only — "missing" covers a hidden project and an unknown slug alike,
+ * exactly what the public page shows — never whether a hidden row exists.
+ *  - found     → a public project;
+ *  - missing   → certain: rows (and hidden rows) were read, or there is no
+ *                Supabase at all, and the slug is not public;
+ *  - uncertain → the data source could not answer (read error, or no service
+ *                role while the slug is a code project that may be hidden).
+ *                A data-source error is NOT "no project": never a 404.
  */
-export function workVerdict(slug: string, activeRow: boolean | null): boolean | null {
-  if (activeRow === true) return true;
-  if (DEFAULT_CASE_STUDY_SLUGS.includes(slug)) return null;
-  return activeRow === false ? false : null;
+export type WorkLookupState = 'found' | 'missing' | 'uncertain';
+export type WorkSourceStatus = 'ok' | 'not_configured' | 'missing_service_role' | 'read_failed';
+
+export function workLookupState(found: boolean, status: WorkSourceStatus, slug: string): WorkLookupState {
+  if (found) return 'found';
+  if (status === 'ok' || status === 'not_configured') return 'missing';
+  if (status === 'missing_service_role' && !DEFAULT_CASE_STUDY_SLUGS.includes(slug)) return 'missing'; // active rows were read; not a code project
+  return 'uncertain';
+}
+
+/** Middleware verdict from the API answer: true / false (→ 404) / null (fail open). */
+export function workVerdictFromApi(state: unknown): boolean | null {
+  if (state === 'found') return true;
+  if (state === 'missing') return false;
+  return null;
 }

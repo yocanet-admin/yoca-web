@@ -378,7 +378,7 @@ function Scene({ id, index, tone, last = false, children }: { id: SceneId; index
 
 function Reveal({ children, delay = 0, reduced }: { children: React.ReactNode; delay?: number; reduced: boolean }) {
   return (
-    <motion.div initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.3 }} transition={{ duration: 0.55, delay, ease: EASE_YOCA }}>
+    <motion.div data-reveal initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.3 }} transition={{ duration: 0.55, delay, ease: EASE_YOCA }}>
       {children}
     </motion.div>
   );

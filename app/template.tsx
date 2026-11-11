@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { EASE_YOCA } from '@/lib/motion';
+// Loaded first so framer's skipAnimations follows "reduce motion" before this
+// template's own wipe / fade are created (lib/reducedMotion.ts).
+import '@/lib/reducedMotion';
 
 /**
  * Yoca — page transition (App Router template).

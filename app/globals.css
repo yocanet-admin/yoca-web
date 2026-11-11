@@ -333,6 +333,13 @@
   html {
     scroll-behavior: auto;
   }
+  /* Entrance reveals (framer `initial` opacity 0 / offset, rendered on the
+     server): shown in place from the first paint — before any JS runs. */
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+    clip-path: none !important;
+  }
 }
 
 /* ── Overview presentation (/overview) ─────────────────────── */

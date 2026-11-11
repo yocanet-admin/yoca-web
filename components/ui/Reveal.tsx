@@ -9,6 +9,9 @@ import { DUR, EASE_YOCA, RISE, VIEWPORT_ONCE } from '@/lib/motion';
  * mode="rise" (default): fade + modular upward shift.
  * mode="mask": geometric wipe — content emerges from structure.
  * All timing/easing comes from lib/motion.ts.
+ * Under "reduce motion" `data-reveal` (app/globals.css) shows the content in
+ * place from the first paint; framer's skipAnimations (lib/reducedMotion.ts)
+ * keeps it still after hydration.
  */
 
 interface RevealProps {
@@ -23,6 +26,7 @@ export default function Reveal({ children, delay = 0, mode = 'rise', className }
   if (mode === 'mask') {
     return (
       <motion.div
+        data-reveal
         initial={{ clipPath: 'inset(0 100% 0 0)', opacity: 0.4 }}
         whileInView={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
         viewport={VIEWPORT_ONCE}
@@ -35,6 +39,7 @@ export default function Reveal({ children, delay = 0, mode = 'rise', className }
   }
   return (
     <motion.div
+      data-reveal
       initial={{ opacity: 0, y: RISE }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={VIEWPORT_ONCE}

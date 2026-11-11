@@ -50,6 +50,7 @@ export default function Hero({ t, base, rail = [] }: HeroProps) {
   };
 
   const item = (delay: number) => ({
+    'data-reveal': true,
     initial: { opacity: prefersReducedMotion ? 1 : 0, y: prefersReducedMotion ? 0 : 22 },
     animate: { opacity: 1, y: 0 },
     transition: { duration: DUR.slow, delay, ease: EASE_YOCA },
