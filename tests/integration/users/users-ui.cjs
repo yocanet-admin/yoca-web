@@ -35,6 +35,7 @@ async function login(browser, email, pw, viewport) {
   sql(`set session_replication_role = replica; delete from admin_invites; delete from admin_users where email not in ('admin@test.local', 'finance@test.local', 'editor@test.local');
        insert into admin_users (email, note, role, name) values ('editor@test.local', 'TEST içerik editörü', 'editor', 'TEST Editör') on conflict (email) do update set role = 'editor', status = 'active', disabled_at = null;`);
   const browser = await chromium.launch({ args: ['--disable-dev-shm-usage'] });
+  let tempPw = '';
 
   // ── Admin: list + invite dialog (desktop), cards (phone)
   {
@@ -72,10 +73,26 @@ async function login(browser, email, pw, viewport) {
     await page.locator('[role="dialog"]').getByRole('button', { name: 'Daveti iptal et' }).click();
     await page.waitForTimeout(1200);
     check('cancel: confirm dialog → invite removed from the list', (await page.locator('tr', { hasText: 'fail4xx@test.local' }).count()) === 0);
+    // direct creation: generated temporary password, no e-mail, "must change" + "not verified" in the list
+    const mailsBefore = (await (await fetch(`${GW}/capture/list`)).json()).filter((m) => m.path === '/capture/resend').length;
+    await page.getByRole('button', { name: 'Kullanıcı oluştur' }).click();
+    const cdlg = page.locator('[role="dialog"][aria-modal="true"]');
+    await cdlg.getByRole('button', { name: 'Güvenli şifre üret' }).click();
+    tempPw = await cdlg.locator('#temp-pw').inputValue();
+    check('create dialog: “Güvenli şifre üret” fills a strong visible password; the dialog says no e-mail is sent', tempPw.length >= 16 && (await cdlg.locator('#temp-pw').getAttribute('type')) === 'text' && /e-posta gönderilmez/.test(await cdlg.innerText()));
+    await cdlg.getByLabel('Ad / görünen ad').fill('TEST UI Doğrudan');
+    await cdlg.getByLabel('E-posta (giriş adı)').fill('ui.dogrudan@test.local');
+    await cdlg.getByRole('radio', { name: /İçerik editörü/ }).check();
+    await cdlg.getByRole('button', { name: 'Hesabı oluştur' }).click();
+    await page.waitForTimeout(1500);
+    const crRow = await page.locator('tr', { hasText: 'ui.dogrudan@test.local' }).innerText();
+    const mailsAfter = (await (await fetch(`${GW}/capture/list`)).json()).filter((m) => m.path === '/capture/resend').length;
+    check('create: success notice says no e-mail was sent; row “İlk girişte şifre değiştirmeli” + “E-posta doğrulanmadı”; nothing mailed', (await cdlg.count()) === 0 && /E-posta gönderilmedi/.test(await page.locator('main').innerText()) && /İlk girişte şifre değiştirmeli/.test(crRow) && /doğrulanmadı/.test(crRow) && mailsAfter === mailsBefore, crRow);
+    check('create: the password is not shown anywhere on the page afterwards', !(await page.content()).includes(tempPw));
     await page.screenshot({ path: `${OUT}/users-1440.png`, fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(500);
     const cards = await page.evaluate(() => Array.from(document.querySelectorAll('main .admin-table tbody tr')).filter((tr) => getComputedStyle(tr).display === 'grid').length);
-    check('390px: users as cards, no sideways scroll', cards === 4 && (await over(page)) <= 0, `cards=${cards} over=${await over(page)}`);
+    check('390px: users as cards, no sideways scroll', cards === 5 && (await over(page)) <= 0, `cards=${cards} over=${await over(page)}`);
     await page.locator('tr', { hasText: 'finance@test.local' }).getByRole('button', { name: 'Rolü değiştir' }).click();
     const box = await page.locator('.admin-dialog').boundingBox();
     check('390px: role dialog fits the screen', Boolean(box) && box.x >= 0 && box.x + box.width <= 390);
@@ -106,6 +123,25 @@ async function login(browser, email, pw, viewport) {
     check('invite page: the same link again → “daha önce kullanıldı”', /daha önce kullanıldı/.test(await page.locator('main').innerText()));
     await page.goto(`${BASE}/admin/davet#t=${'x'.repeat(43)}`); await page.waitForTimeout(1500);
     check('invite page: unknown link → invalid', /geçersiz/.test(await page.locator('main').innerText()));
+    await ctx.close();
+  }
+
+  // ── First sign-in with the temporary password: only the password screen
+  {
+    const { ctx, page } = await login(browser, 'ui.dogrudan@test.local', tempPw, { width: 390, height: 844 });
+    const text = await page.locator('body').innerText();
+    check('first sign-in: only “Şifreni değiştir” (no menu, no screen)', /Şifreni değiştir/.test(text) && (await page.locator('nav[aria-label="Admin"]').count()) === 0);
+    await page.goto(`${BASE}/admin/ops/services`); await page.waitForTimeout(2000);
+    check('first sign-in: a direct address still shows only the password screen', /Şifreni değiştir/.test(await page.locator('body').innerText()) && (await page.locator('main h1', { hasText: 'Hizmetler' }).count()) === 0 && (await over(page)) <= 0);
+    await page.getByLabel('Geçici şifre').fill('yanlis-gecici-000');
+    await page.getByLabel('Yeni şifre', { exact: true }).fill(PW);
+    await page.getByLabel('Yeni şifre (tekrar)').fill(PW);
+    await page.getByRole('button', { name: 'Şifremi değiştir' }).click(); await page.waitForTimeout(1500);
+    check('first sign-in: a wrong temporary password is refused', /Geçici şifre yanlış/.test(await page.locator('body').innerText()));
+    await page.screenshot({ path: `${OUT}/ilk-giris-390.png`, fullPage: true });
+    await page.getByLabel('Geçici şifre').fill(tempPw);
+    await page.getByRole('button', { name: 'Şifremi değiştir' }).click(); await page.waitForTimeout(3000);
+    check('first sign-in: after the change the panel opens with the role (editor → Insights)', /\/admin\/insights$/.test(page.url()) && (await page.locator('main h1').first().count()) === 1, page.url());
     await ctx.close();
   }
 
@@ -182,7 +218,7 @@ async function login(browser, email, pw, viewport) {
 
   await browser.close();
   await fetch(`${GW}/capture/reset?users=1`);
-  sql(`delete from admin_users where email = 'ui.editor@test.local'`);
+  sql(`delete from admin_users where email in ('ui.editor@test.local', 'ui.dogrudan@test.local')`);
   const failed = results.filter((r) => !r.ok).length;
   console.log(`\n${results.length - failed}/${results.length} passed`);
   process.exit(failed ? 1 : 0);

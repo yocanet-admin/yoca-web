@@ -64,3 +64,28 @@ test('database errors map to stable codes', () => {
   assert.equal(dbErrorCode(null, '42501'), 'forbidden');
   assert.equal(dbErrorCode('Bad Hint!', 'P0002'), 'not_found');
 });
+
+test('direct creation helpers: generated temporary password passes the rule; honest e-mail wording', async () => {
+  const { generatePassword, emailProof } = await import('../lib/admin/roles');
+  const seen = new Set<string>();
+  for (let i = 0; i < 200; i += 1) {
+    const p = generatePassword();
+    assert.equal(p.length, 16);
+    assert.equal(passwordProblem(p, 'kisi@yoca.net'), null, p);
+    seen.add(p);
+  }
+  assert.equal(seen.size, 200);
+  assert.equal(emailProof({ created_via: 'direct', email_verified: false, status: 'active' }), 'E-posta doğrulanmadı (yönetici oluşturdu)');
+  assert.equal(emailProof({ created_via: 'invite', email_verified: true, status: 'active' }), 'E-posta doğrulandı (davet bağlantısı)');
+  assert.equal(emailProof({ created_via: 'legacy', email_verified: false, status: 'active' }), 'Mevcut hesap (panel öncesi)');
+  assert.equal(accountState({ status: 'active', must_change_password: true, invite_open: false, invite_send_status: null, invite_expires_at: null }).label, 'İlk girişte şifre değiştirmeli');
+});
+
+test('ADMIN_EMAILS is no longer an access input (database role is the only source)', async () => {
+  const fs = await import('node:fs');
+  const auth = fs.readFileSync('lib/cockpit/auth.ts', 'utf8');
+  const me = fs.readFileSync('app/api/admin/me/route.ts', 'utf8');
+  assert.doesNotMatch(auth, /isAllowedAdminEmail|adminAllowlist\(/);
+  assert.doesNotMatch(me, /ADMIN_EMAILS\b(?![^\n]*no longer)/);
+  assert.match(auth, /export async function requireAdmin[\s\S]*?adminCheck\(bearerToken\(request\)\)/);
+});

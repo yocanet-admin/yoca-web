@@ -102,12 +102,16 @@ export type UserRow = {
   invite_send_status: 'pending' | 'sent' | 'failed' | null;
   invite_sent_at: string | null;
   invite_open: boolean;
+  must_change_password: boolean;
+  email_verified: boolean;
+  created_via: 'legacy' | 'invite' | 'direct';
 };
 
 export type InviteState = 'none' | 'sent' | 'expired' | 'failed' | 'pending';
 
 /** What the list shows for a user's account / invite. */
-export function accountState(row: Pick<UserRow, 'status' | 'invite_open' | 'invite_send_status' | 'invite_expires_at'>, now = Date.now()): { label: string; tone: 'good' | 'warn' | 'bad' | 'info'; invite: InviteState } {
+export function accountState(row: Pick<UserRow, 'status' | 'invite_open' | 'invite_send_status' | 'invite_expires_at'> & { must_change_password?: boolean }, now = Date.now()): { label: string; tone: 'good' | 'warn' | 'bad' | 'info'; invite: InviteState } {
+  if (row.status === 'active' && row.must_change_password) return { label: 'İlk girişte şifre değiştirmeli', tone: 'warn', invite: 'none' };
   if (row.status === 'active') return { label: 'Etkin', tone: 'good', invite: 'none' };
   if (row.status === 'disabled') return { label: 'Erişim kapalı', tone: 'bad', invite: 'none' };
   if (row.invite_send_status === 'failed') return { label: 'Davet gönderilemedi', tone: 'bad', invite: 'failed' };
@@ -115,6 +119,25 @@ export function accountState(row: Pick<UserRow, 'status' | 'invite_open' | 'invi
   if (row.invite_expires_at && Date.parse(row.invite_expires_at) <= now) return { label: 'Davetin süresi doldu', tone: 'warn', invite: 'expired' };
   if (row.invite_send_status === 'sent') return { label: 'Davet bekliyor', tone: 'info', invite: 'sent' };
   return { label: 'Davet hazırlanıyor', tone: 'warn', invite: 'pending' };
+}
+
+/** What the panel can honestly say about e-mail ownership. */
+export function emailProof(row: Pick<UserRow, 'created_via' | 'email_verified' | 'status'>): string {
+  if (row.email_verified) return 'E-posta doğrulandı (davet bağlantısı)';
+  if (row.created_via === 'direct') return 'E-posta doğrulanmadı (yönetici oluşturdu)';
+  if (row.status === 'invited') return 'Davet kabul edilince doğrulanır';
+  return 'Mevcut hesap (panel öncesi)';
+}
+
+/** A temporary password from the browser's CSPRNG (never sent anywhere but the create request). */
+export function generatePassword(length = 16): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789-_.!';
+  const bytes = new Uint32Array(length);
+  globalThis.crypto.getRandomValues(bytes);
+  let out = '';
+  for (const b of Array.from(bytes)) out += alphabet[b % alphabet.length];
+  // at least one digit and one symbol, so it always passes the rule
+  return `${out.slice(0, length - 2)}${'23456789'[bytes[0] % 8]}${'-_.!'[bytes[1] % 4]}`;
 }
 
 /** Database error hints (raise … hint = '…') → stable codes for the API. */

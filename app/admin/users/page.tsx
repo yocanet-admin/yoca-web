@@ -4,18 +4,20 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { adminApi, adminPost } from '@/lib/cockpit/client';
 import { getAdminClient } from '@/lib/adminClient';
 import { AdminTable, Badge, Empty, Flash, PageHead, fmtDateTime, field, label } from '@/components/admin/ops/ui';
-import { accountState, INVITE_TTL_HOURS, ROLE_HINT, ROLE_LABEL, ROLES, type PanelRole, type UserRow } from '@/lib/admin/roles';
+import { accountState, emailProof, generatePassword, INVITE_TTL_HOURS, PASSWORD_MIN, passwordProblem, ROLE_HINT, ROLE_LABEL, ROLES, type PanelRole, type UserRow } from '@/lib/admin/roles';
 
 /**
  * Yoca Admin — Sistem → Kullanıcılar (admin only; the shell, the API and the
  * database functions all refuse other roles).
  * Invite (name, e-mail, role) → the person sets their own password through a
- * one-time link. Pending invites: resend / cancel. Accounts: change role,
- * close / reopen access. Every action is written to İşlem geçmişi.
+ * one-time link. Or create directly with a temporary password (no e-mail is
+ * sent; the person must change it at first sign-in before anything opens).
+ * Pending invites: resend / cancel. Accounts: change role, close / reopen
+ * access. Every action is written to İşlem geçmişi.
  */
 
-type Row = UserRow & { admin_emails_blocked?: boolean };
-type ListBody = { ok: boolean; error?: string; users?: Row[]; inviteReady?: boolean; adminEmailsLimited?: boolean };
+type Row = UserRow;
+type ListBody = { ok: boolean; error?: string; users?: Row[]; inviteReady?: boolean; adminEmailsSet?: boolean };
 type ActBody = { ok: boolean; error?: string; warning?: string | null; expiresAt?: string };
 type Confirm = { title: string; body: ReactNode; action: string; tone?: 'danger'; run: () => Promise<void> };
 
@@ -93,6 +95,55 @@ function InviteDialog({ onClose, onDone }: { onClose: () => void; onDone: (msg: 
   );
 }
 
+function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: (msg: string) => void }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [show, setShow] = useState(false);
+  const [role, setRole] = useState<PanelRole | ''>('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    setError(null);
+    const mail = email.trim().toLowerCase();
+    if (!name.trim()) return setError('Ad / görünen ad girin.');
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) return setError('Geçerli bir e-posta adresi girin.');
+    const rule = passwordProblem(password, mail);
+    if (rule) return setError(`Geçici şifre: ${rule}`);
+    if (!role) return setError('Rol seçin.');
+    setBusy(true);
+    const r = await adminPost<ActBody>('/api/admin/users', { action: 'create', name: name.trim(), email: mail, password, role });
+    setBusy(false);
+    if (!r.ok) return setError(r.error ?? 'Hesap oluşturulamadı.');
+    setPassword('');
+    onDone(`${mail} hesabı ${ROLE_LABEL[role]} rolüyle oluşturuldu. E-posta gönderilmedi: geçici şifreyi kişiye güvenli bir kanaldan iletin; ilk girişte değiştirmeden hiçbir ekran açılmaz.`);
+  };
+  return (
+    <Dialog id="create-title" title="Kullanıcı oluştur (geçici şifreyle)" onClose={onClose}>
+      <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <label className={label}>Ad / görünen ad<input className={field} value={name} onChange={(e) => setName(e.target.value)} maxLength={120} autoComplete="off" /></label>
+        <label className={label}>E-posta (giriş adı)<input className={field} type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" inputMode="email" /></label>
+        <div className="grid gap-1.5">
+          <label className={label} htmlFor="temp-pw">Geçici şifre</label>
+          <div className="flex flex-wrap gap-2">
+            <input id="temp-pw" className={`${field} min-w-0 flex-1 font-mono`} type={show ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" maxLength={72} aria-describedby="temp-pw-hint" />
+            <button type="button" className="admin-btn admin-btn-sm" onClick={() => { setPassword(generatePassword()); setShow(true); }}>Güvenli şifre üret</button>
+            <button type="button" className="admin-btn admin-btn-sm" onClick={() => setShow((v) => !v)} aria-pressed={show}>{show ? 'Gizle' : 'Göster'}</button>
+          </div>
+          <p id="temp-pw-hint" className="admin-hint">En az {PASSWORD_MIN} karakter. Kaydedildikten sonra bir daha gösterilmez veya okunamaz; şimdi not edin ve kişiye güvenli bir kanaldan iletin.</p>
+        </div>
+        <RolePicker value={role} onChange={setRole} name="create-role" />
+        <p className="admin-notice admin-notice-warn text-[12px]"><span>Bu yolla <b>e-posta gönderilmez</b> ve e-posta sahipliği doğrulanmaz (listede “doğrulanmadı” görünür). Kişi ilk girişte şifresini değiştirmeden panelde hiçbir ekran ve işlem açılmaz.</span></p>
+        {error && <p role="alert" className="admin-notice admin-notice-bad text-[13px]">{error}</p>}
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="admin-btn" onClick={onClose} disabled={busy}>Vazgeç</button>
+          <button type="submit" className="admin-btn-primary" disabled={busy}>{busy ? 'Oluşturuluyor…' : 'Hesabı oluştur'}</button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
 function RoleDialog({ row, onClose, onDone }: { row: Row; onClose: () => void; onDone: (msg: string) => void }) {
   const [role, setRole] = useState<PanelRole | ''>(row.role);
   const [busy, setBusy] = useState(false);
@@ -122,6 +173,7 @@ export default function UsersPage() {
   const [me, setMe] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ msg: string; tone: 'ok' | 'bad' | 'warn' } | null>(null);
   const [inviting, setInviting] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [roleRow, setRoleRow] = useState<Row | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [busy, setBusy] = useState(false);
@@ -145,7 +197,6 @@ export default function UsersPage() {
   };
 
   const users = data?.users ?? [];
-  const blocked = users.filter((u) => u.admin_emails_blocked && u.status === 'active');
 
   return (
     <div className="grid gap-6">
@@ -153,16 +204,19 @@ export default function UsersPage() {
         kicker="Sistem"
         title="Kullanıcılar"
         sub="Panel hesapları, rolleri ve davetleri. Değişiklikler İşlem geçmişine yazılır; erişimi kapatmak geçmiş kayıtları silmez."
-        actions={<button type="button" className="admin-btn-primary" onClick={() => setInviting(true)} disabled={!data?.ok}>+ Kullanıcı davet et</button>}
+        actions={
+          <>
+            <button type="button" className="admin-btn" onClick={() => setCreating(true)} disabled={!data?.ok}>Kullanıcı oluştur</button>
+            <button type="button" className="admin-btn-primary" onClick={() => setInviting(true)} disabled={!data?.ok}>+ Kullanıcı davet et</button>
+          </>
+        }
       />
       <Flash message={flash?.msg ?? null} tone={flash?.tone} onClose={() => setFlash(null)} />
       {data?.ok && data.inviteReady === false && (
         <p role="alert" className="admin-notice admin-notice-bad text-[13px]">Davet e-postası gönderilemez: e-posta servisi (RESEND_API_KEY) tanımlı değil. Davetler “gönderilemedi” olarak kalır.</p>
       )}
-      {blocked.length > 0 && (
-        <p role="alert" className="admin-notice admin-notice-warn text-[13px]">
-          <span><b>ADMIN_EMAILS listesi:</b> {blocked.map((u) => u.email).join(', ')} yönetici rolünde ama Vercel’deki ADMIN_EMAILS listesinde yok. Bu kişiler listeye eklenene (veya değişken kaldırılana) kadar yönetim ekranlarını kullanamaz. Liste bu ekrandan değiştirilmez.</span>
-        </p>
+      {data?.ok && data.adminEmailsSet && (
+        <p className="admin-notice admin-notice-warn text-[13px]"><span>Vercel’de <b>ADMIN_EMAILS</b> değişkeni hâlâ tanımlı. Yetki artık yalnız buradaki etkin hesap ve rol bilgisinden gelir; değişken erişimi etkilemez ve yayın planındaki sırayla kaldırılabilir.</span></p>
       )}
       {!data ? (
         <p className="text-[13px] text-subtle">Yükleniyor…</p>
@@ -190,7 +244,7 @@ export default function UsersPage() {
                     {u.status === 'invited' && st.invite === 'sent' && u.invite_expires_at && <span className="text-[12px] text-subtle">{fmtDateTime(u.invite_expires_at)} tarihine kadar geçerli</span>}
                     {u.status === 'invited' && st.invite === 'failed' && <span className="text-[12px] text-subtle">E-posta ulaşmadı; yeniden gönderin veya iptal edin.</span>}
                     {u.status === 'disabled' && u.disabled_at && <span className="text-[12px] text-subtle">{fmtDateTime(u.disabled_at)} kapatıldı</span>}
-                    {u.status === 'active' && u.admin_emails_blocked && <span className="text-[12px] text-yellow-200">ADMIN_EMAILS listesinde değil</span>}
+                    <span className="text-[12px] text-subtle">{emailProof(u)}</span>
                   </div>
                 </td>
                 <td data-actions>
@@ -218,6 +272,7 @@ export default function UsersPage() {
         </AdminTable>
       )}
 
+      {creating && <CreateDialog onClose={() => setCreating(false)} onDone={(msg) => { setCreating(false); setFlash({ msg, tone: 'ok' }); void load(); }} />}
       {inviting && <InviteDialog onClose={() => setInviting(false)} onDone={(msg) => { if (msg) { setInviting(false); setFlash({ msg, tone: 'ok' }); } void load(); }} />}
       {roleRow && <RoleDialog row={roleRow} onClose={() => setRoleRow(null)} onDone={(msg) => { setRoleRow(null); setFlash({ msg, tone: 'ok' }); void load(); }} />}
       {confirm && (

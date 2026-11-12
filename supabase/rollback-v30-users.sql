@@ -5,8 +5,10 @@
 --
 -- Safe side: nobody gains access by this rollback.
 --   • rows the old rules cannot express — role 'editor', status 'invited' or
---     'disabled' — are COPIED to public.admin_users_v30_backup and then removed
---     from admin_users (a disabled user must not become active again);
+--     'disabled', or a pending temporary-password change — are COPIED to
+--     public.admin_users_v30_backup and then removed from admin_users (a
+--     disabled user must not become active again; a temporary password must
+--     not start working without the change);
 --   • functions and policies go back to their v25 definitions (is_admin());
 --   • admin_invites, the user functions and the last-admin trigger are dropped.
 -- History stays: audit_log is not touched. The added columns stay (unused).
@@ -24,13 +26,15 @@ $$;
 
 create table if not exists public.admin_users_v30_backup as select now() as backed_up_at, u.* from public.admin_users u where false;
 alter table public.admin_users_v30_backup enable row level security;
-insert into public.admin_users_v30_backup select now(), u.* from public.admin_users u where u.role = 'editor' or u.status <> 'active';
+insert into public.admin_users_v30_backup select now(), u.* from public.admin_users u where u.role = 'editor' or u.status <> 'active' or u.must_change_password;
 
 drop trigger if exists admin_users_keep_admin on public.admin_users;
 drop function if exists public.admin_users_keep_admin();
-delete from public.admin_users where role = 'editor' or status <> 'active';
+delete from public.admin_users where role = 'editor' or status <> 'active' or must_change_password;
 drop table if exists public.admin_invites;
 
+drop function if exists public.account_state(), public.users_can_create(text), public.users_create(text, text, text, uuid),
+  public.users_password_set(text, uuid);
 drop function if exists public.users_list(), public.users_invite(text, text, text, text, timestamptz),
   public.users_invite_resend(text, text, timestamptz), public.users_invite_sent(uuid, boolean, text),
   public.users_invite_revoke(text), public.users_set_role(text, text), public.users_set_access(text, boolean),
@@ -38,6 +42,7 @@ drop function if exists public.users_list(), public.users_invite(text, text, tex
   public.users_require_admin(), public.users_check_input(text, text), public.users_actor();
 
 alter table public.admin_users drop constraint if exists admin_users_status_check;
+alter table public.admin_users drop constraint if exists admin_users_created_via_check;
 alter table public.admin_users drop constraint if exists admin_users_role_check;
 alter table public.admin_users add constraint admin_users_role_check check (role in ('admin', 'finance'));
 

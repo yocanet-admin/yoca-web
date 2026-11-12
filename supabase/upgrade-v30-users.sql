@@ -9,9 +9,18 @@
 --      status  'active' | 'invited' | 'disabled'         (every existing row → 'active')
 --      name, user_id (Auth user, filled when an invite is accepted),
 --      invited_at / invited_by, disabled_at / disabled_by, updated_at
---    Only ACTIVE rows give access. is_admin(), is_finance(), can_finance()
---    and panel_role() keep their meaning for active rows, so every existing
---    policy, function and storage rule works as before for existing users.
+--      must_change_password  (account created directly with a temporary password)
+--      email_verified_at     (set when an invite link is used; NULL = not proven)
+--      created_via           'legacy' (existing rows) | 'invite' | 'direct'
+--    Only EFFECTIVE rows give access: status 'active', no pending password
+--    change, and — for accounts created by the panel — the signed-in Auth user
+--    must be the one bound to the row (user_id = auth.uid()), so another Auth
+--    account with the same e-mail never inherits a role. is_admin(),
+--    is_finance(), can_finance() and panel_role() keep their meaning for
+--    existing rows (legacy rows have no user_id and match by e-mail as before),
+--    so every existing policy, function and storage rule works as before.
+--    The database role is the single source of truth; the app no longer reads
+--    the ADMIN_EMAILS variable (see YAYIN-v30.md for the transition).
 --    New: is_editor(), can_content() (active admin or editor).
 --    Because the functions read admin_users on every request, a role change or
 --    a disabled account takes effect on the user's NEXT request — an open
@@ -72,6 +81,9 @@ alter table public.admin_users add column if not exists invited_by text;
 alter table public.admin_users add column if not exists disabled_at timestamptz;
 alter table public.admin_users add column if not exists disabled_by text;
 alter table public.admin_users add column if not exists updated_at timestamptz not null default now();
+alter table public.admin_users add column if not exists must_change_password boolean not null default false;
+alter table public.admin_users add column if not exists email_verified_at timestamptz;
+alter table public.admin_users add column if not exists created_via text not null default 'legacy';
 
 alter table public.admin_users drop constraint if exists admin_users_role_check;
 alter table public.admin_users add constraint admin_users_role_check check (role in ('admin', 'finance', 'editor'));
@@ -80,41 +92,45 @@ begin
   if not exists (select 1 from pg_constraint where conname = 'admin_users_status_check') then
     alter table public.admin_users add constraint admin_users_status_check check (status in ('active', 'invited', 'disabled'));
   end if;
+  if not exists (select 1 from pg_constraint where conname = 'admin_users_created_via_check') then
+    alter table public.admin_users add constraint admin_users_created_via_check check (created_via in ('legacy', 'invite', 'direct'));
+  end if;
   if not exists (select 1 from pg_constraint where conname = 'admin_users_name_len') then
     alter table public.admin_users add constraint admin_users_name_len check (char_length(name) <= 120);
   end if;
 end;
 $$;
 
-create or replace function public.is_admin() returns boolean
-language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.admin_users
-    where email = lower(coalesce(auth.jwt() ->> 'email', '')) and role = 'admin' and status = 'active');
-$$;
-create or replace function public.is_finance() returns boolean
-language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.admin_users
-    where email = lower(coalesce(auth.jwt() ->> 'email', '')) and role = 'finance' and status = 'active');
-$$;
-create or replace function public.can_finance() returns boolean
-language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.admin_users
-    where email = lower(coalesce(auth.jwt() ->> 'email', '')) and role in ('admin', 'finance') and status = 'active');
-$$;
-create or replace function public.is_editor() returns boolean
-language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.admin_users
-    where email = lower(coalesce(auth.jwt() ->> 'email', '')) and role = 'editor' and status = 'active');
-$$;
-create or replace function public.can_content() returns boolean
-language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.admin_users
-    where email = lower(coalesce(auth.jwt() ->> 'email', '')) and role in ('admin', 'editor') and status = 'active');
-$$;
+-- One rule for every role check: the signed-in user's EFFECTIVE row.
 create or replace function public.panel_role() returns text
 language sql stable security definer set search_path = public as $$
-  select role from public.admin_users where email = lower(coalesce(auth.jwt() ->> 'email', '')) and status = 'active';
+  select role from public.admin_users
+   where email = lower(coalesce(auth.jwt() ->> 'email', ''))
+     and status = 'active'
+     and not must_change_password
+     and (user_id is null or user_id = auth.uid());
 $$;
+create or replace function public.is_admin() returns boolean
+language sql stable security definer set search_path = public as $$ select coalesce(public.panel_role() = 'admin', false) $$;
+create or replace function public.is_finance() returns boolean
+language sql stable security definer set search_path = public as $$ select coalesce(public.panel_role() = 'finance', false) $$;
+create or replace function public.can_finance() returns boolean
+language sql stable security definer set search_path = public as $$ select coalesce(public.panel_role() in ('admin', 'finance'), false) $$;
+create or replace function public.is_editor() returns boolean
+language sql stable security definer set search_path = public as $$ select coalesce(public.panel_role() = 'editor', false) $$;
+create or replace function public.can_content() returns boolean
+language sql stable security definer set search_path = public as $$ select coalesce(public.panel_role() in ('admin', 'editor'), false) $$;
+
+-- The signed-in user's own account state (for the "change your temporary password" screen).
+-- No role and no access come from it.
+create or replace function public.account_state()
+returns table (status text, must_change_password boolean, role text, name text)
+language sql stable security definer set search_path = public as $$
+  select u.status, u.must_change_password, u.role, u.name from public.admin_users u
+   where u.email = lower(coalesce(auth.jwt() ->> 'email', '')) and (u.user_id is null or u.user_id = auth.uid());
+$$;
+revoke all on function public.account_state() from public, anon;
+grant execute on function public.account_state() to authenticated, service_role;
 
 revoke all on function public.is_editor() from public;
 revoke all on function public.can_content() from public;
@@ -125,11 +141,12 @@ grant execute on function public.can_content() to anon, authenticated, service_r
 create or replace function public.admin_users_keep_admin() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if old.role = 'admin' and old.status = 'active'
-     and (tg_op = 'DELETE' or new.role <> 'admin' or new.status <> 'active') then
+  -- an EFFECTIVE admin (active, no pending password change) stops being one
+  if old.role = 'admin' and old.status = 'active' and not old.must_change_password
+     and (tg_op = 'DELETE' or new.role <> 'admin' or new.status <> 'active' or new.must_change_password) then
     perform pg_advisory_xact_lock(hashtext('public.admin_users:last_admin'));
     if not exists (select 1 from public.admin_users
-                    where role = 'admin' and status = 'active' and email <> old.email) then
+                    where role = 'admin' and status = 'active' and not must_change_password and email <> old.email) then
       raise exception 'Son etkin yönetici kaldırılamaz, devre dışı bırakılamaz veya başka role geçirilemez.'
         using errcode = 'P0001', hint = 'last_admin';
     end if;
@@ -179,17 +196,19 @@ end;
 $$;
 revoke all on function public.users_require_admin() from public, anon, authenticated;
 
+drop function if exists public.users_list();
 create or replace function public.users_list()
 returns table (email text, name text, role text, status text, has_account boolean, invited_at timestamptz, invited_by text,
                disabled_at timestamptz, created_at timestamptz, invite_expires_at timestamptz, invite_send_status text,
-               invite_sent_at timestamptz, invite_open boolean)
+               invite_sent_at timestamptz, invite_open boolean, must_change_password boolean, email_verified boolean, created_via text)
 language plpgsql stable security definer set search_path = public as $$
 begin
   perform public.users_require_admin();
   return query
     select u.email, u.name, u.role, u.status, (u.user_id is not null or u.status <> 'invited'), u.invited_at, u.invited_by,
            u.disabled_at, u.created_at, i.expires_at, i.send_status, i.sent_at,
-           (i.id is not null and i.accepted_at is null and i.revoked_at is null)
+           (i.id is not null and i.accepted_at is null and i.revoked_at is null),
+           u.must_change_password, u.email_verified_at is not null, u.created_via
       from public.admin_users u
       left join lateral (select * from public.admin_invites x where x.email = u.email order by x.created_at desc limit 1) i on true
      order by case u.status when 'active' then 0 when 'invited' then 1 else 2 end, u.created_at;
@@ -220,8 +239,8 @@ begin
     if cur.status = 'invited' then raise exception 'Bu e-postaya bekleyen bir davet var; yeniden gönderin veya iptal edin.' using errcode = 'P0001', hint = 'pending_invite'; end if;
     raise exception 'Bu e-postayla bir kullanıcı zaten var (%).', case cur.status when 'active' then 'etkin' else 'devre dışı' end using errcode = 'P0001', hint = 'exists';
   end if;
-  insert into public.admin_users (email, name, role, status, invited_at, invited_by, note)
-  values (e, btrim(p_name), p_role, 'invited', now(), public.users_actor(), 'Panelden davet');
+  insert into public.admin_users (email, name, role, status, invited_at, invited_by, note, created_via)
+  values (e, btrim(p_name), p_role, 'invited', now(), public.users_actor(), 'Panelden davet', 'invite');
   insert into public.admin_invites (email, token_hash, expires_at, created_by)
   values (e, p_token_hash, p_expires_at, public.users_actor()) returning id into inv;
   perform public.users_log('invite', e, jsonb_build_object('role', jsonb_build_object('from', null, 'to', p_role), 'name', jsonb_build_object('from', null, 'to', btrim(p_name)), 'invite_expires_at', jsonb_build_object('from', null, 'to', p_expires_at)));
@@ -344,13 +363,64 @@ begin
   if i.revoked_at is not null or u.status <> 'invited' then raise exception 'Bu davet iptal edildi veya yenisi gönderildi.' using errcode = 'P0001', hint = 'revoked'; end if;
   if i.expires_at <= now() then raise exception 'Davet bağlantısının süresi doldu.' using errcode = 'P0001', hint = 'expired'; end if;
   update public.admin_invites set accepted_at = now() where id = i.id;
-  update public.admin_users set status = 'active', user_id = p_user_id, updated_at = now() where email = i.email;
+  -- the link proved the inbox: e-mail verified
+  update public.admin_users set status = 'active', user_id = p_user_id, email_verified_at = now(), updated_at = now() where email = i.email;
   perform public.users_log('invite_accept', i.email, jsonb_build_object('status', jsonb_build_object('from', 'invited', 'to', 'active')), 'davet: ' || i.email);
   return i.email;
 end;
 $$;
 
+-- Direct creation (temporary password). The password never reaches the database:
+-- the server creates the Auth user, then binds it here in ONE transaction.
+create or replace function public.users_can_create(p_email text) returns void
+language plpgsql stable security definer set search_path = public as $$
+declare e text; cur public.admin_users;
+begin
+  perform public.users_require_admin();
+  e := public.users_check_input(p_email, null);
+  select * into cur from public.admin_users where email = e;
+  if found then
+    if cur.status = 'invited' then raise exception 'Bu e-postaya bekleyen bir davet var; yeniden gönderin veya iptal edin.' using errcode = 'P0001', hint = 'pending_invite'; end if;
+    raise exception 'Bu e-postayla bir kullanıcı zaten var (%).', case cur.status when 'active' then 'etkin' else 'devre dışı' end using errcode = 'P0001', hint = 'exists';
+  end if;
+end;
+$$;
+
+create or replace function public.users_create(p_email text, p_name text, p_role text, p_user_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare e text;
+begin
+  perform public.users_can_create(p_email);
+  e := public.users_check_input(p_email, p_role);
+  if p_role is null then raise exception 'Rol seçin.' using errcode = '22023'; end if;
+  if p_user_id is null then raise exception 'Giriş hesabı gerekli.' using errcode = '22023'; end if;
+  if char_length(btrim(coalesce(p_name, ''))) not between 1 and 120 then raise exception 'Ad 1–120 karakter olmalı.' using errcode = '22023'; end if;
+  insert into public.admin_users (email, name, role, status, user_id, must_change_password, created_via, invited_by, note)
+  values (e, btrim(p_name), p_role, 'active', p_user_id, true, 'direct', public.users_actor(), 'Panelden oluşturuldu');
+  perform public.users_log('create', e, jsonb_build_object('role', jsonb_build_object('from', null, 'to', p_role),
+    'name', jsonb_build_object('from', null, 'to', btrim(p_name)), 'must_change_password', jsonb_build_object('from', null, 'to', true)));
+end;
+$$;
+
+-- Called by the server (service role) only after it verified the temporary password and set the new one in Auth.
+create or replace function public.users_password_set(p_email text, p_user_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare e text := lower(btrim(coalesce(p_email, '')));
+begin
+  update public.admin_users set must_change_password = false, updated_at = now()
+   where email = e and user_id = p_user_id and status = 'active' and must_change_password;
+  if not found then raise exception 'Şifre değişikliği gereken etkin hesap bulunamadı.' using errcode = 'P0002'; end if;
+  perform public.users_log('password_changed', e, jsonb_build_object('must_change_password', jsonb_build_object('from', true, 'to', false)), e);
+end;
+$$;
+
 revoke all on function public.users_list() from public, anon;
+revoke all on function public.users_can_create(text) from public, anon;
+revoke all on function public.users_create(text, text, text, uuid) from public, anon;
+revoke all on function public.users_password_set(text, uuid) from public, anon, authenticated;
+grant execute on function public.users_can_create(text) to authenticated, service_role;
+grant execute on function public.users_create(text, text, text, uuid) to authenticated, service_role;
+grant execute on function public.users_password_set(text, uuid) to service_role;
 revoke all on function public.users_invite(text, text, text, text, timestamptz) from public, anon;
 revoke all on function public.users_invite_resend(text, text, timestamptz) from public, anon;
 revoke all on function public.users_invite_sent(uuid, boolean, text) from public, anon;

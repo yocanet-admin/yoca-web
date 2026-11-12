@@ -87,7 +87,12 @@ npx --prefix tests/integration tsx tests/integration/finance/cron-roll.mts
 
 | Paket | Dosya | Ne sınar |
 |---|---|---|
-| Uçtan uca | `users/users-e2e.mts` | Üç rolün doğrudan veritabanı, depolama ve API erişimi; davet (tek kullanımlık bağlantı, kendi şifresi, süre, yeniden gönderme, iptal, gönderilemeyen davet, aynı e-posta, Auth'ta zaten var olan e-posta); açık oturumda rol değişikliği ve erişim kapatma; son etkin yönetici (eşzamanlı dahil); işlem geçmişi; saklanan sır yok |
+| Uçtan uca | `users/users-e2e.mts` | Üç rolün doğrudan veritabanı, depolama ve API erişimi; doğrudan oluşturma (geçici şifre, e-posta gitmez, ilk girişte şifre değiştirmeden DB/API kapalı, kısmi hata geri alma, şifrenin hiçbir kayıtta/günlükte olmaması); davet (tek kullanımlık bağlantı, kendi şifresi, süre, yeniden gönderme, iptal, gönderilemeyen davet, aynı e-posta, Auth'ta zaten var olan e-posta); açık oturumda rol değişikliği ve erişim kapatma; son etkin yönetici (eşzamanlı dahil); işlem geçmişi; saklanan sır yok |
 | Arayüz | `users/users-ui.cjs` | Sistem → Kullanıcılar (masaüstü/mobil, davet ve onay pencereleri), davet sayfası (390 px), editör menüsü ve izinsiz adreslerden yönlendirme, açık panelde rol değişikliği / erişim kapatma, finans kullanıcısının Kullanıcılar'a ulaşamaması, eksik lisans yapılandırmasıyla Operasyon ayarları (390 px) |
+
+| ADMIN_EMAILS geçişi | `users/admin-emails.mts` | İki kez: değişken tanımlıyken (`ADMIN_EMAILS=admin@test.local bash start.sh`, `EXPECT_ADMIN_EMAILS=1`) ve tanımsızken. Panelde oluşturulan yeni yönetici değişkene bakılmadan çalışır; panel hesabı olmayan girişli kullanıcı hiçbir yetki almaz |
+| Eski uygulama + v30 | `users/v30-old-app.mts` | Bugünkü production kodu (`APP_DIR=<main worktree>`, `ADMIN_EMAILS` tanımlı) v30 veritabanıyla: mevcut yönetici/finans çalışır, editör ve geçici şifreli hesap erişemez |
+
+Geçit, production'daki "Confirm email: açık" ayarını taklit eder (onaysız kullanıcı giriş yapamaz). Bu testler **taklit Auth** kullanır; gerçek Supabase Auth davranışını kanıtlamaz (bkz. `supabase/YAYIN-v30.md`).
 
 Çalıştırma (Finans paketinden sonra, `panel-screens` tohumundan önce): `tsx tests/integration/users/users-e2e.mts && node tests/integration/users/users-ui.cjs "$ITEST_OUT"`.

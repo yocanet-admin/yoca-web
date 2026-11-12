@@ -56,7 +56,8 @@ export async function POST(request: NextRequest) {
     if (!userId) userId = await findAuthUserId(service, email);
     if (userId) {
       // An Auth user with this e-mail already exists (e.g. an earlier account): the link proves the inbox; set the new password and allow sign-in.
-      const { error: upd } = await service.auth.admin.updateUserById(userId, { password, ban_duration: 'none' });
+      // email_confirm: the link proved the inbox (Supabase "Confirm email" is ON; an unconfirmed user could not sign in).
+      const { error: upd } = await service.auth.admin.updateUserById(userId, { password, ban_duration: 'none', email_confirm: true });
       if (upd) return NextResponse.json({ ok: false, code: 'auth_failed', error: `Şifre kaydedilemedi: ${upd.message}` }, { status: 400 });
     } else {
       const { data: created, error: create } = await service.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { name: row.name } });

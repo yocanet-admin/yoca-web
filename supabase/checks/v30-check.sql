@@ -24,8 +24,9 @@ union all
 select 'içerik politikaları can_content()', count(*)::text || ' / 25 beklenir'
   from pg_policies where coalesce(qual, '') || coalesce(with_check, '') ~ 'can_content\(\)'
 union all
-select 'etkin yönetici sayısı', count(*)::text
+select 'geçerli yönetici sayısı (etkin, geçici şifresi değiştirilmiş)', count(*)::text
   from public.admin_users a where role = 'admin' and coalesce(to_jsonb(a) ->> 'status', 'active') = 'active'
+   and coalesce((to_jsonb(a) ->> 'must_change_password')::boolean, false) = false
 union all
 select 'finans politikaları can_finance() (değişmemeli)', count(*)::text
   from pg_policies where coalesce(qual, '') || coalesce(with_check, '') ~ 'can_finance\(\)';

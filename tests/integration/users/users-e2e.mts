@@ -122,6 +122,10 @@ const edAdminOnly = await Promise.all(adminOnly.map((p) => api(ed.token, p)));
 check('api: editor is refused on newsletter, Operasyon, traffic, SEO, AI settings, health and documents', edAdminOnly.every((r) => r.status === 401), adminOnly.map((p, i) => `${p.split('?')[0]}=${edAdminOnly[i].status}`).join(' '));
 const edFin = await fetch(`${APP}/api/admin/fin/import`, { method: 'POST', headers: { Authorization: `Bearer ${ed.token}` }, body: new FormData() });
 check('api: editor is refused on the Finans import', edFin.status === 403 || edFin.status === 401, String(edFin.status));
+const edAiSave = await api(ed.token, '/api/admin/ai', { action: 'save', settings: { monthlyBudgetUsd: 9999 } });
+const edAiRow = await ed.db.from('cockpit_settings').upsert({ key: 'ai', value: { monthlyBudgetUsd: 9999 }, updated_at: new Date().toISOString() });
+const edAiRead = await ed.db.from('cockpit_settings').select('key').eq('key', 'ai');
+check('AI: editor cannot change AI budget / model / key settings (API and database) nor read them', edAiSave.status === 401 && Boolean(edAiRow.error) && (edAiRead.data ?? []).length === 0 && !sql(`select coalesce(value::text, '') from cockpit_settings where key = 'ai'`).includes('9999'));
 const noToken = await api(null, '/api/admin/users');
 check('api: no session → 401', noToken.status === 401);
 
@@ -195,6 +199,82 @@ const failResend = await api(admin.token, '/api/admin/users', { action: 'resend'
 check('send failure: a failing resend is also reported as failed', failResend.status === 502);
 await api(admin.token, '/api/admin/users', { action: 'revoke', email: 'fail4xx@test.local' });
 
+/* ── 3b. Direct creation with a temporary password ─────────────────── */
+const TEMP = 'Gecici-Sifre-7731-Kum';
+const NEWPW = 'Kendi-Sifrem-9054-Dag';
+const mailsBefore = (await captured()).filter((m) => m.path === '/capture/resend').length;
+const cr = await api(admin.token, '/api/admin/users', { action: 'create', email: 'Dogrudan@Test.Local', name: 'TEST Doğrudan Editör', role: 'editor', password: TEMP });
+const crAuth = (await captured()).filter((m) => m.path === '/auth/admin/create' && m.body.email === 'dogrudan@test.local');
+check('create: admin creates an account with a temporary password; NO e-mail is sent', cr.status === 200 && cr.json.created === true && (await captured()).filter((m) => m.path === '/capture/resend').length === mailsBefore && crAuth.length === 1, JSON.stringify(cr.json));
+check('create: the response never echoes the password', !JSON.stringify(cr.json).includes(TEMP));
+const crRow = sql(`select status || '|' || role || '|' || must_change_password || '|' || created_via || '|' || (email_verified_at is null) || '|' || (user_id is not null) from admin_users where email = 'dogrudan@test.local'`);
+check('create: row active, bound to its Auth user, must change password, e-mail NOT marked verified', crRow === 'active|editor|true|direct|true|true', crRow);
+const crList = ((await api(admin.token, '/api/admin/users')).json.users as Array<Record<string, unknown>>).find((u) => u.email === 'dogrudan@test.local');
+check('create: the list says "must change password" and "e-mail not verified"', crList?.must_change_password === true && crList?.email_verified === false && crList?.created_via === 'direct');
+const dTemp = await as('dogrudan@test.local', TEMP);
+const dMe = await api(dTemp.token, '/api/admin/me');
+const dContent = await canInsertMenu(dTemp, 'temp');
+const dRead = await dTemp.db.from('insights').select('id').eq('slug', 'test-usr-draft');
+const dApi = await api(dTemp.token, '/api/ai', { action: 'fetch_sources', urls: [] });
+const dSettings = await api(dTemp.token, '/api/admin/site-settings');
+check('first sign-in: the temporary password signs in, but no role yet (/me → password_change)', dMe.json.allowed === false && dMe.json.reason === 'password_change', JSON.stringify(dMe.json));
+check('first sign-in: database and API refuse everything until the password is changed', !dContent && (dRead.data ?? []).length === 0 && dApi.status === 401 && dSettings.status === 401, `content=${dContent} ai=${dApi.status} settings=${dSettings.status}`);
+const dSelfClear = await dTemp.db.rpc('users_password_set', { p_email: 'dogrudan@test.local', p_user_id: sql(`select user_id from admin_users where email = 'dogrudan@test.local'`) });
+const dSelfUpdate = await dTemp.db.from('admin_users').update({ must_change_password: false }).eq('email', 'dogrudan@test.local').select('email');
+check('first sign-in: the account cannot clear its own flag (function server-only, table closed)', Boolean(dSelfClear.error) && (Boolean(dSelfUpdate.error) || (dSelfUpdate.data ?? []).length === 0) && sql(`select must_change_password from admin_users where email = 'dogrudan@test.local'`) === 't');
+const wrongCur = await api(dTemp.token, '/api/admin/password', { current: 'yanlis-sifre-000', next: NEWPW });
+const weakNew = await api(dTemp.token, '/api/admin/password', { current: TEMP, next: 'kisa' });
+const sameNew = await api(dTemp.token, '/api/admin/password', { current: TEMP, next: TEMP });
+check('password change: wrong temporary password, weak or unchanged new password refused', wrongCur.json.code === 'wrong_current' && weakNew.json.code === 'weak_password' && sameNew.json.code === 'same_password', `${wrongCur.json.code} ${weakNew.json.code} ${sameNew.json.code}`);
+const changed = await api(dTemp.token, '/api/admin/password', { current: TEMP, next: NEWPW });
+const dMe2 = await api(dTemp.token, '/api/admin/me');
+check('password change: succeeds; the same session now has its role (editor) and content access', changed.status === 200 && dMe2.json.role === 'editor' && (await canInsertMenu(dTemp, 'after-pw')), JSON.stringify(changed.json));
+const tempAgain = await login('dogrudan@test.local', TEMP);
+const newLogin = await login('dogrudan@test.local', NEWPW);
+check('password change: the temporary password stops working; the new one works', 'error' in tempAgain && !('error' in newLogin));
+const notRequired = await api(admin.token, '/api/admin/password', { current: 'itest-admin-pw', next: NEWPW });
+check('password change: refused for accounts that have no pending change', notRequired.status === 409 && notRequired.json.code === 'not_required');
+// the row is bound to ITS Auth user: another Auth identity with the same e-mail gets nothing
+sql(`update admin_users set user_id = gen_random_uuid() where email = 'dogrudan@test.local'`);
+const otherId = await api((newLogin as Who).token, '/api/admin/me');
+sql(`update admin_users set user_id = '${(await (newLogin as Who).db.auth.getUser()).data.user!.id}' where email = 'dogrudan@test.local'`);
+check('binding: a session of a different Auth user with the same e-mail has no role', otherId.json.allowed === false && (await api((newLogin as Who).token, '/api/admin/me')).json.role === 'editor');
+// duplicates: existing panel account / pending invite / Auth user without panel account
+const dupCreate = await api(admin.token, '/api/admin/users', { action: 'create', email: 'dogrudan@test.local', name: 'X', role: 'admin', password: TEMP });
+await api(admin.token, '/api/admin/users', { action: 'invite', email: 'bekleyen@test.local', name: 'TEST Bekleyen', role: 'finance' });
+const dupPending = await api(admin.token, '/api/admin/users', { action: 'create', email: 'bekleyen@test.local', name: 'X', role: 'admin', password: TEMP });
+const authCountBefore = (await captured()).filter((m) => m.path === '/auth/admin/create').length;
+const dupAuth = await api(admin.token, '/api/admin/users', { action: 'create', email: 'intruder@test.local', name: 'X', role: 'admin', password: TEMP });
+check('create: no second account — existing panel account, pending invite and an existing Auth user are all refused with clear reasons', dupCreate.json.code === 'exists' && dupPending.json.code === 'pending_invite' && dupAuth.json.code === 'auth_exists' && sql(`select count(*) from admin_users where email = 'intruder@test.local'`) === '0' && (await captured()).filter((m) => m.path === '/auth/admin/create').length === authCountBefore && sql(`select role from admin_users where email = 'dogrudan@test.local'`) === 'editor', `${dupCreate.json.code} ${dupPending.json.code} ${dupAuth.json.code}`);
+await api(admin.token, '/api/admin/users', { action: 'revoke', email: 'bekleyen@test.local' });
+const weakTemp = await api(admin.token, '/api/admin/users', { action: 'create', email: 'zayif@test.local', name: 'X', role: 'editor', password: 'kisa' });
+check('create: a weak temporary password is refused before anything is created', weakTemp.status === 400 && sql(`select count(*) from admin_users where email = 'zayif@test.local'`) === '0' && !(await captured()).some((m) => m.path === '/auth/admin/create' && m.body.email === 'zayif@test.local'));
+const edCreate = await api(ed.token, '/api/admin/users', { action: 'create', email: 'edcreate@test.local', name: 'X', role: 'admin', password: TEMP });
+const finCreate = await api(fin.token, '/api/admin/users', { action: 'create', email: 'fincreate@test.local', name: 'X', role: 'admin', password: TEMP });
+const edDbCreate = await ed.db.rpc('users_create', { p_email: 'edcreate@test.local', p_name: 'X', p_role: 'admin', p_user_id: '11111111-1111-4111-8111-111111111111' });
+check('create: editor and finance cannot create accounts (API and database function)', edCreate.status === 401 && finCreate.status === 401 && Boolean(edDbCreate.error) && sql(`select count(*) from admin_users where email in ('edcreate@test.local', 'fincreate@test.local')`) === '0');
+// partial failure: the role assignment fails after the Auth user exists → Auth user removed (or blocked), request fails
+sql(`create or replace function itest_fail_bind() returns trigger language plpgsql as $f$ begin if new.email like 'partial%' then raise exception 'test: bind failed'; end if; return new; end $f$;
+     drop trigger if exists itest_fail_bind on admin_users; create trigger itest_fail_bind before insert on admin_users for each row execute function itest_fail_bind();`);
+const part = await api(admin.token, '/api/admin/users', { action: 'create', email: 'partial@test.local', name: 'TEST Yarım', role: 'admin', password: TEMP });
+const partLogin = await login('partial@test.local', TEMP);
+const partDeleted = (await captured()).some((m) => m.path === '/auth/admin/delete' && m.body.email === 'partial@test.local');
+check('partial failure: not reported as success; no panel row; the new Auth user is deleted (cannot sign in)', part.json.ok === false && sql(`select count(*) from admin_users where email = 'partial@test.local'`) === '0' && partDeleted && 'error' in partLogin, JSON.stringify(part.json));
+const part2 = await api(admin.token, '/api/admin/users', { action: 'create', email: 'partial-nodelete@test.local', name: 'TEST Yarım 2', role: 'admin', password: TEMP });
+const part2Login = await login('partial-nodelete@test.local', TEMP);
+check('partial failure: if the Auth user cannot be deleted it is blocked and the admin is told to remove it', part2.status === 500 && part2.json.code === 'partial' && 'error' in part2Login && /user_banned|banned/i.test((part2Login as { error: string }).error) && sql(`select count(*) from admin_users where email = 'partial-nodelete@test.local'`) === '0', `${JSON.stringify(part2.json)} ${'error' in part2Login ? (part2Login as { error: string }).error : 'signed in'}`);
+sql(`drop trigger if exists itest_fail_bind on admin_users; drop function if exists itest_fail_bind();`);
+// an admin created directly does not count as an effective admin before the password change
+const crAdmin = await api(admin.token, '/api/admin/users', { action: 'create', email: 'yeni.yonetici@test.local', name: 'TEST Yeni Yönetici', role: 'admin', password: TEMP });
+let lastWithPending = '';
+try { sql(`update admin_users set role = 'editor' where email = 'admin@test.local'`); } catch (e) { lastWithPending = String((e as Error).message); }
+check('last admin: an admin who has not changed the temporary password does not count — the only effective admin stays protected', crAdmin.status === 200 && /Son etkin yönetici/.test(lastWithPending));
+// no password anywhere it must not be
+const appLog = (() => { try { return execFileSync('cat', [`${process.env.ITEST_STATE || '/var/tmp/yoca-itest-gw'}.app.log`], { encoding: 'utf8' }); } catch { return ''; } })();
+const gwFiles = execFileSync('bash', ['-c', `cat ${process.env.ITEST_STATE || '/var/tmp/yoca-itest-gw'}.log ${process.env.ITEST_STATE || '/var/tmp/yoca-itest-gw'}/captured.jsonl 2>/dev/null || true`], { encoding: 'utf8' });
+const dbHits = sql(`select count(*) from audit_log where coalesce(changes::text,'') || coalesce(label,'') ~ '${TEMP}|${NEWPW}'`) + sql(`select count(*) from admin_users where row_to_json(admin_users)::text ~ '${TEMP}|${NEWPW}'`) + sql(`select count(*) from admin_invites where row_to_json(admin_invites)::text ~ '${TEMP}|${NEWPW}'`);
+check('secrets: neither the temporary nor the new password is in audit log, user table, invites, app log, gateway log or captured requests', dbHits === '000' && !appLog.includes(TEMP) && !appLog.includes(NEWPW) && !gwFiles.includes(TEMP) && !gwFiles.includes(NEWPW), `db=${dbHits} app=${appLog.includes(TEMP) || appLog.includes(NEWPW)} gw=${gwFiles.includes(TEMP) || gwFiles.includes(NEWPW)}`);
+
 // an e-mail that already has an Auth user (but no panel account): the link proves the inbox; no second Auth user
 await api(admin.token, '/api/admin/users', { action: 'invite', email: 'intruder@test.local', name: 'TEST Var Olan', role: 'finance' });
 const tI = await lastInviteToken('intruder@test.local');
@@ -250,15 +330,15 @@ const [d1, d2] = await Promise.all([
   api(admin.token, '/api/admin/users', { action: 'role', email: 'admin2@test.local', role: 'editor' }),
   api(admin2.token, '/api/admin/users', { action: 'role', email: 'admin@test.local', role: 'editor' }),
 ]);
-const activeAdmins = sql(`select count(*) from admin_users where role = 'admin' and status = 'active'`);
+const activeAdmins = sql(`select count(*) from admin_users where role = 'admin' and status = 'active' and not must_change_password`);
 const st = [d1.status, d2.status].sort();
 check('last admin: two admins demoting each other concurrently → exactly one succeeds, one admin remains', st[0] === 200 && [401, 403, 409].includes(st[1]) && activeAdmins === '1', `${d1.status}/${d1.json.code} ${d2.status}/${d2.json.code} admins=${activeAdmins}`);
 sql(`update admin_users set role = 'admin' where email in ('admin@test.local', 'admin2@test.local')`);
 
 /* ── 7. Audit log ──────────────────────────────────────────────────── */
 const actions = sql(`select string_agg(distinct action, ',' order by action) from audit_log where entity = 'admin_users'`);
-const want = ['disable', 'enable', 'invite', 'invite_accept', 'invite_resend', 'invite_revoke', 'invite_send_failed', 'role_change'];
-check('audit: every user action is in İşlem geçmişi (invite, resend, cancel, failed send, accept, role, close, reopen)', want.every((a) => actions.split(',').includes(a)), actions);
+const want = ['create', 'disable', 'enable', 'invite', 'invite_accept', 'invite_resend', 'invite_revoke', 'invite_send_failed', 'password_changed', 'role_change'];
+check('audit: every user action is in İşlem geçmişi (create, password change, invite, resend, cancel, failed send, accept, role, close, reopen)', want.every((a) => actions.split(',').includes(a)), actions);
 check('audit: actor is the admin (or the invitee for acceptance)', sql(`select count(*) from audit_log where entity = 'admin_users' and action = 'role_change' and actor = 'admin@test.local'`) !== '0' && sql(`select count(*) from audit_log where entity = 'admin_users' and action = 'invite_accept' and actor = 'davet: yeni.editor@test.local'`) === '1');
 const adminAudit = await rows(admin, 'audit_log');
 check('audit: readable by admins only (editor/finance get nothing)', adminAudit > 0 && (await rows(ed, 'audit_log')) <= 0 && (await rows(fin, 'audit_log')) <= 0);

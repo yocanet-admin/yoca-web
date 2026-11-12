@@ -11,7 +11,7 @@ import { clearDocBackups } from '@/lib/documents/backup';
 import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, patchOpenGroups, resolveOpenGroups, toggleGroup, type OpenGroups } from '@/lib/admin/navState';
 import t from '@/components/admin/tangram/tangram.module.css';
 import { PanelRoleContext } from '@/lib/admin/roleContext';
-import { canOpen, isPanelRole, isPublicAdminPath, ROLE_GROUPS, ROLE_HOME, ROLE_LABEL, visibleHref, type PanelRole } from '@/lib/admin/roles';
+import { canOpen, isPanelRole, isPublicAdminPath, passwordProblem, PASSWORD_MIN, ROLE_GROUPS, ROLE_HOME, ROLE_LABEL, visibleHref, type PanelRole } from '@/lib/admin/roles';
 
 /**
  * Yoca — admin shell (Client Component).
@@ -134,6 +134,53 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   return <PanelShell>{children}</PanelShell>;
 }
 
+/** First sign-in with a temporary password: the only thing this account can do. */
+function PasswordChange({ email, onDone, onLogout }: { email: string; onDone: () => void; onLogout: () => void }) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [again, setAgain] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setProblem(null);
+    const rule = passwordProblem(next, email);
+    if (rule) return setProblem(rule);
+    if (next !== again) return setProblem('Yeni şifreler aynı değil.');
+    if (next === current) return setProblem('Yeni şifre geçici şifreyle aynı olamaz.');
+    setBusy(true);
+    const { data } = (await getAdminClient()?.auth.getSession()) ?? { data: { session: null } };
+    const response = await fetch('/api/admin/password', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.session?.access_token ?? ''}` }, body: JSON.stringify({ current, next }) }).catch(() => null);
+    const body = (await response?.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    setBusy(false);
+    if (!response || !body?.ok) return setProblem(body?.error ?? 'Şifre değiştirilemedi. Bağlantınızı kontrol edip yeniden deneyin.');
+    setCurrent(''); setNext(''); setAgain('');
+    onDone();
+  };
+  return (
+    <div className={t.shell}>
+      <main className="relative z-[7] mx-auto grid min-h-screen w-full max-w-[460px] content-center gap-5 p-4 sm:p-6">
+        <img src="/brand/yoca-logo-primary.svg" alt="Yoca" width={120} height={32} />
+        <form className="admin-card grid gap-3 !p-5 sm:!p-6" onSubmit={submit}>
+          <p className="admin-kicker">İlk giriş</p>
+          <h1 className="admin-h1 !text-[26px]">Şifreni değiştir</h1>
+          <p className="text-[13px] text-muted">Hesabın bir yönetici tarafından geçici şifreyle açıldı. Kendi şifreni belirleyene kadar panelde hiçbir ekran ve işlem açılmaz.</p>
+          <input type="email" name="username" autoComplete="username" value={email} readOnly hidden />
+          <label className="admin-label">Geçici şifre<input className="admin-input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required /></label>
+          <label className="admin-label">Yeni şifre<input className="admin-input" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} maxLength={72} required /></label>
+          <label className="admin-label">Yeni şifre (tekrar)<input className="admin-input" type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} maxLength={72} required /></label>
+          <p className="admin-hint">En az {PASSWORD_MIN} karakter; e-posta adını içermesin. Şifreni kimseyle paylaşma.</p>
+          {problem && <p role="alert" className="admin-notice admin-notice-bad text-[13px]">{problem}</p>}
+          <div className="flex flex-wrap gap-2">
+            <button type="submit" className="admin-btn-primary" disabled={busy}>{busy ? 'Kaydediliyor…' : 'Şifremi değiştir'}</button>
+            <button type="button" className="admin-btn" onClick={onLogout} disabled={busy}>Çıkış</button>
+          </div>
+        </form>
+      </main>
+    </div>
+  );
+}
+
 function PanelShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -146,8 +193,8 @@ function PanelShell({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  // Optional ADMIN_EMAILS allowlist, checked on the server (the list itself is never sent here).
-  const [access, setAccess] = useState<{ userId: string; allowed: boolean; role: PanelRole | null } | null>(null);
+  // The panel role, decided by the database on the server (/api/admin/me).
+  const [access, setAccess] = useState<{ userId: string; allowed: boolean; role: PanelRole | null; mustChange?: boolean } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const userId = session?.user.id ?? null;
@@ -176,6 +223,11 @@ function PanelShell({ children }: { children: ReactNode }) {
         /* network error: see above */
       }
       if (cancelled) return;
+      // Temporary password (direct creation): no role until the person sets their own password.
+      if (!allowed && reason === 'password_change') {
+        setAccess({ userId, allowed: false, role: null, mustChange: true });
+        return;
+      }
       setAccess({ userId, allowed, role });
       if (!allowed) {
         setError(reason === 'check_failed' ? CHECK_FAILED : NOT_ALLOWED);
@@ -379,6 +431,9 @@ function PanelShell({ children }: { children: ReactNode }) {
 
   // ── Loading (session, then the allowlist check) ─────────────
   const checkingAccess = Boolean(session) && access?.userId !== session?.user.id;
+  if (session && access?.mustChange && access.userId === userId) {
+    return <PasswordChange email={session.user.email ?? ''} onDone={() => setAccess(null)} onLogout={handleLogout} />;
+  }
   if (loading || checkingAccess || (session && access && !access.allowed) || outside) {
     return (
       <div className="relative z-[7] flex min-h-screen items-center justify-center">

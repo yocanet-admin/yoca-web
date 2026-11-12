@@ -48,7 +48,7 @@ function loadUsers() {
   let extra = {};
   try { extra = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); } catch {}
   const all = {};
-  for (const [email, u] of Object.entries(BUILTIN)) all[email] = { banned: false, user_metadata: {}, created_at: '2026-01-01T00:00:00Z', ...u };
+  for (const [email, u] of Object.entries(BUILTIN)) all[email] = { banned: false, confirmed: true, user_metadata: {}, created_at: '2026-01-01T00:00:00Z', ...u };
   for (const [email, u] of Object.entries(extra)) if (u === null) delete all[email]; else all[email] = { ...(all[email] || {}), ...u };
   return all;
 }
@@ -60,7 +60,7 @@ function saveUser(email, patch) {
 }
 const findById = (id) => Object.entries(loadUsers()).find(([, u]) => u.id === id) || null;
 function userJson(email, u) {
-  return { id: u.id, aud: 'authenticated', role: 'authenticated', email, email_confirmed_at: u.created_at, app_metadata: { provider: 'email' }, user_metadata: u.user_metadata || {}, banned_until: u.banned ? '2126-01-01T00:00:00Z' : null, created_at: u.created_at };
+  return { id: u.id, aud: 'authenticated', role: 'authenticated', email, email_confirmed_at: u.confirmed ? u.created_at : null, app_metadata: { provider: 'email' }, user_metadata: u.user_metadata || {}, banned_until: u.banned ? '2126-01-01T00:00:00Z' : null, created_at: u.created_at };
 }
 function session(email) {
   const u = loadUsers()[email];
@@ -290,6 +290,8 @@ async function authRoute(req, res, url) {
       const u = loadUsers()[email];
       if (!u || !u.password || u.password !== body.password) return send(res, 400, { error: 'invalid_grant', error_description: 'Invalid login credentials', code: 'invalid_credentials', msg: 'Invalid login credentials' });
       if (u.banned) return send(res, 400, { error: 'invalid_grant', error_description: 'User is banned', code: 'user_banned', msg: 'User is banned' });
+      // like production ("Confirm email" ON): an unconfirmed user cannot sign in
+      if (!u.confirmed) return send(res, 400, { error: 'invalid_grant', error_description: 'Email not confirmed', code: 'email_not_confirmed', msg: 'Email not confirmed' });
       return send(res, 200, session(email));
     }
     if (grant === 'refresh_token') {
@@ -318,8 +320,9 @@ async function authRoute(req, res, url) {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return send(res, 400, { code: 400, error_code: 'validation_failed', msg: 'Unable to validate email address: invalid format' });
       if (loadUsers()[email]) return send(res, 422, { code: 422, error_code: 'email_exists', msg: 'A user with this email address has already been registered' });
       if (body.password != null && String(body.password).length < 6) return send(res, 422, { code: 422, error_code: 'weak_password', msg: 'Password should be at least 6 characters.' });
-      saveUser(email, { id: crypto.randomUUID(), password: body.password ?? null, banned: false, user_metadata: body.user_metadata || {}, created_at: new Date().toISOString() });
-      fs.appendFileSync(CAPTURE_FILE, JSON.stringify({ at: new Date().toISOString(), path: '/auth/admin/create', body: { email, hasPassword: body.password != null } }) + '\n');
+      saveUser(email, { id: crypto.randomUUID(), password: body.password ?? null, banned: false, confirmed: body.email_confirm === true, user_metadata: body.user_metadata || {}, created_at: new Date().toISOString() });
+      // createUser never sends an e-mail (as in Supabase); recorded without the password
+      fs.appendFileSync(CAPTURE_FILE, JSON.stringify({ at: new Date().toISOString(), path: '/auth/admin/create', body: { email, hasPassword: body.password != null, email_confirm: body.email_confirm === true } }) + '\n');
       return send(res, 200, userJson(email, loadUsers()[email]));
     }
     if (!id && req.method === 'GET') {
@@ -331,15 +334,20 @@ async function authRoute(req, res, url) {
     if (!hit) return send(res, 404, { code: 404, error_code: 'user_not_found', msg: 'User not found' });
     const [email, u] = hit;
     if (req.method === 'GET') return send(res, 200, userJson(email, u));
-    if (req.method === 'DELETE') { saveUser(email, null); return send(res, 200, {}); }
+    if (req.method === 'DELETE') {
+      fs.appendFileSync(CAPTURE_FILE, JSON.stringify({ at: new Date().toISOString(), path: '/auth/admin/delete', body: { email } }) + '\n');
+      if (email.includes('nodelete')) return send(res, 500, { code: 500, msg: 'test: delete failed' }); // test hook
+      saveUser(email, null); return send(res, 200, {});
+    }
     if (req.method === 'PUT') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const patch = {};
       if (body.password != null) { if (String(body.password).length < 6) return send(res, 422, { code: 422, error_code: 'weak_password', msg: 'Password should be at least 6 characters.' }); patch.password = String(body.password); }
       if (body.ban_duration != null) patch.banned = body.ban_duration !== 'none';
+      if (body.email_confirm === true) patch.confirmed = true;
       if (body.user_metadata) patch.user_metadata = { ...(u.user_metadata || {}), ...body.user_metadata };
       saveUser(email, patch);
-      fs.appendFileSync(CAPTURE_FILE, JSON.stringify({ at: new Date().toISOString(), path: '/auth/admin/update', body: { email, password: body.password != null, ban_duration: body.ban_duration ?? null } }) + '\n');
+      fs.appendFileSync(CAPTURE_FILE, JSON.stringify({ at: new Date().toISOString(), path: '/auth/admin/update', body: { email, password: body.password != null, ban_duration: body.ban_duration ?? null, email_confirm: body.email_confirm ?? null } }) + '\n');
       return send(res, 200, userJson(email, loadUsers()[email]));
     }
   }

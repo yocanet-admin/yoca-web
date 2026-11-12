@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAllowlist, bearerToken, requireAdmin } from '@/lib/cockpit/auth';
+import { adminEmailsStillSet, bearerToken, requireAdmin } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
 import { sendEmail } from '@/lib/notify';
-import { dbErrorCode, isPanelRole, normalizeEmail, validEmail, validName, type PanelRole, type UserRow } from '@/lib/admin/roles';
+import { dbErrorCode, isPanelRole, normalizeEmail, passwordProblem, validEmail, validName, type PanelRole, type UserRow } from '@/lib/admin/roles';
 import { findAuthUserId, inviteEmail, inviteLink, newInviteToken, setAuthBan } from '@/lib/admin/users';
 
 /**
@@ -10,9 +10,17 @@ import { findAuthUserId, inviteEmail, inviteLink, newInviteToken, setAuthBan } f
  * inside every database function, so a non-admin can never manage users even
  * with a direct API or database call).
  *
- * GET  → { users, inviteReady, adminEmailsLimited }
+ * GET  → { users, inviteReady, adminEmailsSet }
  * POST { action, email, … }
  *   invite { email, name, role }  → account row "invited" + one-time link by e-mail
+ *   create { email, name, role, password }
+ *                                 → Auth user with a TEMPORARY password (no e-mail is
+ *                                   sent); the panel row is bound to it and must
+ *                                   change the password before any access. The
+ *                                   password goes only to Supabase Auth: never stored,
+ *                                   logged, audited or returned. Partial failure →
+ *                                   the new Auth user is deleted (or, failing that,
+ *                                   blocked) and the request fails.
  *   resend { email }              → new link (the previous one stops working)
  *   revoke { email }              → pending invite cancelled (e-mail free again)
  *   role   { email, role }        → takes effect on the user's next request
@@ -51,9 +59,7 @@ export async function GET(request: NextRequest) {
   if (!asUser) return fail(503, 'not_configured', 'Supabase yapılandırılmamış.');
   const { data, error } = await asUser.rpc('users_list');
   if (error) return dbFail(error);
-  const list = adminAllowlist();
-  const users = ((data ?? []) as UserRow[]).map((u) => ({ ...u, admin_emails_blocked: u.role === 'admin' && list !== null && !list.includes(u.email) }));
-  return NextResponse.json({ ok: true, users, inviteReady: Boolean(process.env.RESEND_API_KEY || process.env.NOTIFY_RESEND_ENDPOINT), adminEmailsLimited: list !== null });
+  return NextResponse.json({ ok: true, users: (data ?? []) as UserRow[], inviteReady: Boolean(process.env.RESEND_API_KEY || process.env.NOTIFY_RESEND_ENDPOINT), adminEmailsSet: adminEmailsStillSet() });
 }
 
 export async function POST(request: NextRequest) {
@@ -61,7 +67,7 @@ export async function POST(request: NextRequest) {
   if (!admin) return unauthorized();
   const asUser = getSupabaseAsUser(bearerToken(request));
   if (!asUser) return fail(503, 'not_configured', 'Supabase yapılandırılmamış.');
-  const body = (await request.json().catch(() => ({}))) as { action?: string; email?: string; name?: string; role?: string; enabled?: boolean };
+  const body = (await request.json().catch(() => ({}))) as { action?: string; email?: string; name?: string; role?: string; enabled?: boolean; password?: string };
   const email = normalizeEmail(body.email);
   if (!validEmail(email)) return fail(400, 'invalid', 'Geçerli bir e-posta adresi girin.');
 
@@ -76,6 +82,43 @@ export async function POST(request: NextRequest) {
       const sent = await sendInvite(asUser, String(inviteId), { email, name, role: body.role, token: t.token, expiresAt: t.expiresAt, invitedBy: admin.email });
       if (!sent.ok) return fail(502, 'send_failed', `Davet e-postası gönderilemedi: ${sent.error} Kullanıcı listede “Davet gönderilemedi” olarak duruyor; yeniden gönderebilir veya iptal edebilirsiniz.`);
       return NextResponse.json({ ok: true, sent: true, expiresAt: t.expiresAt });
+    }
+    case 'create': {
+      if (!validName(body.name)) return fail(400, 'invalid', 'Ad 1–120 karakter olmalı.');
+      if (!isPanelRole(body.role)) return fail(400, 'invalid', 'Rol seçin.');
+      const password = typeof body.password === 'string' ? body.password : '';
+      const problem = passwordProblem(password, email);
+      if (problem) return fail(400, 'weak_password', `Geçici şifre: ${problem}`);
+      const name = String(body.name).trim();
+      // 1) clean refusal before anything is created (existing account / pending invite)
+      const pre = await asUser.rpc('users_can_create', { p_email: email });
+      if (pre.error) return dbFail(pre.error);
+      const service = getSupabaseServiceRole();
+      if (!service) return fail(503, 'not_configured', 'Sunucu anahtarı yok; hesap oluşturulamaz.');
+      // 2) Auth user. email_confirm: Supabase "Confirm email" is ON, so an unconfirmed user could not
+      //    sign in at all; ownership is NOT proven — the panel keeps email_verified_at empty and says so.
+      const { data: created, error: createError } = await service.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { name } });
+      if (createError || !created?.user) {
+        const exists = /already|exists|registered/i.test(createError?.message ?? '');
+        return exists
+          ? fail(409, 'auth_exists', 'Bu e-postayla bir giriş hesabı zaten var (panel kullanıcısı değil). İkinci hesap açılmaz; bu kişiyi davetle ekleyin — bağlantı e-posta sahipliğini doğrular.')
+          : fail(502, 'auth_failed', 'Giriş hesabı oluşturulamadı.');
+      }
+      // 3) bind + role in one database transaction; on failure undo the Auth user
+      const bind = await asUser.rpc('users_create', { p_email: email, p_name: name, p_role: body.role, p_user_id: created.user.id });
+      if (bind.error) {
+        const del = await service.auth.admin.deleteUser(created.user.id);
+        if (del.error) {
+          const banned = await setAuthBan(service, created.user.id, true);
+          console.error('[users] create rollback: Auth user could not be deleted', banned ? 'nor blocked' : '(blocked)');
+          return fail(500, 'partial', banned
+            ? 'Hesap oluşturulamadı ve yarım kalan giriş hesabı silinemedi veya engellenemedi. Supabase → Authentication → Users ekranından bu e-postayı silin.'
+            : 'Hesap oluşturulamadı; yarım kalan giriş hesabı silinemedi ama oturum açması engellendi. Supabase → Authentication → Users ekranından silebilirsiniz.');
+        }
+        const r = dbFail(bind.error);
+        return r;
+      }
+      return NextResponse.json({ ok: true, created: true });
     }
     case 'resend': {
       const { data: rows, error: listError } = await asUser.rpc('users_list');

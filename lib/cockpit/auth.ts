@@ -7,25 +7,22 @@ import { isPanelRole, type PanelRole } from '@/lib/admin/roles';
  * The admin panel signs in with Supabase Auth in the browser; its API calls
  * send the access token as `Authorization: Bearer …`.
  *
- * Admins are the e-mails in public.admin_users (checked through is_admin()).
- * ADMIN_EMAILS (optional, comma-separated) narrows this further; it can never
- * add someone who is not in admin_users.
+ * Who may do what is decided by the DATABASE on every request: the
+ * signed-in user's effective row in public.admin_users (v30: active, no
+ * pending password change, bound to this Auth user) through is_admin() /
+ * panel_role() — the same functions the RLS policies use, so the app and
+ * direct database access can never disagree. A signed-in Auth user without
+ * such a row has no role at all.
+ *
+ * ADMIN_EMAILS (v30): no longer read for access. It used to narrow admins
+ * while admin_users was the only list; with panel-managed accounts it would
+ * block every newly created admin. Its presence is only reported (Kullanıcılar
+ * screen) so it can be removed after the transition (supabase/YAYIN-v30.md).
  */
 
-/** The ADMIN_EMAILS allowlist, lower-cased; null when the env var is unset or empty. */
-export function adminAllowlist(): string[] | null {
-  const list = (process.env.ADMIN_EMAILS ?? '')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  return list.length ? list : null;
-}
-
-/** True when the e-mail may use the admin panel (always true without ADMIN_EMAILS). */
-export function isAllowedAdminEmail(email: string | null | undefined): boolean {
-  const list = adminAllowlist();
-  if (!list) return true;
-  return Boolean(email) && list.includes(String(email).trim().toLowerCase());
+/** True when the (no longer used) ADMIN_EMAILS variable is still set — for the transition notice only. */
+export function adminEmailsStillSet(): boolean {
+  return (process.env.ADMIN_EMAILS ?? '').split(',').some((email) => email.trim() !== '');
 }
 
 /** The signed-in user behind the Bearer token (allowlist NOT applied), or null. */
@@ -102,25 +99,23 @@ export function bearerToken(request: NextRequest): string {
   return header.startsWith('Bearer ') ? header.slice(7) : '';
 }
 
-/** The signed-in admin, or null: valid session + optional ADMIN_EMAILS + database is_admin(). */
+/** The signed-in admin, or null: valid session + database is_admin() (effective admin row). */
 export async function requireAdmin(request: NextRequest): Promise<{ id: string; email?: string } | null> {
   const user = await sessionUser(request);
-  if (!user || !isAllowedAdminEmail(user.email)) return null;
+  if (!user) return null;
   const check = await adminCheck(bearerToken(request));
   return check.ok ? user : null;
 }
 
 /**
  * The signed-in user if their CURRENT role (read from the database on this
- * request) is one of `roles`. ADMIN_EMAILS still narrows admins (as in
- * requireAdmin); it never applies to finance or editor accounts.
+ * request) is one of `roles`.
  */
 export async function requireRole(request: NextRequest, roles: PanelRole[]): Promise<{ id: string; email?: string; role: PanelRole } | null> {
   const user = await sessionUser(request);
   if (!user) return null;
   const role = await panelRole(bearerToken(request));
   if (role === 'check_failed' || role === null || !roles.includes(role)) return null;
-  if (role === 'admin' && !isAllowedAdminEmail(user.email)) return null;
   return { ...user, role };
 }
 
