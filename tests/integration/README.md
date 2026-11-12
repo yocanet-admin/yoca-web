@@ -80,3 +80,14 @@ npx --prefix tests/integration tsx tests/integration/finance/cron-roll.mts
 
 - İnternet erişimi olmayan bir derleme ortamında `next build` Google Fonts'u indiremez; yalnızca o durumda `NEXT_FONT_GOOGLE_MOCKED_RESPONSES` ile yerel bir yazı tipi yanıtı verin. Normal ortamda gerekmez.
 - Paketler veritabanındaki sentetik `TEST …` kayıtlarını siler ve yeniden oluşturur; aylık görünüm paketi Giderler tablolarını tamamen boşaltır. Bu yüzden yalnızca `setup-db.sh` ile kurulan geçici veritabanında çalıştırın.
+
+## Kullanıcı yönetimi ve roller (v30)
+
+`setup-db.sh` v30'dan sonra `editor@test.local` (rol `editor`, şifre `itest-editor-pw`) ekler. Test geçidi Supabase Auth'un yönetici uçlarını (`auth.admin.createUser / updateUserById / listUsers`, ban) taklit eder; kullanıcılar `$ITEST_STATE/auth-users.json` dosyasında durur, `setup-db.sh` ve `/capture/reset?users=1` dosyayı sıfırlar. Davet e-postaları geçidin Resend yakalayıcısına gider (`fail4xx@…` alıcısı 422 = gönderilemedi).
+
+| Paket | Dosya | Ne sınar |
+|---|---|---|
+| Uçtan uca | `users/users-e2e.mts` | Üç rolün doğrudan veritabanı, depolama ve API erişimi; davet (tek kullanımlık bağlantı, kendi şifresi, süre, yeniden gönderme, iptal, gönderilemeyen davet, aynı e-posta, Auth'ta zaten var olan e-posta); açık oturumda rol değişikliği ve erişim kapatma; son etkin yönetici (eşzamanlı dahil); işlem geçmişi; saklanan sır yok |
+| Arayüz | `users/users-ui.cjs` | Sistem → Kullanıcılar (masaüstü/mobil, davet ve onay pencereleri), davet sayfası (390 px), editör menüsü ve izinsiz adreslerden yönlendirme, açık panelde rol değişikliği / erişim kapatma, finans kullanıcısının Kullanıcılar'a ulaşamaması, eksik lisans yapılandırmasıyla Operasyon ayarları (390 px) |
+
+Çalıştırma (Finans paketinden sonra, `panel-screens` tohumundan önce): `tsx tests/integration/users/users-e2e.mts && node tests/integration/users/users-ui.cjs "$ITEST_OUT"`.

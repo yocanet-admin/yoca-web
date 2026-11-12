@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
+import { bearerToken, requireContent } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
 import { finalizePublishRecord, imagePatch, insertPublishSnapshot, markSnapshotNotPublished, recordMediaUrls, resolveImages, withMediaUrls } from '@/lib/insightPublishServer';
 import { countSourceMarkers } from '@/lib/ai/sourceText';
 
 /**
- * Yoca — explicit publish / schedule / unpublish for one Insight (admin only).
+ * Yoca — explicit publish / schedule / unpublish for one Insight (admin or content editor).
  * The ONLY place an article becomes public. AI actions never call it.
  *  - publish:   status PUBLISHED, publish_at = now
  *  - schedule:  status SCHEDULED, publish_at = the given future time
@@ -25,7 +25,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
-  const admin = await requireAdmin(request);
+  const admin = await requireContent(request);
   if (!admin) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   const service = getSupabaseServiceRole();
   const asUser = getSupabaseAsUser(bearerToken(request));

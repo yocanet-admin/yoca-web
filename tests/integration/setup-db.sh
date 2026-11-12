@@ -21,11 +21,15 @@ psql -h "$ITEST_DIR" -p "$ITEST_PORT" -U postgres -qc "create database $ITEST_DB
 P="psql -h $ITEST_DIR -p $ITEST_PORT -U postgres -d $ITEST_DB -v ON_ERROR_STOP=1 -q"
 
 $P -f tests/integration/db/stubs.sql
+# fresh database → fresh test Auth users (only the built-in test accounts)
+rm -f "${ITEST_STATE:-/var/tmp/yoca-itest-gw}/auth-users.json"
 for f in supabase/schema.sql $(ls supabase/upgrade-v*.sql | sort -V); do
   # v12 refuses an empty admin list; v25 adds the role column
   case "$f" in *upgrade-v12-*) $P -c "insert into public.admin_users (email, note) values ('admin@test.local', 'TEST yönetici') on conflict do nothing" ;; esac
   if ! out=$($P -f "$f" 2>&1); then echo "$out" | grep -v NOTICE; echo "FAIL $f"; exit 1; fi
   case "$f" in *upgrade-v25-*) $P -c "insert into public.admin_users (email, note, role) values ('finance@test.local', 'TEST finans sorumlusu', 'finance') on conflict do nothing" ;; esac
+  # v30 adds the editor role (a ready test editor; invited users are created by the users suite)
+  case "$f" in *upgrade-v30-*) $P -c "insert into public.admin_users (email, note, role, name) values ('editor@test.local', 'TEST içerik editörü', 'editor', 'TEST Editör') on conflict do nothing" ;; esac
   echo "ok $f"
 done
 echo "ready: host=$ITEST_DIR port=$ITEST_PORT db=$ITEST_DB"

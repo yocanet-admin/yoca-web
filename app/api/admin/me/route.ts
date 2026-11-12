@@ -6,7 +6,8 @@ import { getWorkSourceStatus } from '@/lib/work';
  * Yoca cockpit — "may this signed-in user use the panel?" (admin shell check).
  * Same rule as every admin API route: valid session + optional ADMIN_EMAILS +
  * database is_admin(). Returns { ok, allowed, role, reason }; lists are never
- * exposed. role: 'admin', or 'finance' (v25: Giderler screens only).
+ * exposed. role: 'admin', 'finance' (v25: Finans screens only) or 'editor'
+ * (v30: content screens only). Only ACTIVE accounts get a role (v30).
  *   reason "not_admin"    → not in public.admin_users (or not in ADMIN_EMAILS)
  *   reason "check_failed" → is_admin() missing/unreachable (fails closed)
  * For an allowed admin it also returns `warnings`: configuration problems the
@@ -32,6 +33,8 @@ export async function GET(request: NextRequest) {
   // Finance user: only the Giderler screens (data access is enforced by RLS / can_finance()).
   // ADMIN_EMAILS narrows the ADMINS only; it is not a finance list.
   if (role === 'finance') return NextResponse.json({ ok: true, allowed: true, role: 'finance', warnings: [] });
+  // Content editor (v30): content screens only (RLS can_content(), requireContent routes).
+  if (role === 'editor') return NextResponse.json({ ok: true, allowed: true, role: 'editor', warnings: [] });
   if (role !== 'admin' || !isAllowedAdminEmail(user.email)) return NextResponse.json({ ok: true, allowed: false, reason: 'not_admin' });
   const check = await adminCheck(token);
   if (!check.ok) return NextResponse.json({ ok: true, allowed: false, reason: check.reason });

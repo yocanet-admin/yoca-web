@@ -35,16 +35,37 @@ function verify(token) {
   if (payload.exp && payload.exp * 1000 < Date.now()) return null;
   return payload;
 }
-const USERS = {
+const BUILTIN = {
   'admin@test.local': { id: '11111111-1111-4111-8111-111111111111', password: process.env.ITEST_ADMIN_PW || 'itest-admin-pw' },
   'intruder@test.local': { id: '22222222-2222-4222-8222-222222222222', password: process.env.ITEST_INTRUDER_PW || 'itest-intruder-pw' },
   'finance@test.local': { id: '33333333-3333-4333-8333-333333333333', password: process.env.ITEST_FINANCE_PW || 'itest-finance-pw' },
+  'editor@test.local': { id: '44444444-4444-4444-8444-444444444444', password: process.env.ITEST_EDITOR_PW || 'itest-editor-pw' },
 };
+// Auth users live in a file so the app, the gateway and the tests share them (like Supabase Auth).
+// Users created through the admin API (createUser) are added here; banned users cannot sign in or refresh.
+const USERS_FILE = STATE + '/auth-users.json';
+function loadUsers() {
+  let extra = {};
+  try { extra = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); } catch {}
+  const all = {};
+  for (const [email, u] of Object.entries(BUILTIN)) all[email] = { banned: false, user_metadata: {}, created_at: '2026-01-01T00:00:00Z', ...u };
+  for (const [email, u] of Object.entries(extra)) if (u === null) delete all[email]; else all[email] = { ...(all[email] || {}), ...u };
+  return all;
+}
+function saveUser(email, patch) {
+  let extra = {};
+  try { extra = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); } catch {}
+  extra[email] = patch === null ? null : { ...(loadUsers()[email] || {}), ...patch };
+  fs.writeFileSync(USERS_FILE, JSON.stringify(extra, null, 1));
+}
+const findById = (id) => Object.entries(loadUsers()).find(([, u]) => u.id === id) || null;
+function userJson(email, u) {
+  return { id: u.id, aud: 'authenticated', role: 'authenticated', email, email_confirmed_at: u.created_at, app_metadata: { provider: 'email' }, user_metadata: u.user_metadata || {}, banned_until: u.banned ? '2126-01-01T00:00:00Z' : null, created_at: u.created_at };
+}
 function session(email) {
-  const u = USERS[email];
+  const u = loadUsers()[email];
   const exp = Math.floor(Date.now() / 1000) + 3600;
-  const user = { id: u.id, aud: 'authenticated', role: 'authenticated', email, app_metadata: { provider: 'email' }, user_metadata: {}, created_at: new Date().toISOString() };
-  return { access_token: sign({ sub: u.id, email, role: 'authenticated', aud: 'authenticated', exp }), token_type: 'bearer', expires_in: 3600, expires_at: exp, refresh_token: `r-${email}`, user };
+  return { access_token: sign({ sub: u.id, email, role: 'authenticated', aud: 'authenticated', exp }), token_type: 'bearer', expires_in: 3600, expires_at: exp, refresh_token: `r-${email}`, user: userJson(email, u) };
 }
 
 // ── helpers ───────────────────────────────────────────────────
@@ -265,29 +286,70 @@ async function authRoute(req, res, url) {
     const body = JSON.parse((await readBody(req)) || '{}');
     const grant = url.searchParams.get('grant_type');
     if (grant === 'password') {
-      const u = USERS[String(body.email || '').toLowerCase()];
-      if (!u || u.password !== body.password) return send(res, 400, { error: 'invalid_grant', error_description: 'Invalid login credentials', code: 'invalid_credentials', msg: 'Invalid login credentials' });
-      return send(res, 200, session(String(body.email).toLowerCase()));
+      const email = String(body.email || '').toLowerCase();
+      const u = loadUsers()[email];
+      if (!u || !u.password || u.password !== body.password) return send(res, 400, { error: 'invalid_grant', error_description: 'Invalid login credentials', code: 'invalid_credentials', msg: 'Invalid login credentials' });
+      if (u.banned) return send(res, 400, { error: 'invalid_grant', error_description: 'User is banned', code: 'user_banned', msg: 'User is banned' });
+      return send(res, 200, session(email));
     }
     if (grant === 'refresh_token') {
       const email = String(body.refresh_token || '').replace(/^r-/, '');
-      if (!USERS[email]) return send(res, 400, { error: 'invalid_grant' });
+      const u = loadUsers()[email];
+      if (!u || u.banned) return send(res, 400, { error: 'invalid_grant', code: u ? 'user_banned' : 'refresh_token_not_found' });
       return send(res, 200, session(email));
     }
   }
   if (path === '/user') {
     const claims = verify((req.headers.authorization || '').replace(/^Bearer\s+/i, ''));
     if (!claims || claims.role !== 'authenticated') return send(res, 401, { code: 401, msg: 'invalid JWT' });
-    return send(res, 200, session(claims.email).user);
+    const u = loadUsers()[claims.email];
+    if (!u || u.id !== claims.sub) return send(res, 403, { code: 403, error_code: 'user_not_found', msg: 'User from sub claim in JWT does not exist' });
+    return send(res, 200, userJson(claims.email, u));
   }
   if (path === '/logout') return send(res, 204);
+  // Admin API (service role only), the subset supabase-js auth.admin uses.
+  if (path.startsWith('/admin/users')) {
+    const claims = verify((req.headers.authorization || '').replace(/^Bearer\s+/i, ''));
+    if (!claims || claims.role !== 'service_role') return send(res, 403, { code: 403, msg: 'User not allowed', error_code: 'not_admin' });
+    const id = path.split('/')[3] || null;
+    if (!id && req.method === 'POST') {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const email = String(body.email || '').trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return send(res, 400, { code: 400, error_code: 'validation_failed', msg: 'Unable to validate email address: invalid format' });
+      if (loadUsers()[email]) return send(res, 422, { code: 422, error_code: 'email_exists', msg: 'A user with this email address has already been registered' });
+      if (body.password != null && String(body.password).length < 6) return send(res, 422, { code: 422, error_code: 'weak_password', msg: 'Password should be at least 6 characters.' });
+      saveUser(email, { id: crypto.randomUUID(), password: body.password ?? null, banned: false, user_metadata: body.user_metadata || {}, created_at: new Date().toISOString() });
+      fs.appendFileSync(CAPTURE_FILE, JSON.stringify({ at: new Date().toISOString(), path: '/auth/admin/create', body: { email, hasPassword: body.password != null } }) + '\n');
+      return send(res, 200, userJson(email, loadUsers()[email]));
+    }
+    if (!id && req.method === 'GET') {
+      const page = Number(url.searchParams.get('page') || 1); const per = Number(url.searchParams.get('per_page') || 50);
+      const all = Object.entries(loadUsers()).map(([e, u]) => userJson(e, u));
+      return send(res, 200, { users: all.slice((page - 1) * per, page * per), aud: 'authenticated', total: all.length });
+    }
+    const hit = id ? findById(id) : null;
+    if (!hit) return send(res, 404, { code: 404, error_code: 'user_not_found', msg: 'User not found' });
+    const [email, u] = hit;
+    if (req.method === 'GET') return send(res, 200, userJson(email, u));
+    if (req.method === 'DELETE') { saveUser(email, null); return send(res, 200, {}); }
+    if (req.method === 'PUT') {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const patch = {};
+      if (body.password != null) { if (String(body.password).length < 6) return send(res, 422, { code: 422, error_code: 'weak_password', msg: 'Password should be at least 6 characters.' }); patch.password = String(body.password); }
+      if (body.ban_duration != null) patch.banned = body.ban_duration !== 'none';
+      if (body.user_metadata) patch.user_metadata = { ...(u.user_metadata || {}), ...body.user_metadata };
+      saveUser(email, patch);
+      fs.appendFileSync(CAPTURE_FILE, JSON.stringify({ at: new Date().toISOString(), path: '/auth/admin/update', body: { email, password: body.password != null, ban_duration: body.ban_duration ?? null } }) + '\n');
+      return send(res, 200, userJson(email, loadUsers()[email]));
+    }
+  }
   return send(res, 404, { msg: 'not found' });
 }
 
 async function capture(req, res, url) {
   const body = await readBody(req);
   const entry = { at: new Date().toISOString(), path: url.pathname, body: body ? (() => { try { return JSON.parse(body); } catch { return body; } })() : null };
-  if (url.pathname === '/capture/reset') { fs.writeFileSync(CAPTURE_FILE, ''); global.__flaky = new Map(); global.__resend = { keys: new Map(), mails: new Map() }; return send(res, 200, { ok: true }); }
+  if (url.pathname === '/capture/reset') { fs.writeFileSync(CAPTURE_FILE, ''); if (url.searchParams.get('users') === '1') fs.rmSync(USERS_FILE, { force: true }); global.__flaky = new Map(); global.__resend = { keys: new Map(), mails: new Map() }; return send(res, 200, { ok: true }); }
   if (url.pathname === '/capture/list') return send(res, 200, fs.existsSync(CAPTURE_FILE) ? fs.readFileSync(CAPTURE_FILE, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
   // Resend emulation (test only): Idempotency-Key replays, GET /emails/{id} with last_event,
   // and recipient hooks: fail4xx@ → 422 (not sent), err5xx@ → 500 (not sent), slow@ → sent but answers after 30 s,

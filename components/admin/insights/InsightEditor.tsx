@@ -2,6 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { DateTimeField } from '@/components/admin/DateField';
+import { usePanelRole } from '@/lib/admin/roleContext';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getAdminClient } from '@/lib/adminClient';
@@ -90,6 +91,7 @@ interface Props {
 export default function InsightEditor({ id, embedded = false, onState, reloadToken = 0, onGroupChanged }: Props) {
   const supabase = getAdminClient();
   const router = useRouter();
+  const panelRole = usePanelRole();
   const [row, setRow] = useState<EditableInsight | null>(null);
   const [categories, setCategories] = useState<InsightCategoryRow[]>([]);
   const [siblings, setSiblings] = useState<Array<SiblingInfo & { updated_at?: string }>>([]);
@@ -579,7 +581,8 @@ export default function InsightEditor({ id, embedded = false, onState, reloadTok
             </div>
           )}
 
-          {tab === 'publish' && row.id && (
+          {/* Newsletter: subscriber list + bulk e-mail → admin only (the API refuses editors too). */}
+          {tab === 'publish' && row.id && panelRole === 'admin' && (
             <div className="admin-card grid gap-2">
               <p className="text-[13px] font-semibold text-muted">Bülten (e-posta)</p>
               <NewsletterBox insightId={row.id} groupId={row.group_id} dirty={dirty} />

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
+import { bearerToken, requireContent } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser, getSupabaseServiceRole } from '@/lib/supabase';
 import { sourceFingerprint, type TranslatableFields } from '@/lib/ai/translateHelpers';
 import { readingMinutes } from '@/lib/markdown';
@@ -21,7 +21,7 @@ import {
 import { findPendingByKey, findPublishByKey, finalizePublishRecord, imagePatch, insertPublishSnapshot, lastPublishedFingerprint, markSnapshotNotPublished, recordedFirstPublish, recordMediaUrls, resolveImages, withMediaUrls } from '@/lib/insightPublishServer';
 
 /**
- * Yoca — publish several language versions of ONE article at once (admin only).
+ * Yoca — publish several language versions of ONE article at once (admin or content editor).
  *
  * POST {
  *   groupId, requestKey (uuid, one per dialog), dryRun?,
@@ -89,7 +89,7 @@ export interface ItemResult {
 const SOURCE_FIELDS = 'id,locale,title,excerpt,body_md,seo_title,meta_description,og_title,og_description,faq,tags,cover_alt,cover_caption';
 
 export async function POST(request: NextRequest) {
-  const admin = await requireAdmin(request);
+  const admin = await requireContent(request);
   if (!admin) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   const service = getSupabaseServiceRole();
   const asUser = getSupabaseAsUser(bearerToken(request));

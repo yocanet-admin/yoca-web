@@ -66,7 +66,7 @@ async function login(browser, email, pw, viewport) {
     '/admin/expenses/new', ids.expense && `/admin/expenses/${ids.expense}`,
     '/admin/sections', '/admin/menus', '/admin/content', '/admin/work', '/admin/work/results',
     '/admin/insights', '/admin/insights/new', ids.insight && `/admin/insights/${ids.insight}`,
-    '/admin/newsletter', '/admin/team', '/admin/signature', '/admin/company', '/admin/activity', '/admin/settings',
+    '/admin/newsletter', '/admin/team', '/admin/signature', '/admin/company', '/admin/activity', '/admin/settings', '/admin/users',
   ].filter(Boolean);
 
   for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) {

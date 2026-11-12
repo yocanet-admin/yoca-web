@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { getSupabaseAdmin, getSupabaseAsUser } from '@/lib/supabase';
+import { isPanelRole, type PanelRole } from '@/lib/admin/roles';
 
 /**
  * Yoca — admin API guard (server only).
@@ -68,13 +69,15 @@ export async function adminCheck(token: string): Promise<AdminCheck> {
 }
 
 /**
- * The panel role of this session (v25): 'admin' | 'finance' | null, or
- * 'check_failed'. A finance user ("Finans sorumlusu") only gets the Giderler
- * screens: is_admin() is false for them, so every admin API route
- * (requireAdmin) and every is_admin() policy still refuses them. Before v25
- * (no panel_role()) this falls back to is_admin().
+ * The panel role of this session: 'admin' | 'finance' | 'editor' | null, or
+ * 'check_failed'. The database decides (panel_role(), v25/v30): only ACTIVE
+ * accounts have a role, so a disabled or still-invited account gets null. A
+ * finance user only gets Finans, an editor only the content screens:
+ * is_admin() is false for both, so every requireAdmin route and is_admin()
+ * policy still refuses them. Before v25 (no panel_role()) this falls back to
+ * is_admin().
  */
-export async function panelRole(token: string): Promise<'admin' | 'finance' | null | 'check_failed'> {
+export async function panelRole(token: string): Promise<PanelRole | null | 'check_failed'> {
   const client = getSupabaseAsUser(token);
   if (!client) return 'check_failed';
   try {
@@ -87,7 +90,7 @@ export async function panelRole(token: string): Promise<'admin' | 'finance' | nu
       console.error('panelRole: panel_role() failed:', error.message);
       return 'check_failed';
     }
-    return data === 'admin' || data === 'finance' ? data : null;
+    return isPanelRole(data) ? data : null;
   } catch (error) {
     console.error('panelRole: panel_role() failed:', (error as Error).message);
     return 'check_failed';
@@ -106,6 +109,23 @@ export async function requireAdmin(request: NextRequest): Promise<{ id: string; 
   const check = await adminCheck(bearerToken(request));
   return check.ok ? user : null;
 }
+
+/**
+ * The signed-in user if their CURRENT role (read from the database on this
+ * request) is one of `roles`. ADMIN_EMAILS still narrows admins (as in
+ * requireAdmin); it never applies to finance or editor accounts.
+ */
+export async function requireRole(request: NextRequest, roles: PanelRole[]): Promise<{ id: string; email?: string; role: PanelRole } | null> {
+  const user = await sessionUser(request);
+  if (!user) return null;
+  const role = await panelRole(bearerToken(request));
+  if (role === 'check_failed' || role === null || !roles.includes(role)) return null;
+  if (role === 'admin' && !isAllowedAdminEmail(user.email)) return null;
+  return { ...user, role };
+}
+
+/** Content screens (Bölümler, Menüler, Metinler, Work, Insights, Ekip): admin or editor. */
+export const requireContent = (request: NextRequest) => requireRole(request, ['admin', 'editor']);
 
 /** Tiny in-memory cache per serverless instance (keeps API quotas calm). */
 const store = new Map<string, { at: number; value: unknown }>();

@@ -3,23 +3,31 @@
 /* eslint-disable @next/next/no-img-element */
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/adminClient';
 import AdminPrivacyNotice from '@/components/admin/AdminPrivacyNotice';
 import { clearDocBackups } from '@/lib/documents/backup';
 import { groupOfPath, navStorageKey, openCurrent, parseOpenGroups, patchOpenGroups, resolveOpenGroups, toggleGroup, type OpenGroups } from '@/lib/admin/navState';
 import t from '@/components/admin/tangram/tangram.module.css';
+import { PanelRoleContext } from '@/lib/admin/roleContext';
+import { canOpen, isPanelRole, isPublicAdminPath, ROLE_GROUPS, ROLE_HOME, ROLE_LABEL, visibleHref, type PanelRole } from '@/lib/admin/roles';
 
 /**
  * Yoca — admin shell (Client Component).
  * Handles Supabase Auth (email + password), renders the login screen when
  * signed out and the sidebar + content layout when signed in.
  *
- * Roles (v25, /api/admin/me): an admin sees every section; a finance user
- * ("Finans sorumlusu") sees only Finans (Genel bakış, Gelirler, Giderler). The menu is not the protection:
- * the database (RLS: is_admin() / can_finance()) and the admin API routes
- * (requireAdmin) refuse a finance user everywhere else.
+ * Roles (/api/admin/me, lib/admin/roles.ts): an admin sees every section; a
+ * finance user ("Finans sorumlusu") only Finans; a content editor (v30) only
+ * Site içeriği (Bölümler, Menüler, Metinler, Work, Insights, Ekip). A page
+ * outside the role is never rendered (redirect to the role's home). The menu is
+ * not the protection: the database (RLS: is_admin() / can_finance() /
+ * can_content()) and the API routes (requireAdmin / requireRole) refuse
+ * everything else on every request.
+ * The role is checked again on focus, every minute and on navigation: a role
+ * change applies to an open panel, and a disabled account is signed out.
+ * /admin/davet (invite: set your own password) renders without a session.
  *
  * Menu: "Kokpit" (/admin) stays visible above the groups (Genel, Operasyon,
  * Finans, Site içeriği, Sistem); every group folds open/closed from its
@@ -84,6 +92,7 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ href: string; label: str
     items: [
       { href: '/admin/company', label: 'Şirket bilgileri', icon: '§' },
       { href: '/admin/activity', label: 'İşlem geçmişi', icon: '↺' },
+      { href: '/admin/users', label: 'Kullanıcılar', icon: '☺' },
       { href: '/admin/settings', label: 'Ayarlar', icon: '⚙' },
     ],
   },
@@ -95,11 +104,12 @@ const HOME_ITEM = NAV_ITEMS[0];
 const ADMIN_GROUPS = NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => item.href !== HOME_ITEM.href) })).filter(
   (group) => group.items.length > 0,
 );
-// Finance user: the Finans section only (Genel bakış, Gelirler, Giderler).
-const FINANCE_HOME = '/admin/finance';
-const FINANCE_ROOTS = ['/admin/finance', '/admin/expenses'];
-const FINANCE_GROUPS = NAV_GROUPS.filter((group) => group.title === 'Finans');
-const financePath = (pathname: string) => FINANCE_ROOTS.some((root) => pathname === root || pathname.startsWith(`${root}/`));
+// Finance user / content editor: only their groups, only the items inside their roots.
+const groupsFor = (role: Exclude<PanelRole, 'admin'>) =>
+  NAV_GROUPS.filter((group) => ROLE_GROUPS[role].includes(group.title))
+    .map((group) => ({ ...group, items: group.items.filter((item) => visibleHref(role, item.href)) }))
+    .filter((group) => group.items.length > 0);
+const ROLE_NAV: Record<Exclude<PanelRole, 'admin'>, typeof NAV_GROUPS> = { finance: groupsFor('finance'), editor: groupsFor('editor') };
 
 // Section roots that have their own sub-pages in the menu match exactly.
 const EXACT = new Set(['/admin', '/admin/ops', '/admin/finance']);
@@ -108,7 +118,23 @@ const isActive = (href: string, pathname: string) => (EXACT.has(href) ? pathname
 const NOT_ALLOWED = 'Bu hesabın yönetim paneline erişim izni yok. Yetkili bir hesapla giriş yapın.';
 const CHECK_FAILED = 'Yönetici kontrolü yapılamadı (veritabanındaki is_admin() fonksiyonu yok ya da erişilemiyor). Güvenlik için panel açılmadı.';
 
+const ACCESS_CLOSED = 'Bu hesabın panel erişimi kapatıldı veya artık geçerli değil. Bir yöneticiyle görüşün.';
+const ROLE_CHANGED = 'Hesabınızın rolü değişti; menü ve erişiminiz yeni role göre güncellendi.';
+
+type MeBody = { ok?: boolean; allowed?: boolean; role?: string; reason?: string; warnings?: string[] };
+
+/** Invite page: no session, no menu (the token in the link is the credential). */
+function PublicFrame({ children }: { children: ReactNode }) {
+  return <div className={t.shell}><main className="relative z-[7] mx-auto grid min-h-screen w-full max-w-[460px] content-center p-4 sm:p-6">{children}</main></div>;
+}
+
 export default function AdminShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  if (isPublicAdminPath(pathname)) return <PublicFrame>{children}</PublicFrame>;
+  return <PanelShell>{children}</PanelShell>;
+}
+
+function PanelShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = getAdminClient();
@@ -121,7 +147,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const [signingIn, setSigningIn] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // Optional ADMIN_EMAILS allowlist, checked on the server (the list itself is never sent here).
-  const [access, setAccess] = useState<{ userId: string; allowed: boolean; role: 'admin' | 'finance' | null } | null>(null);
+  const [access, setAccess] = useState<{ userId: string; allowed: boolean; role: PanelRole | null } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const userId = session?.user.id ?? null;
   const token = session?.access_token ?? null;
@@ -135,12 +162,12 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       // and the database policies (v12) enforce the same admin rule on every request.
       let allowed = true;
       let reason: string | undefined;
-      let role: 'admin' | 'finance' | null = null;
+      let role: PanelRole | null = null;
       try {
         const response = await fetch('/api/admin/me', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
-        const body = (await response.json().catch(() => null)) as { ok?: boolean; allowed?: boolean; role?: string; reason?: string; warnings?: string[] } | null;
+        const body = (await response.json().catch(() => null)) as MeBody | null;
         if (!cancelled) setWarnings(Array.isArray(body?.warnings) ? body.warnings : []);
-        if (body?.role === 'admin' || body?.role === 'finance') role = body.role;
+        if (isPanelRole(body?.role)) role = body.role;
         if (response.ok && body?.ok && body.allowed === false) {
           allowed = false;
           reason = body.reason;
@@ -161,14 +188,65 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     };
   }, [userId, token, supabase, access?.userId]);
 
-  // A finance user outside Finans goes to the Finans overview (the data is closed to them anyway).
-  const isFinance = access?.role === 'finance';
+  // Live re-check: the database is the source of truth; a changed role or a closed account
+  // must not keep its old menu (its requests are already refused by the API and RLS).
+  const accessRole = access?.role ?? null;
+  const accessOk = Boolean(access?.allowed && access.userId === userId);
+  const recheckRef = useRef<() => void>(() => {});
   useEffect(() => {
-    if (isFinance && !financePath(pathname)) router.replace(FINANCE_HOME);
-  }, [isFinance, pathname, router]);
+    if (!accessOk || !token || !supabase || !userId) return;
+    let stopped = false;
+    const closeSession = async () => {
+      setError(ACCESS_CLOSED);
+      setAccess(null);
+      await supabase.auth.signOut();
+    };
+    const recheck = async () => {
+      let response: Response;
+      try {
+        response = await fetch('/api/admin/me', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+      } catch {
+        return; // offline / network problem: keep the current state (requests are checked anyway)
+      }
+      if (stopped) return;
+      if (response.status === 401) return void closeSession();
+      const body = (await response.json().catch(() => null)) as MeBody | null;
+      if (stopped || !response.ok || !body?.ok) return; // temporary problem: keep the current state
+      if (body.allowed === false) return void closeSession();
+      const next = isPanelRole(body.role) ? body.role : null;
+      if (next !== accessRole) {
+        setNotice(ROLE_CHANGED);
+        setAccess({ userId, allowed: true, role: next });
+      }
+    };
+    recheckRef.current = () => void recheck();
+    const onFocus = () => document.visibilityState === 'visible' && void recheck();
+    const timer = window.setInterval(() => void recheck(), 60_000);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      stopped = true;
+      recheckRef.current = () => {};
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [accessOk, accessRole, token, supabase, userId]);
+  // …and on every navigation inside the panel.
+  useEffect(() => {
+    recheckRef.current();
+  }, [pathname]);
+
+  // A finance user / editor outside their screens goes to their home (the data is closed to them anyway).
+  const restricted = accessRole && accessRole !== 'admin' ? accessRole : null;
+  const outside = Boolean(restricted && !canOpen(restricted, pathname));
+  useEffect(() => {
+    if (restricted && outside) router.replace(ROLE_HOME[restricted]);
+  }, [restricted, outside, router]);
+  const isFinance = restricted === 'finance';
 
   // Menu groups: which are open (per user, this browser).
-  const groups = isFinance ? FINANCE_GROUPS : ADMIN_GROUPS;
+  const groups = restricted ? ROLE_NAV[restricted] : ADMIN_GROUPS;
   const groupTitles = groups.map((group) => group.title);
   const titlesKey = groupTitles.join('|');
   const currentGroup = groupOfPath(groups, pathname, isActive);
@@ -301,7 +379,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
 
   // ── Loading (session, then the allowlist check) ─────────────
   const checkingAccess = Boolean(session) && access?.userId !== session?.user.id;
-  if (loading || checkingAccess || (session && access && !access.allowed) || (isFinance && !financePath(pathname))) {
+  if (loading || checkingAccess || (session && access && !access.allowed) || outside) {
     return (
       <div className="relative z-[7] flex min-h-screen items-center justify-center">
         <span className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-yoca-lime" />
@@ -365,7 +443,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   }
 
   // ── Authenticated layout ─────────────────────────────────────
-  const home = isFinance ? FINANCE_HOME : '/admin';
+  const home = restricted ? ROLE_HOME[restricted] : '/admin';
   const current = NAV_ITEMS.find((item) => isActive(item.href, pathname));
 
   const navLink = (item: (typeof NAV_ITEMS)[number], variant: 'sidebar' | 'drawer') => {
@@ -389,7 +467,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
 
   const navLinks = (variant: 'sidebar' | 'drawer') => (
     <nav aria-label="Admin" className={t.nav}>
-      {!isFinance && <div className={t.navGroup}>{navLink(HOME_ITEM, variant)}</div>}
+      {!restricted && <div className={t.navGroup}>{navLink(HOME_ITEM, variant)}</div>}
       {groups.map((group) => {
         const open = openGroups[group.title] === true;
         const listId = `admin-nav-${variant}-${group.title.toLocaleLowerCase('tr').replace(/[^a-z0-9]+/g, '-')}`;
@@ -430,7 +508,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         <span aria-hidden="true" className={t.avatar}>{userEmail.slice(0, 2).toLocaleUpperCase('tr') || '··'}</span>
         <span className={t.accountText}>
           <strong title={userEmail}>{userEmail}</strong>
-          {access?.role && <span>{isFinance ? 'Finans sorumlusu' : 'Yönetici'}</span>}
+          {access?.role && <span>{ROLE_LABEL[access.role]}</span>}
         </span>
       </div>
       <div className={t.accountActions}>
@@ -449,7 +527,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       {/* Mobile / tablet: compact top bar + slide-down menu */}
       <div className={t.topbar}>
         <div className={t.topbarRow}>
-          <Link href={home} className="flex-none" aria-label={isFinance ? 'Finans' : 'Kokpit'}>
+          <Link href={home} className="flex-none" aria-label={isFinance ? 'Finans' : restricted === 'editor' ? 'İçerik' : 'Kokpit'}>
             <img src="/brand/yoca-logo-primary.svg" alt="Yoca" width={96} height={26} />
           </Link>
           <span className={t.topbarTitle}>{current?.label ?? 'Yönetim'}</span>
@@ -494,7 +572,13 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               ))}
             </div>
           )}
-          {children}
+          {notice && (
+            <div role="status" className="admin-notice admin-notice-warn mb-6 flex flex-wrap items-center justify-between gap-2 text-[14px]">
+              <span>{notice}</span>
+              <button type="button" className="admin-btn admin-btn-sm" onClick={() => setNotice(null)}>Tamam</button>
+            </div>
+          )}
+          <PanelRoleContext.Provider value={access?.role ?? null}>{children}</PanelRoleContext.Provider>
           <AdminPrivacyNotice />
         </main>
       </div>

@@ -1,0 +1,272 @@
+/**
+ * Kullanıcı yönetimi + roller (v30) — LOCAL test stack only (gateway :54331, app :3190).
+ * Synthetic accounts @test.local; e-mails go to the gateway's capture (never a real inbox);
+ * Auth users live in the gateway's test file. Re-runnable after setup-db.sh.
+ *
+ * Covers: the three roles on direct database access, storage and API routes; the invite
+ * flow (link by e-mail, own password, one-time, expiry, resend, cancel, failed send,
+ * duplicates, an e-mail that already exists in Auth); role change and closed access with an
+ * OPEN session (old token); the last active admin; audit log; history kept; no secrets stored.
+ */
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+
+const APP = 'http://localhost:3190';
+const GW = 'http://127.0.0.1:54331';
+const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const PSQL = ['-h', process.env.ITEST_DIR || '/var/tmp/yoca-itest', '-p', process.env.ITEST_PORT || '54339', '-U', 'postgres', '-d', process.env.ITEST_DB || 'itest', '-Atc'];
+const sql = (q: string) => execFileSync('psql', [...PSQL, q], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const results: Array<{ name: string; ok: boolean }> = [];
+const check = (name: string, ok: boolean, detail = '') => { results.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail && !ok ? `  — ${detail}` : ''}`); };
+type Who = { db: SupabaseClient; token: string; refresh: string };
+async function login(email: string, password: string): Promise<Who | { error: string }> {
+  const db = createClient(GW, ANON, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await db.auth.signInWithPassword({ email, password });
+  if (error || !data.session) return { error: error?.message ?? 'no session' };
+  return { db, token: data.session.access_token, refresh: data.session.refresh_token };
+}
+async function as(email: string, password: string): Promise<Who> {
+  const r = await login(email, password);
+  if ('error' in r) throw new Error(`login ${email}: ${r.error}`);
+  return r;
+}
+async function api(token: string | null, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
+  const r = await fetch(APP + path, { method: body === undefined ? 'GET' : 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: r.status, json: (await r.json().catch(() => ({}))) as Record<string, unknown> };
+}
+const captured = async () => (await (await fetch(`${GW}/capture/list`)).json()) as Array<{ path: string; body: { to?: string[]; subject?: string; html?: string; email?: string } }>;
+async function lastInviteToken(to: string): Promise<string | null> {
+  const mails = (await captured()).filter((m) => m.path === '/capture/resend' && (m.body.to ?? []).includes(to));
+  const html = mails.at(-1)?.body.html ?? '';
+  return /\/admin\/davet#t=([A-Za-z0-9_-]{43})/.exec(html)?.[1] ?? null;
+}
+const PW = 'Yesil-Vadi-2026-Kalem';
+
+// ── reset (test DB + test Auth only) ─────────────────────────────────
+await fetch(`${GW}/capture/reset?users=1`);
+sql(`set session_replication_role = replica;
+  delete from admin_invites;
+  delete from admin_users where email not in ('admin@test.local', 'finance@test.local', 'editor@test.local');
+  update admin_users set role = 'admin', status = 'active', disabled_at = null where email = 'admin@test.local';
+  update admin_users set role = 'finance', status = 'active', disabled_at = null where email = 'finance@test.local';
+  insert into admin_users (email, note, role, name) values ('editor@test.local', 'TEST içerik editörü', 'editor', 'TEST Editör') on conflict (email) do update set role = 'editor', status = 'active', disabled_at = null;
+  delete from audit_log where entity = 'admin_users';
+  delete from menus where title like 'TEST USR%'; delete from insights where slug like 'test-usr-%';
+  delete from storage.objects where name like 'test-usr/%';`);
+
+const admin = await as('admin@test.local', 'itest-admin-pw');
+const fin = await as('finance@test.local', 'itest-finance-pw');
+const ed = await as('editor@test.local', 'itest-editor-pw');
+const intr = await as('intruder@test.local', 'itest-intruder-pw');
+
+/* ── 1. Database: what each role can read / write directly ─────────── */
+const canInsertMenu = async (w: Who, tag: string) => {
+  const r = await w.db.from('menus').insert({ title: `TEST USR ${tag}`, url: '/tr', location: 'footer', order_index: 990, is_active: false }).select('id');
+  return !r.error && (r.data ?? []).length === 1;
+};
+const rows = async (w: Who, table: string) => {
+  const r = await w.db.from(table).select('*').limit(5);
+  return r.error ? -1 : (r.data ?? []).length;
+};
+sql(`insert into clients (name, roles) values ('TEST USR müşteri', '{customer}') on conflict do nothing;
+     insert into contact_submissions (name, email, message) values ('TEST USR lead', 'usr-lead@test.local', 'x');
+     insert into insights (locale, slug, title, status) values ('tr', 'test-usr-draft', 'TEST USR taslak', 'DRAFT');`);
+check('db: editor manages content (menus insert, Insights draft read + update, team / Work read)', (await canInsertMenu(ed, 'editor')) && (await rows(ed, 'insights')) > 0 && !(await ed.db.from('insights').update({ excerpt: 'TEST USR editör' }).eq('slug', 'test-usr-draft')).error && sql(`select excerpt from insights where slug = 'test-usr-draft'`) === 'TEST USR editör' && (await rows(ed, 'team_members')) >= 0 && (await rows(ed, 'case_studies')) >= 0);
+const edAbout = await ed.db.from('cockpit_settings').upsert({ key: 'about_intro', value: { status: 'draft', texts: { tr: 'TEST USR' } }, updated_at: new Date().toISOString() });
+const edOther = await ed.db.from('cockpit_settings').upsert({ key: 'site_copy', value: { hacked: true }, updated_at: new Date().toISOString() });
+check('db: editor may write the Hakkımızda draft setting only (other settings refused)', !edAbout.error && Boolean(edOther.error) && !sql(`select value::text from cockpit_settings where key = 'site_copy'`).includes('hacked'), `${edAbout.error?.message ?? ''} | ${edOther.error?.message ?? 'other accepted'}`);
+const closedForEditor = ['clients', 'contact_submissions', 'deals', 'ops_services', 'ops_payments', 'fin_expenses', 'fin_receivables', 'doc_documents', 'audit_log', 'newsletter_subscribers', 'monitored_sites', 'admin_users', 'admin_invites', 'seo_keywords'];
+const leaks: string[] = [];
+for (const t of closedForEditor) if ((await rows(ed, t)) > 0) leaks.push(t);
+check('db: editor sees no Operasyon, Finans, CRM / lead, documents, newsletter, audit, users or SEO rows', leaks.length === 0, leaks.join(', '));
+const edWriteClient = await ed.db.from('clients').insert({ name: 'TEST USR editör müşteri', roles: ['customer'] }).select('id');
+check('db: editor cannot write customer data', Boolean(edWriteClient.error) || (edWriteClient.data ?? []).length === 0);
+check('db: finance keeps Finans (receivables / expenses readable) but cannot write content', (await rows(fin, 'fin_receivables')) >= 0 && (await fin.db.from('fin_expenses').select('id').limit(1)).error === null && !(await canInsertMenu(fin, 'finance')));
+check('db: finance sees no content-management data beyond public rows (drafts, revisions)', (await fin.db.from('insights').select('id').eq('slug', 'test-usr-draft')).data?.length === 0 && (await rows(fin, 'insight_revisions')) <= 0);
+check('db: admin keeps everything (content, customers, users list)', (await canInsertMenu(admin, 'admin')) && (await rows(admin, 'clients')) > 0 && !(await admin.db.rpc('users_list')).error);
+const ul = await Promise.all([ed, fin, intr].map((w) => w.db.rpc('users_list')));
+check('db: users_list() refused for editor, finance and a signed-in non-member', ul.every((r) => Boolean(r.error)), ul.map((r) => r.error?.message ?? 'ok').join(' | '));
+const edInvite = await ed.db.rpc('users_invite', { p_email: 'x@test.local', p_name: 'X', p_role: 'admin', p_token_hash: 'a'.repeat(64), p_expires_at: new Date(Date.now() + 3600e3).toISOString() });
+const edRole = await ed.db.rpc('users_set_role', { p_email: 'editor@test.local', p_role: 'admin' });
+check('db: an editor cannot invite or raise anyone’s role (not even their own)', Boolean(edInvite.error) && Boolean(edRole.error) && sql(`select role from admin_users where email = 'editor@test.local'`) === 'editor');
+const lookup = await ed.db.rpc('invite_lookup', { p_token_hash: 'a'.repeat(64) });
+check('db: invite_lookup / invite_accept are server-only (refused for signed-in users)', Boolean(lookup.error));
+
+// storage: content media yes, private finance / ops / document files no
+const up = async (w: Who, bucket: string) => !(await w.db.storage.from(bucket).upload(`test-usr/${Date.now()}-${Math.random()}.txt`, new Blob(['x'], { type: 'text/plain' }), { contentType: 'text/plain' })).error;
+const edBuckets = { insights: await up(ed, 'insights'), 'team-photos': await up(ed, 'team-photos'), 'insight-drafts': await up(ed, 'insight-drafts'), 'case-evidence': await up(ed, 'case-evidence'), 'fin-docs': await up(ed, 'fin-docs'), 'ops-docs': await up(ed, 'ops-docs'), 'yoca-docs': await up(ed, 'yoca-docs') };
+check('storage: editor uploads content media (insights, team photos, drafts, case evidence)', edBuckets.insights && edBuckets['team-photos'] && edBuckets['insight-drafts'] && edBuckets['case-evidence'], JSON.stringify(edBuckets));
+check('storage: editor cannot upload to finance, Operasyon or document buckets', !edBuckets['fin-docs'] && !edBuckets['ops-docs'] && !edBuckets['yoca-docs'], JSON.stringify(edBuckets));
+check('storage: finance cannot upload content media', !(await up(fin, 'insights')) && !(await up(fin, 'team-photos')));
+
+/* ── 2. API routes per role ────────────────────────────────────────── */
+const me = await Promise.all([admin, fin, ed, intr].map((w) => api(w.token, '/api/admin/me')));
+check('api: /me reports admin / finance / editor; a non-member is not allowed', me[0].json.role === 'admin' && me[1].json.role === 'finance' && me[2].json.role === 'editor' && me[3].json.allowed === false, me.map((m) => `${m.json.role ?? m.json.reason}`).join(','));
+const usersApi = await Promise.all([admin, fin, ed, intr].map((w) => api(w.token, '/api/admin/users')));
+check('api: user management is admin only', usersApi[0].status === 200 && usersApi.slice(1).every((r) => r.status === 401), usersApi.map((r) => r.status).join(','));
+const edSettings = await api(ed.token, '/api/admin/site-settings');
+check('api: editor gets only the Hakkımızda draft from site settings (no company / KVKK / response data)', edSettings.status === 200 && 'about' in edSettings.json && !('company' in edSettings.json) && !('responseTimes' in edSettings.json) && !('kvkk' in edSettings.json));
+const edCompany = await api(ed.token, '/api/admin/site-settings', { key: 'company_info', value: { legalName: 'TEST USR' } });
+const edAboutApi = await api(ed.token, '/api/admin/site-settings', { key: 'about_intro', value: { status: 'draft', texts: { tr: 'TEST USR api' } } });
+check('api: editor cannot save company info; can save the Hakkımızda draft', edCompany.status === 403 && edAboutApi.status === 200, `${edCompany.status} ${edAboutApi.status}`);
+const contentRoutes = ['/api/admin/insights/images?groupId=00000000-0000-4000-8000-000000000000'];
+const edContent = await Promise.all(contentRoutes.map((p) => api(ed.token, p)));
+const finContent = await Promise.all(contentRoutes.map((p) => api(fin.token, p)));
+const edAi = await api(ed.token, '/api/ai', { action: 'fetch_sources', urls: [] });
+const finAi = await api(fin.token, '/api/ai', { action: 'fetch_sources', urls: [] });
+const edPublish = await api(ed.token, '/api/admin/insights/publish', { insightId: 'not-an-id' });
+check('api: editor reaches the content routes (Insights images, AI studio, publish validation); finance does not', edContent.every((r) => r.status !== 401) && edAi.status !== 401 && edPublish.status === 400 && finContent.every((r) => r.status === 401) && finAi.status === 401, `${edContent.map((r) => r.status)} ai=${edAi.status} pub=${edPublish.status} fin=${finContent.map((r) => r.status)}/${finAi.status}`);
+const adminOnly = ['/api/admin/newsletter?groupId=00000000-0000-4000-8000-000000000000', '/api/admin/ops/settings', '/api/admin/traffic', '/api/admin/seo', '/api/admin/ai', '/api/admin/health', '/api/admin/documents?list=1'];
+const edAdminOnly = await Promise.all(adminOnly.map((p) => api(ed.token, p)));
+check('api: editor is refused on newsletter, Operasyon, traffic, SEO, AI settings, health and documents', edAdminOnly.every((r) => r.status === 401), adminOnly.map((p, i) => `${p.split('?')[0]}=${edAdminOnly[i].status}`).join(' '));
+const edFin = await fetch(`${APP}/api/admin/fin/import`, { method: 'POST', headers: { Authorization: `Bearer ${ed.token}` }, body: new FormData() });
+check('api: editor is refused on the Finans import', edFin.status === 403 || edFin.status === 401, String(edFin.status));
+const noToken = await api(null, '/api/admin/users');
+check('api: no session → 401', noToken.status === 401);
+
+/* ── 3. Invite flow ────────────────────────────────────────────────── */
+const inv = await api(admin.token, '/api/admin/users', { action: 'invite', email: 'Yeni.Editor@Test.Local ', name: 'TEST Yeni Editör', role: 'editor' });
+const tok1 = await lastInviteToken('yeni.editor@test.local');
+check('invite: admin invites (e-mail normalised); the e-mail is accepted by the service and carries a one-time link', inv.status === 200 && inv.json.sent === true && Boolean(tok1), JSON.stringify(inv.json));
+const row1 = sql(`select u.status || '|' || u.role || '|' || i.send_status || '|' || (i.token_hash = '${createHash('sha256').update(tok1 ?? '').digest('hex')}') from admin_users u join admin_invites i using (email) where email = 'yeni.editor@test.local'`);
+check('invite: row "invited" + invite "sent"; only the token HASH is stored', row1 === 'invited|editor|sent|true', row1);
+check('invite: the raw token is stored nowhere (invites, users, audit log)', sql(`select count(*) from admin_invites where token_hash like '%${tok1}%'`) === '0' && sql(`select count(*) from audit_log where coalesce(changes::text,'') || coalesce(label,'') like '%${tok1}%'`) === '0');
+const noAccessYet = await login('yeni.editor@test.local', PW);
+check('invite: an invited person cannot sign in before setting a password', 'error' in noAccessYet);
+const dup = await api(admin.token, '/api/admin/users', { action: 'invite', email: 'yeni.editor@test.local', name: 'Tekrar', role: 'admin' });
+const dupExisting = await api(admin.token, '/api/admin/users', { action: 'invite', email: 'FINANCE@test.local', name: 'Tekrar', role: 'editor' });
+check('invite: the same e-mail cannot be invited twice (pending invite / existing account, clear reasons)', dup.status === 409 && dup.json.code === 'pending_invite' && dupExisting.status === 409 && dupExisting.json.code === 'exists' && sql(`select count(*) from admin_users where email in ('yeni.editor@test.local', 'finance@test.local')`) === '2' && sql(`select role from admin_users where email = 'finance@test.local'`) === 'finance', `${dup.json.code} ${dupExisting.json.code}`);
+const bad = await Promise.all([
+  api(admin.token, '/api/admin/users', { action: 'invite', email: 'not-an-email', name: 'X', role: 'editor' }),
+  api(admin.token, '/api/admin/users', { action: 'invite', email: 'x@test.local', name: '', role: 'editor' }),
+  api(admin.token, '/api/admin/users', { action: 'invite', email: 'x@test.local', name: 'X', role: 'superuser' }),
+]);
+check('invite: invalid e-mail, empty name, unknown role refused', bad.every((r) => r.status === 400) && sql(`select count(*) from admin_users where email = 'x@test.local'`) === '0');
+
+const chk = await api(null, '/api/admin/invite', { token: tok1 });
+check('accept: the link shows name, e-mail and role (no session needed)', chk.json.state === 'valid' && chk.json.email === 'yeni.editor@test.local' && chk.json.role === 'İçerik editörü');
+const weak = await api(null, '/api/admin/invite', { token: tok1, password: 'kisa' });
+check('accept: a weak password is refused; the invite stays usable', weak.status === 400 && sql(`select status from admin_users where email = 'yeni.editor@test.local'`) === 'invited');
+const acc = await api(null, '/api/admin/invite', { token: tok1, password: PW });
+check('accept: the invitee sets their own password → account active', acc.status === 200 && acc.json.state === 'accepted' && sql(`select status || '|' || (user_id is not null) from admin_users where email = 'yeni.editor@test.local'`) === 'active|true', JSON.stringify(acc.json));
+const reuse = await api(null, '/api/admin/invite', { token: tok1, password: 'Baska-Bir-Sifre-99' });
+check('accept: the link works once', reuse.json.state === 'used' && reuse.status === 200);
+const newEd = await as('yeni.editor@test.local', PW);
+const newMe = await api(newEd.token, '/api/admin/me');
+check('accept: the new user signs in with their own password and gets the invited role', newMe.json.role === 'editor');
+check('accept: no password is stored or logged by the app (only Auth has it)', sql(`select count(*) from audit_log where coalesce(changes::text,'') like '%${PW}%'`) === '0' && sql(`select count(*) from admin_invites where coalesce(send_error,'') like '%${PW}%'`) === '0');
+const createdAuth = (await captured()).filter((m) => m.path === '/auth/admin/create' && m.body.email === 'yeni.editor@test.local');
+check('accept: exactly one Auth user created for the invitee', createdAuth.length === 1);
+
+// resend → the old link stops working; the new one works
+await api(admin.token, '/api/admin/users', { action: 'invite', email: 'ikinci@test.local', name: 'TEST İkinci', role: 'finance' });
+const tA = await lastInviteToken('ikinci@test.local');
+const rs = await api(admin.token, '/api/admin/users', { action: 'resend', email: 'ikinci@test.local' });
+const tB = await lastInviteToken('ikinci@test.local');
+const oldState = await api(null, '/api/admin/invite', { token: tA });
+const newState = await api(null, '/api/admin/invite', { token: tB });
+check('resend: a new link is sent; the previous one is revoked', rs.status === 200 && tA !== tB && oldState.json.state === 'revoked' && newState.json.state === 'valid', `${rs.status} ${oldState.json.state} ${newState.json.state}`);
+const resendActive = await api(admin.token, '/api/admin/users', { action: 'resend', email: 'yeni.editor@test.local' });
+check('resend: refused for an account that is already active', resendActive.status === 409 && resendActive.json.code === 'not_invited');
+
+// expiry
+sql(`update admin_invites set expires_at = now() - interval '1 minute' where email = 'ikinci@test.local' and revoked_at is null`);
+const exp = await api(null, '/api/admin/invite', { token: tB });
+const expAcc = await api(null, '/api/admin/invite', { token: tB, password: PW });
+check('expiry: an expired link shows "expired" and cannot be used', exp.json.state === 'expired' && (expAcc.json.state === 'expired' || expAcc.status === 409) && sql(`select status from admin_users where email = 'ikinci@test.local'`) === 'invited');
+const listExp = await api(admin.token, '/api/admin/users');
+const ikinci = (listExp.json.users as Array<Record<string, unknown>>).find((u) => u.email === 'ikinci@test.local');
+check('expiry: the list shows it as an invite (resend / cancel possible)', ikinci?.status === 'invited' && ikinci?.invite_open === true);
+
+// cancel
+const rv = await api(admin.token, '/api/admin/users', { action: 'revoke', email: 'ikinci@test.local' });
+const afterRv = await api(null, '/api/admin/invite', { token: tB });
+check('cancel: the pending invite is removed; its link is invalid; the e-mail can be invited again', rv.status === 200 && afterRv.json.state === 'invalid' && sql(`select count(*) from admin_users where email = 'ikinci@test.local'`) === '0');
+const revokeActive = await api(admin.token, '/api/admin/users', { action: 'revoke', email: 'yeni.editor@test.local' });
+check('cancel: refused for an active account (use "close access" instead)', revokeActive.status === 409 && sql(`select status from admin_users where email = 'yeni.editor@test.local'`) === 'active');
+
+// failed send is never reported as sent
+const failInv = await api(admin.token, '/api/admin/users', { action: 'invite', email: 'fail4xx@test.local', name: 'TEST Gönderilemez', role: 'editor' });
+const failRow = sql(`select u.status || '|' || i.send_status || '|' || (i.revoked_at is not null) from admin_users u join admin_invites i using (email) where email = 'fail4xx@test.local'`);
+const failList = ((await api(admin.token, '/api/admin/users')).json.users as Array<Record<string, unknown>>).find((u) => u.email === 'fail4xx@test.local');
+check('send failure: the API answers with an error (not success); the link is revoked; the list shows "gönderilemedi"', failInv.status === 502 && failInv.json.ok === false && failRow === 'invited|failed|true' && failList?.invite_send_status === 'failed', `${failInv.status} ${failRow}`);
+const failResend = await api(admin.token, '/api/admin/users', { action: 'resend', email: 'fail4xx@test.local' });
+check('send failure: a failing resend is also reported as failed', failResend.status === 502);
+await api(admin.token, '/api/admin/users', { action: 'revoke', email: 'fail4xx@test.local' });
+
+// an e-mail that already has an Auth user (but no panel account): the link proves the inbox; no second Auth user
+await api(admin.token, '/api/admin/users', { action: 'invite', email: 'intruder@test.local', name: 'TEST Var Olan', role: 'finance' });
+const tI = await lastInviteToken('intruder@test.local');
+const accI = await api(null, '/api/admin/invite', { token: tI, password: PW });
+const intrNew = await login('intruder@test.local', PW);
+const intrOld = await login('intruder@test.local', 'itest-intruder-pw');
+check('existing Auth user: accepted without creating a second Auth user; the new password works, the old one not', accI.status === 200 && !('error' in intrNew) && 'error' in intrOld && (await captured()).filter((m) => m.path === '/auth/admin/create' && m.body.email === 'intruder@test.local').length === 0);
+
+/* ── 4. Role change with an OPEN session ───────────────────────────── */
+const oldToken = newEd; // signed in as editor before the change
+const toFin = await api(admin.token, '/api/admin/users', { action: 'role', email: 'yeni.editor@test.local', role: 'finance' });
+const afterMe = await api(oldToken.token, '/api/admin/me');
+const afterContent = await canInsertMenu(oldToken, 'after-role');
+const afterFin = await oldToken.db.from('fin_expenses').select('id').limit(1);
+const afterApi = await api(oldToken.token, '/api/ai', { action: 'fetch_sources', urls: [] });
+check('role change: the open session (same token) immediately has the NEW rights only', toFin.status === 200 && afterMe.json.role === 'finance' && !afterContent && !afterFin.error && afterApi.status === 401, `${afterMe.json.role} content=${afterContent} ai=${afterApi.status}`);
+const toSelf = await api(admin.token, '/api/admin/users', { action: 'role', email: 'admin@test.local', role: 'editor' });
+check('role change: an admin cannot change their own role here', toSelf.status === 409 && toSelf.json.code === 'self' && sql(`select role from admin_users where email = 'admin@test.local'`) === 'admin');
+
+/* ── 5. Close access with an OPEN session; history kept; reopen ───── */
+await oldToken.db.from('fin_expenses').select('id').limit(1); // (finance now)
+const auditBefore = sql(`select count(*) from audit_log`);
+const off = await api(admin.token, '/api/admin/users', { action: 'access', email: 'yeni.editor@test.local', enabled: false });
+const offMe = await api(oldToken.token, '/api/admin/me');
+const offFin = await oldToken.db.from('fin_expenses').select('id').limit(1);
+const offFinRows = (offFin.data ?? []).length;
+const offLogin = await login('yeni.editor@test.local', PW);
+const offRefresh = await oldToken.db.auth.refreshSession({ refresh_token: oldToken.refresh });
+check('close access: the open session is refused by the API and the database at once', off.status === 200 && !off.json.warning && offMe.json.allowed === false && (Boolean(offFin.error) || offFinRows === 0) && !(await canInsertMenu(oldToken, 'after-off')), `${JSON.stringify(off.json)} me=${JSON.stringify(offMe.json)}`);
+check('close access: sign-in and token refresh are refused (Auth ban)', 'error' in offLogin && Boolean(offRefresh.error));
+check('close access: nothing is deleted (account row + its history stay)', sql(`select status from admin_users where email = 'yeni.editor@test.local'`) === 'disabled' && Number(sql(`select count(*) from audit_log`)) > Number(auditBefore) && sql(`select count(*) from audit_log where actor = 'yeni.editor@test.local' or entity_id = 'yeni.editor@test.local'`) !== '0');
+const listOff = ((await api(admin.token, '/api/admin/users')).json.users as Array<Record<string, unknown>>).find((u) => u.email === 'yeni.editor@test.local');
+check('close access: the list shows "Erişim kapalı" state (disabled, kept)', listOff?.status === 'disabled');
+const on = await api(admin.token, '/api/admin/users', { action: 'access', email: 'yeni.editor@test.local', enabled: true });
+const onLogin = await login('yeni.editor@test.local', PW);
+check('reopen: sign-in works again with the same password, with the current role', on.status === 200 && !('error' in onLogin) && (await api((onLogin as Who).token, '/api/admin/me')).json.role === 'finance');
+const offSelf = await api(admin.token, '/api/admin/users', { action: 'access', email: 'admin@test.local', enabled: false });
+check('close access: an admin cannot close their own access here', offSelf.status === 409 && offSelf.json.code === 'self');
+
+/* ── 6. Last active admin ──────────────────────────────────────────── */
+let lastAdmin = '';
+try { sql(`update admin_users set role = 'editor' where email = 'admin@test.local'`); } catch (e) { lastAdmin = String((e as Error).message); }
+let lastAdminDel = '';
+try { sql(`delete from admin_users where email = 'admin@test.local'`); } catch (e) { lastAdminDel = String((e as Error).message); }
+let lastAdminOff = '';
+try { sql(`update admin_users set status = 'disabled' where email = 'admin@test.local'`); } catch (e) { lastAdminOff = String((e as Error).message); }
+check('last admin: demoting, disabling or deleting the only active admin is refused (even from SQL)', /Son etkin yönetici/.test(lastAdmin) && /Son etkin yönetici/.test(lastAdminDel) && /Son etkin yönetici/.test(lastAdminOff) && sql(`select role || status from admin_users where email = 'admin@test.local'`) === 'adminactive');
+// a second admin through the invite flow; two admins demoting each other at the same time → one must fail
+await api(admin.token, '/api/admin/users', { action: 'invite', email: 'admin2@test.local', name: 'TEST Yönetici 2', role: 'admin' });
+await api(null, '/api/admin/invite', { token: await lastInviteToken('admin2@test.local'), password: PW });
+const admin2 = await as('admin2@test.local', PW);
+const [d1, d2] = await Promise.all([
+  api(admin.token, '/api/admin/users', { action: 'role', email: 'admin2@test.local', role: 'editor' }),
+  api(admin2.token, '/api/admin/users', { action: 'role', email: 'admin@test.local', role: 'editor' }),
+]);
+const activeAdmins = sql(`select count(*) from admin_users where role = 'admin' and status = 'active'`);
+const st = [d1.status, d2.status].sort();
+check('last admin: two admins demoting each other concurrently → exactly one succeeds, one admin remains', st[0] === 200 && [401, 403, 409].includes(st[1]) && activeAdmins === '1', `${d1.status}/${d1.json.code} ${d2.status}/${d2.json.code} admins=${activeAdmins}`);
+sql(`update admin_users set role = 'admin' where email in ('admin@test.local', 'admin2@test.local')`);
+
+/* ── 7. Audit log ──────────────────────────────────────────────────── */
+const actions = sql(`select string_agg(distinct action, ',' order by action) from audit_log where entity = 'admin_users'`);
+const want = ['disable', 'enable', 'invite', 'invite_accept', 'invite_resend', 'invite_revoke', 'invite_send_failed', 'role_change'];
+check('audit: every user action is in İşlem geçmişi (invite, resend, cancel, failed send, accept, role, close, reopen)', want.every((a) => actions.split(',').includes(a)), actions);
+check('audit: actor is the admin (or the invitee for acceptance)', sql(`select count(*) from audit_log where entity = 'admin_users' and action = 'role_change' and actor = 'admin@test.local'`) !== '0' && sql(`select count(*) from audit_log where entity = 'admin_users' and action = 'invite_accept' and actor = 'davet: yeni.editor@test.local'`) === '1');
+const adminAudit = await rows(admin, 'audit_log');
+check('audit: readable by admins only (editor/finance get nothing)', adminAudit > 0 && (await rows(ed, 'audit_log')) <= 0 && (await rows(fin, 'audit_log')) <= 0);
+
+// leave the test Auth users as built (other suites use the built-in passwords)
+await fetch(`${GW}/capture/reset?users=1`);
+sql(`delete from admin_users where email in ('intruder@test.local'); delete from menus where title like 'TEST USR%';`);
+
+const failed = results.filter((r) => !r.ok).length;
+console.log(`\n${results.length - failed}/${results.length} passed`);
+process.exit(failed ? 1 : 0);

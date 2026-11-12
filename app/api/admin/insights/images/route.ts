@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/cockpit/auth';
+import { requireContent } from '@/lib/cockpit/auth';
 import { getSupabaseServiceRole } from '@/lib/supabase';
 import { CROP_SIZES, DRAFT_BUCKET, imageSize, readDraftImage, serverCrop, shouldBrand, storeDraftImage } from '@/lib/ai/images';
 import { OpenAIError } from '@/lib/ai/openai';
 
 /**
- * Yoca — Insights image library (admin only).
+ * Yoca — Insights image library (admin or content editor).
  * GET  ?groupId=…            → images of the article group with 1-hour signed URLs
  * POST multipart (file, groupId, insightId, kind=upload|crop, parentId?, crop?, alt?)
  *                            → own upload or a social/mobile crop, stored PRIVATE
@@ -25,7 +25,7 @@ const unauthorized = () => NextResponse.json({ ok: false, error: 'unauthorized' 
 const isId = (v: unknown) => typeof v === 'string' && /^[0-9a-f-]{36}$/.test(v);
 
 export async function GET(request: NextRequest) {
-  if (!(await requireAdmin(request))) return unauthorized();
+  if (!(await requireContent(request))) return unauthorized();
   const supabase = getSupabaseServiceRole();
   if (!supabase) return NextResponse.json({ ok: false, error: 'SUPABASE_SERVICE_ROLE_KEY yok.' }, { status: 503 });
   const groupId = request.nextUrl.searchParams.get('groupId') ?? '';
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const admin = await requireAdmin(request);
+  const admin = await requireContent(request);
   if (!admin) return unauthorized();
   const supabase = getSupabaseServiceRole();
   if (!supabase) return NextResponse.json({ ok: false, error: 'SUPABASE_SERVICE_ROLE_KEY yok.' }, { status: 503 });

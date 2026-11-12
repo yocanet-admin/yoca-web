@@ -502,7 +502,9 @@ test('every SEO admin route checks requireAdmin first; the cron route checks CRO
 test('finance role: SEO is not a finance path (menu hidden + redirect), it sits in Genel next to Trafik; RLS is admin-only', () => {
   const shell = read('components/admin/AdminShell.tsx');
   assert.match(shell, /\{ href: '\/admin\/traffic', label: 'Trafik', icon: '↗' \},\n\s+\{ href: '\/admin\/seo', label: 'SEO'/);
-  assert.match(shell, /const FINANCE_ROOTS = \['\/admin\/finance', '\/admin\/expenses'\];/);
+  // v30: the role roots live in lib/admin/roles.ts (the shell redirects with canOpen)
+  assert.match(read('lib/admin/roles.ts'), /finance: \['\/admin\/finance', '\/admin\/expenses'\],/);
+  assert.match(shell, /canOpen\(restricted, pathname\)/);
   const sql = read('supabase/upgrade-v27-seo.sql');
   assert.match(sql, /using \(public\.is_admin\(\)\) with check \(public\.is_admin\(\)\)/);
   assert.doesNotMatch(sql, /can_finance/);

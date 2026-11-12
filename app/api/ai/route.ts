@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/cockpit/auth';
+import { requireContent } from '@/lib/cockpit/auth';
 import { getSupabaseServiceRole } from '@/lib/supabase';
 import { editImage, generateImage, hasOpenAIKey, OpenAIError, type OpenAIResult, type OpenAIUsage } from '@/lib/ai/openai';
 import { mockEnabled } from '@/lib/ai/mock';
@@ -28,7 +28,7 @@ import { buildEditPrompt, buildImagePrompt, imageSize, readDraftImage, storeDraf
 /**
  * Yoca — admin AI endpoint (server only).
  * - Every request: valid session + ADMIN_EMAILS (optional) + database is_admin()
- *   (requireAdmin). The OpenAI key never leaves the server.
+ *   (requireContent: admin or content editor). The OpenAI key never leaves the server.
  * - Per-user rate limit, request size cap, per-request token caps, monthly
  *   budget, idempotency key per click (double clicks never start a second job),
  *   limited retries inside the client (no fix loops).
@@ -76,7 +76,7 @@ async function saveProposal(insightId: string, runId: string, createdBy: string,
 }
 
 export async function POST(request: NextRequest) {
-  const user = await requireAdmin(request);
+  const user = await requireContent(request);
   if (!user) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   if (rateLimited(user.id)) return NextResponse.json({ ok: false, error: 'Saatlik yapay zekâ sınırı doldu; biraz sonra tekrar deneyin.' }, { status: 429 });
 

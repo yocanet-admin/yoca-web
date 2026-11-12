@@ -29,5 +29,6 @@ alter default privileges in schema public grant execute on functions to anon, au
 insert into auth.users (id, email) values
   ('11111111-1111-4111-8111-111111111111', 'admin@test.local'),
   ('22222222-2222-4222-8222-222222222222', 'intruder@test.local'),
-  ('33333333-3333-4333-8333-333333333333', 'finance@test.local')
+  ('33333333-3333-4333-8333-333333333333', 'finance@test.local'),
+  ('44444444-4444-4444-8444-444444444444', 'editor@test.local')
 on conflict do nothing;

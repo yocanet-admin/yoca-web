@@ -183,8 +183,8 @@ export default function OpsSettingsPage() {
           <dl className="grid gap-2 text-[13px]">
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2">
               <dt className="text-muted">Lisans API’si (license.yoca.net)</dt>
-              <dd className="flex flex-wrap items-center gap-2">
-                {env.licenseApi.configured ? <Badge tone="ok">Yapılandırıldı</Badge> : <><Badge tone="warn">Bağlı değil</Badge><span className="text-[12px] text-subtle">Eksik: {env.licenseApi.missing.map((m) => <code key={m} className="ms-1 text-yoca-lime">{m}</code>)}</span></>}
+              <dd className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+                {env.licenseApi.configured ? <Badge tone="ok">Yapılandırıldı</Badge> : <><Badge tone="warn">Bağlı değil</Badge><span className="min-w-0 max-w-full text-[12px] text-subtle [overflow-wrap:anywhere]">Eksik: {env.licenseApi.missing.map((m) => <code key={m} className="ms-1 inline-block max-w-full break-all text-yoca-lime">{m}</code>)}</span></>}
               </dd>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2">

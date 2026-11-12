@@ -6,6 +6,7 @@ import { Card, Notice } from '@/components/admin/cockpit/Widgets';
 import { getAdminClient } from '@/lib/adminClient';
 import { LEAD_LABEL, fmtDate, timeAgo, type LeadStatus } from '@/lib/cockpit/client';
 import { DEAL_LABEL, type DealStage } from '@/lib/cockpit/crm';
+import { isPanelRole, ROLE_LABEL } from '@/lib/admin/roles';
 
 /**
  * Yoca Admin — İşlem geçmişi (audit log, upgrade-v9).
@@ -39,6 +40,7 @@ const ENTITY: Record<string, string> = {
   insights: 'Yazı',
   insight_categories: 'Kategori',
   cockpit_settings: 'Ayar',
+  admin_users: 'Kullanıcı',
 };
 
 const AREAS: Record<string, string[]> = {
@@ -47,9 +49,17 @@ const AREAS: Record<string, string[]> = {
   Siteler: ['monitored_sites'],
   'Site içeriği': ['sections', 'menus', 'site_content', 'team_members', 'case_studies', 'insights', 'insight_categories'],
   Ayarlar: ['cockpit_settings'],
+  Kullanıcılar: ['admin_users'],
 };
 
-const VERB: Record<string, string> = { insert: 'eklendi', update: 'güncellendi', delete: 'silindi' };
+const VERB: Record<string, string> = {
+  insert: 'eklendi', update: 'güncellendi', delete: 'silindi',
+  // Kullanıcılar (v30)
+  invite: 'davet edildi', invite_resend: 'için davet yeniden gönderildi', invite_send_failed: 'daveti gönderilemedi',
+  invite_revoke: 'daveti iptal edildi', invite_accept: 'daveti kabul etti, hesap açıldı', role_change: 'rolü değiştirildi',
+  disable: 'erişimi kapatıldı', enable: 'erişimi yeniden açıldı',
+};
+const USER_STATUS: Record<string, string> = { active: 'etkin', invited: 'davet bekliyor', disabled: 'erişim kapalı' };
 
 const FIELD: Record<string, string> = {
   status: 'durum',
@@ -77,6 +87,9 @@ const FIELD: Record<string, string> = {
   is_visible: 'görünür',
   order_index: 'sıra',
   publish_at: 'yayın zamanı',
+  role: 'rol',
+  invite_expires_at: 'davet geçerlilik sonu',
+  send_error: 'gönderim hatası',
 };
 
 const INSIGHT_STATUS: Record<string, string> = { DRAFT: 'Taslak', IN_REVIEW: 'İncelemede', SCHEDULED: 'Zamanlanmış', PUBLISHED: 'Yayında', ARCHIVED: 'Arşivde' };
@@ -84,6 +97,9 @@ const INSIGHT_STATUS: Record<string, string> = { DRAFT: 'Taslak', IN_REVIEW: 'İ
 function show(field: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return 'boş';
   if (typeof value === 'boolean') return value ? 'evet' : 'hayır';
+  if (field === 'role' && isPanelRole(value)) return ROLE_LABEL[value];
+  if (field === 'invite_expires_at' && typeof value === 'string') return fmtDate(value);
+  if (field === 'status' && typeof value === 'string' && value in USER_STATUS) return USER_STATUS[value];
   if (field === 'status' && typeof value === 'string' && value in LEAD_LABEL) return LEAD_LABEL[value as LeadStatus];
   if (field === 'status' && typeof value === 'string' && value in INSIGHT_STATUS) return INSIGHT_STATUS[value];
   if (field === 'stage' && typeof value === 'string' && value in DEAL_LABEL) return DEAL_LABEL[value as DealStage];
@@ -97,6 +113,7 @@ function href(entry: Entry): string | null {
   if (entry.entity === 'clients') return `/admin/clients?id=${entry.entity_id}`;
   if (entry.entity === 'monitored_sites') return '/admin/sites';
   if (entry.entity === 'insights') return `/admin/insights/${entry.entity_id}`;
+  if (entry.entity === 'admin_users') return '/admin/users';
   return null;
 }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { bearerToken, requireAdmin } from '@/lib/cockpit/auth';
+import { bearerToken, requireRole } from '@/lib/cockpit/auth';
 import { getSupabaseAsUser } from '@/lib/supabase';
 import { readSettingFresh, sanitizeAboutIntro, DEFAULT_ABOUT_INTRO, type AboutIntro } from '@/lib/siteSettings';
 import { DEFAULT_RESPONSE_TIMES, dueBusinessDay, sanitizeResponseTimes, type ResponseTimes } from '@/lib/responseCopy';
@@ -11,8 +11,11 @@ import { DEFAULT_COMPANY, DEFAULT_KVKK_PUBLISH, missingForNotice, sanitizeCompan
  *   company_info    data controller / KVKK facts
  *   kvkk_published  owner flag: notice linked as final (default OFF)
  *   about_intro     About-page draft text
- * Admin only (requireAdmin); writes go through the admin's own session so the
- * audit log records who changed what.
+ * Admin: every key. Content editor (v30): only about_intro (Metinler →
+ * Hakkımızda taslağı) — GET returns only that, POST refuses other keys, and
+ * the database allows the editor that one cockpit_settings row only.
+ * Writes go through the user's own session so the audit log records who
+ * changed what.
  * GET  → everything (+ what is missing for the notice, due-date preview)
  * POST { key, value }
  */
@@ -28,7 +31,12 @@ async function currentCompany(): Promise<CompanyInfo> {
 }
 
 export async function GET(request: NextRequest) {
-  if (!(await requireAdmin(request))) return unauthorized();
+  const user = await requireRole(request, ['admin', 'editor']);
+  if (!user) return unauthorized();
+  if (user.role === 'editor') {
+    const about = await readSettingFresh('about_intro');
+    return NextResponse.json({ ok: true, ready: about.ready, about: about.value ? sanitizeAboutIntro(about.value as Partial<AboutIntro>) : DEFAULT_ABOUT_INTRO });
+  }
   const [rt, company, about, kvkk] = await Promise.all([readSettingFresh('site_copy'), readSettingFresh('company_info'), readSettingFresh('about_intro'), readSettingFresh('kvkk_published')]);
   const responseTimes = rt.value ? sanitizeResponseTimes(rt.value as Partial<ResponseTimes>) : DEFAULT_RESPONSE_TIMES;
   const companyInfo = company.value ? sanitizeCompany(company.value as Partial<CompanyInfo>) : DEFAULT_COMPANY;
@@ -50,9 +58,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const admin = await requireAdmin(request);
+  const admin = await requireRole(request, ['admin', 'editor']);
   if (!admin) return unauthorized();
   const body = (await request.json().catch(() => ({}))) as { key?: string; value?: Record<string, unknown> };
+  if (admin.role === 'editor' && body.key !== 'about_intro') return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
   const client = getSupabaseAsUser(bearerToken(request));
   if (!client) return NextResponse.json({ ok: false, error: 'Supabase yapılandırılmamış.' }, { status: 503 });
   let value: unknown;
